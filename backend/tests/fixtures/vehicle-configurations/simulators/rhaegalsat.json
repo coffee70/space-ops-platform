@@ -1,0 +1,100 @@
+{
+  "version": 1,
+  "name": "RhaegalSat",
+  "base_url": "http://simulator2:8001",
+  "vehicle_profile": {
+    "bus_class": "Deep survey heavy bus",
+    "propulsion_layout": "Dual tank propulsion with split oxidizer/fuel conditioning",
+    "tank_count": 2,
+    "computer_count": 3,
+    "payloads": ["Hyperspectral mapper", "Synthetic aperture radar", "Ka-band relay"],
+    "notes": ["Heavier, more redundant platform with dense thermal instrumentation"]
+  },
+  "channels": [
+    {"name": "PWR_MAIN_BUS_VOLT", "aliases": ["BAT_V", "BATTERY_VOLT", "VBAT"], "units": "V", "description": "Main bus voltage", "subsystem": "power", "mean": 28.0, "std_dev": 0.22, "red_low": 27.1, "red_high": 29.0, "sample_rate_hz": 1.0},
+    {"name": "PWR_MAIN_BUS_CURR", "units": "A", "description": "Main bus current", "subsystem": "power", "mean": 7.1, "std_dev": 0.55, "red_low": 4.5, "red_high": 8.8},
+    {"name": "EPS_BATTERY_SOC", "units": "%", "description": "Battery state of charge", "subsystem": "power", "mean": 84.0, "std_dev": 3.8, "red_low": 42.0, "red_high": 99.0},
+    {"name": "THERM_OBC_A_TEMP", "units": "C", "description": "OBC A board temperature", "subsystem": "thermal", "mean": 34.0, "std_dev": 2.8, "red_low": 0.0, "red_high": 58.0},
+    {"name": "THERM_OBC_B_TEMP", "units": "C", "description": "OBC B board temperature", "subsystem": "thermal", "mean": 33.0, "std_dev": 2.7, "red_low": 0.0, "red_high": 58.0},
+    {"name": "THERM_OBC_C_TEMP", "units": "C", "description": "OBC C board temperature", "subsystem": "thermal", "mean": 32.0, "std_dev": 2.6, "red_low": 0.0, "red_high": 58.0},
+    {"name": "THERM_PAYLOAD_BAY_A_TEMP", "units": "C", "description": "Payload bay A temperature", "subsystem": "thermal", "mean": 11.0, "std_dev": 2.4, "red_low": -10.0, "red_high": 28.0},
+    {"name": "THERM_PAYLOAD_BAY_B_TEMP", "units": "C", "description": "Payload bay B temperature", "subsystem": "thermal", "mean": 9.0, "std_dev": 2.2, "red_low": -10.0, "red_high": 28.0},
+    {"name": "OBC_A_CPU_LOAD", "units": "%", "description": "Guidance computer load", "subsystem": "obc", "mean": 43.0, "std_dev": 7.0, "red_low": 5.0, "red_high": 90.0},
+    {"name": "OBC_B_CPU_LOAD", "units": "%", "description": "Payload computer load", "subsystem": "obc", "mean": 57.0, "std_dev": 8.5, "red_low": 5.0, "red_high": 93.0},
+    {"name": "OBC_C_CPU_LOAD", "units": "%", "description": "Comms computer load", "subsystem": "obc", "mean": 39.0, "std_dev": 7.2, "red_low": 5.0, "red_high": 88.0},
+    {"name": "ADCS_BODY_RATE_X", "units": "deg/s", "description": "Body rate X", "subsystem": "adcs", "mean": 0.0, "std_dev": 0.03, "red_low": -0.2, "red_high": 0.2, "sample_rate_hz": 5.0},
+    {"name": "ADCS_BODY_RATE_Y", "units": "deg/s", "description": "Body rate Y", "subsystem": "adcs", "mean": 0.0, "std_dev": 0.03, "red_low": -0.2, "red_high": 0.2, "sample_rate_hz": 5.0},
+    {"name": "ADCS_BODY_RATE_Z", "units": "deg/s", "description": "Body rate Z", "subsystem": "adcs", "mean": 0.0, "std_dev": 0.03, "red_low": -0.2, "red_high": 0.2, "sample_rate_hz": 5.0},
+    {"name": "COMM_KA_TX_PWR", "units": "dBm", "description": "Ka-band transmitter power", "subsystem": "comms", "mean": 36.0, "std_dev": 1.2, "red_low": 30.0, "red_high": 40.0},
+    {"name": "COMM_KA_LINK_MARGIN", "units": "dB", "description": "Ka-band link margin", "subsystem": "comms", "mean": 7.8, "std_dev": 1.0, "red_low": 2.0, "red_high": 13.0},
+    {"name": "COMM_CROSSLINK_QUEUE", "units": "pkts", "description": "Crosslink queue depth", "subsystem": "comms", "mean": 18.0, "std_dev": 4.0, "red_low": 0.0, "red_high": 40.0},
+    {"name": "PAYLOAD_HSI_TEMP", "units": "C", "description": "Hyperspectral imager temperature", "subsystem": "payload", "mean": 7.0, "std_dev": 2.0, "red_low": -12.0, "red_high": 20.0},
+    {"name": "PAYLOAD_HSI_LINE_RATE", "units": "lines/s", "description": "Hyperspectral imager line rate", "subsystem": "payload", "mean": 1240.0, "std_dev": 30.0, "red_low": 1100.0, "red_high": 1325.0},
+    {"name": "PAYLOAD_SAR_PLATE_TEMP", "units": "C", "description": "SAR electronics plate temperature", "subsystem": "payload", "mean": 17.0, "std_dev": 2.6, "red_low": -5.0, "red_high": 38.0},
+    {"name": "PAYLOAD_SAR_DUTY_CYCLE", "units": "%", "description": "SAR duty cycle", "subsystem": "payload", "mean": 42.0, "std_dev": 6.0, "red_low": 5.0, "red_high": 78.0},
+    {"name": "PROP_TANK_A_PRESS", "units": "kPa", "description": "Propellant tank A pressure", "subsystem": "propulsion", "mean": 238.0, "std_dev": 5.5, "red_low": 180.0, "red_high": 260.0},
+    {"name": "PROP_TANK_B_PRESS", "units": "kPa", "description": "Propellant tank B pressure", "subsystem": "propulsion", "mean": 233.0, "std_dev": 5.8, "red_low": 175.0, "red_high": 255.0},
+    {"name": "PROP_TANK_A_TEMP", "units": "C", "description": "Propellant tank A temperature", "subsystem": "propulsion", "mean": 9.5, "std_dev": 2.0, "red_low": -8.0, "red_high": 30.0},
+    {"name": "PROP_TANK_B_TEMP", "units": "C", "description": "Propellant tank B temperature", "subsystem": "propulsion", "mean": 10.5, "std_dev": 2.1, "red_low": -8.0, "red_high": 30.0},
+    {"name": "POS_ECEF_X", "units": "m", "description": "Position X in ECEF", "subsystem": "nav", "mean": 0.0, "std_dev": 1000000.0, "sample_rate_hz": 1.0},
+    {"name": "POS_ECEF_Y", "units": "m", "description": "Position Y in ECEF", "subsystem": "nav", "mean": 0.0, "std_dev": 1000000.0, "sample_rate_hz": 1.0},
+    {"name": "POS_ECEF_Z", "units": "m", "description": "Position Z in ECEF", "subsystem": "nav", "mean": 0.0, "std_dev": 1000000.0, "sample_rate_hz": 1.0},
+    {"name": "NAV_GNSS_SATS", "units": "count", "description": "GNSS satellites tracked", "subsystem": "nav", "mean": 11.0, "std_dev": 1.2, "sample_rate_hz": 1.0},
+    {"name": "HEALTH_STATUS", "units": "0/1", "description": "Overall health indicator", "subsystem": "safety", "mean": 1.0, "std_dev": 0.01, "red_low": 1.0, "red_high": 1.0}
+  ],
+  "position_mapping": {
+    "frame_type": "ecef",
+    "x_channel_name": "POS_ECEF_X",
+    "y_channel_name": "POS_ECEF_Y",
+    "z_channel_name": "POS_ECEF_Z"
+  },
+  "scenarios": {
+    "nominal": {
+      "description": "Stable survey mission with redundant avionics active",
+      "anomaly_fraction": 0.008,
+      "orbit_profile": "orbit_nominal"
+    },
+    "dual_tank_imbalance": {
+      "description": "One propulsion tank drifts low while the other stays nominal",
+      "anomaly_fraction": 0.0,
+      "orbit_profile": "nominal",
+      "events": [
+        {"t0": 35.0, "duration": 60.0, "type": "offset", "channels": ["PROP_TANK_B_PRESS"], "magnitude": -34.0},
+        {"t0": 35.0, "duration": 60.0, "type": "ramp", "channels": ["PROP_TANK_B_TEMP"], "magnitude": 9.0}
+      ]
+    },
+    "avionics_hotbox": {
+      "description": "Payload and avionics bays warm up during sustained observation",
+      "anomaly_fraction": 0.0,
+      "orbit_profile": "nominal",
+      "events": [
+        {"t0": 18.0, "duration": 70.0, "type": "ramp", "channels": ["THERM_OBC_B_TEMP", "THERM_OBC_C_TEMP", "THERM_PAYLOAD_BAY_A_TEMP", "PAYLOAD_SAR_PLATE_TEMP"], "magnitude": 11.0}
+      ]
+    },
+    "orbit_nominal": {
+      "description": "Smooth physically plausible orbit without random position spikes",
+      "anomaly_fraction": 0.0,
+      "orbit_profile": "orbit_nominal"
+    },
+    "orbit_decay": {
+      "description": "Low-perigee orbit for decay testing",
+      "anomaly_fraction": 0.0,
+      "orbit_profile": "orbit_decay"
+    },
+    "orbit_highly_elliptical": {
+      "description": "High-eccentricity orbit for anomaly testing",
+      "anomaly_fraction": 0.0,
+      "orbit_profile": "orbit_highly_elliptical"
+    },
+    "orbit_suborbital": {
+      "description": "Insufficient orbital velocity",
+      "anomaly_fraction": 0.0,
+      "orbit_profile": "orbit_suborbital"
+    },
+    "orbit_escape": {
+      "description": "Escape trajectory test case",
+      "anomaly_fraction": 0.0,
+      "orbit_profile": "orbit_escape"
+    }
+  }
+}
