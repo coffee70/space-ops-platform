@@ -33,7 +33,7 @@ from app.models.schemas import (
 from app.models.telemetry import TelemetrySource
 from app.routes import ops as ops_routes
 from app.routes import realtime as realtime_routes
-from app.routes import telemetry as telemetry_routes
+from app.routes import _telemetry_handlers as telemetry_routes
 from app.services import overview_service as overview_service_module
 from app.services import realtime_service
 from app.services.source_stream_service import (
@@ -577,8 +577,35 @@ def test_ops_routes_use_source_id_contract(monkeypatch) -> None:
 
 
 def test_feed_status_route_returns_source_id(monkeypatch) -> None:
-    tracker = MagicMock()
-    tracker.get_status.return_value = {
+    class _Response:
+        status_code = 200
+
+        @staticmethod
+        def json():
+            return {
+                "source_id": "source-a",
+                "connected": True,
+                "state": "connected",
+                "last_reception_time": None,
+                "approx_rate_hz": 2.5,
+                "drop_count": 0,
+            }
+
+    class _Client:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def get(self, *_args, **_kwargs):
+            return _Response()
+
+    monkeypatch.setattr(ops_routes.httpx, "Client", lambda *args, **kwargs: _Client())
+
+    payload = ops_routes.get_feed_status(source_id="source-a")
+
+    assert payload == {
         "source_id": "source-a",
         "connected": True,
         "state": "connected",
@@ -586,12 +613,6 @@ def test_feed_status_route_returns_source_id(monkeypatch) -> None:
         "approx_rate_hz": 2.5,
         "drop_count": 0,
     }
-    monkeypatch.setattr(ops_routes, "get_feed_health_tracker", lambda: tracker)
-
-    payload = ops_routes.get_feed_status(source_id="source-a")
-
-    assert payload["source_id"] == "source-a"
-    assert payload["connected"] is True
 
 
 def test_ensure_stream_belongs_to_source_rejects_unknown_explicit_source_stream() -> None:

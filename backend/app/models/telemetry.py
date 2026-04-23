@@ -278,6 +278,32 @@ class TelemetryAlert(Base):
     resolved_by: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     resolution_text: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     resolution_code: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+
+class TelemetryFeedHealth(Base):
+    """Durable feed-health state owned by telemetry ingest."""
+
+    __tablename__ = "telemetry_feed_health"
+
+    source_id: Mapped[str] = mapped_column(
+        Text,
+        ForeignKey("telemetry_sources.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    connected: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    state: Mapped[str] = mapped_column(Text, nullable=False, default="disconnected")
+    last_reception_time: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    approx_rate_hz: Mapped[Optional[float]] = mapped_column(Numeric(20, 10), nullable=True)
+    drop_count: Mapped[int] = mapped_column(nullable=False, default=0)
+    last_transition_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+        nullable=False,
+    )
+
+
 class OpsEvent(Base):
     """Operational event for unified timeline (alerts, operator actions, data-path)."""
 

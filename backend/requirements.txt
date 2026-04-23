@@ -10,6 +10,7 @@ alembic
 numpy
 sentence-transformers
 openai
+nats-py>=2.9
 python-dotenv
 pytest>=7.0
 pyyaml>=6.0

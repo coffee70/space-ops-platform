@@ -270,6 +270,24 @@ def upgrade() -> None:
     )
 
     op.create_table(
+        "telemetry_feed_health",
+        sa.Column(
+            "source_id",
+            sa.Text(),
+            sa.ForeignKey("telemetry_sources.id", ondelete="CASCADE"),
+            primary_key=True,
+            nullable=False,
+        ),
+        sa.Column("connected", sa.Boolean(), nullable=False),
+        sa.Column("state", sa.Text(), nullable=False),
+        sa.Column("last_reception_time", sa.DateTime(timezone=True), nullable=True),
+        sa.Column("approx_rate_hz", sa.Numeric(20, 10), nullable=True),
+        sa.Column("drop_count", sa.Integer(), nullable=False),
+        sa.Column("last_transition_at", sa.DateTime(timezone=True), nullable=True),
+        sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
+    )
+
+    op.create_table(
         "ops_events",
         sa.Column("id", UUID(as_uuid=True), primary_key=True, nullable=False),
         sa.Column("source_id", sa.Text(), nullable=False),
@@ -413,6 +431,8 @@ def downgrade() -> None:
     op.drop_index(op.f("ix_telemetry_alerts_telemetry_id"), table_name="telemetry_alerts")
     op.drop_index(op.f("ix_telemetry_alerts_source_id"), table_name="telemetry_alerts")
     op.drop_table("telemetry_alerts")
+
+    op.drop_table("telemetry_feed_health")
 
     op.drop_table("telemetry_current")
 

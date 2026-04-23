@@ -3,13 +3,14 @@
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
+import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from app.database import get_db
-from app.realtime.feed_health import get_feed_health_tracker
 from app.models.schemas import OpsEventSchema, OpsEventsResponse
 from app.services.source_stream_service import resolve_latest_stream_id
 from app.services.ops_events_service import query_events
+from platform_common.service_proxy import build_service_proxy_url
 
 router = APIRouter()
 
@@ -25,16 +26,21 @@ def _parse_iso_datetime(value: Optional[str], field_name: str) -> Optional[datet
 
 @router.get("/feed-status")
 def get_feed_status(source_id: str = Query(...)):
-    """Get feed health status for a source."""
-    status = get_feed_health_tracker().get_status(source_id)
-    return {
-        "source_id": status.get("source_id", source_id),
-        "connected": status.get("connected", False),
-        "state": status.get("state", "disconnected"),
-        "last_reception_time": status.get("last_reception_time"),
-        "approx_rate_hz": status.get("approx_rate_hz"),
-        "drop_count": status.get("drop_count"),
-    }
+    """Get feed health from the ingest service API."""
+    with httpx.Client(timeout=10.0) as client:
+        response = client.get(
+            build_service_proxy_url("telemetry-ingest-service", "telemetry/feed-health"),
+            params={"source_id": source_id},
+        )
+    if response.status_code >= 400:
+        detail = response.text
+        try:
+            payload = response.json()
+            detail = payload.get("detail", detail)
+        except ValueError:
+            pass
+        raise HTTPException(status_code=response.status_code, detail=detail)
+    return response.json()
 
 
 @router.get("/events", response_model=OpsEventsResponse)
