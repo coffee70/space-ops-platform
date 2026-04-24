@@ -33,6 +33,7 @@ from app.services.source_stream_service import (
     ensure_stream_belongs_to_source,
     normalize_source_id,
     resolve_active_stream_id,
+    resolve_latest_stream_id,
 )
 
 
@@ -283,6 +284,36 @@ def _get_scoped_recent_values(
     )
     rows = db.execute(stmt).fetchall()
     return [(row[0], float(row[1]), row[2]) for row in rows]
+
+
+def _get_recent_values_db_only(
+    db: Session,
+    name: str,
+    source_id: str,
+    limit: int = 100,
+    since: datetime | None = None,
+    until: datetime | None = None,
+) -> list[tuple[datetime, float]]:
+    """Get recent values using only DB—no embedding/LLM cold start."""
+    data_source_id = resolve_latest_stream_id(db, source_id)
+    meta = _get_channel_meta(db, source_id, name)
+    if not meta:
+        raise ValueError(f"Telemetry not found: {name}")
+    stmt = (
+        select(TelemetryData.timestamp, TelemetryData.value)
+        .where(
+            TelemetryData.telemetry_id == meta.id,
+            TelemetryData.stream_id == data_source_id,
+        )
+        .order_by(desc(TelemetryData.timestamp), desc(TelemetryData.sequence))
+        .limit(limit)
+    )
+    if since is not None:
+        stmt = stmt.where(TelemetryData.timestamp >= since)
+    if until is not None:
+        stmt = stmt.where(TelemetryData.timestamp <= until)
+    rows = db.execute(stmt).fetchall()
+    return [(row[0], float(row[1])) for row in rows]
 
 
 def _get_scoped_statistics(

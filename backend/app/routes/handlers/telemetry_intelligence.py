@@ -2,7 +2,6 @@ from typing import Optional
 from urllib.parse import unquote
 
 from fastapi import Depends, HTTPException, Query
-from sqlalchemy import desc, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -17,13 +16,14 @@ from app.models.schemas import (
     TelemetrySchemaCreate,
     TelemetrySchemaResponse,
 )
-from app.models.telemetry import TelemetryData, TelemetryMetadata, TelemetryStatistics
+from app.models.telemetry import TelemetryMetadata, TelemetryStatistics
 from app.routes.handlers.providers import get_embedding_provider, get_llm_provider
 from app.routes.handlers.scope import (
     DetailDataScope,
     _confidence_indicator,
     _detail_page_scope_payload,
     _get_channel_meta,
+    _get_recent_values_db_only,
     _get_scoped_recent_values,
     _get_scoped_statistics,
     _resolve_detail_data_scope,
@@ -220,36 +220,6 @@ def _get_explanation_summary_db_only(db: Session, name: str, source_id: str) -> 
         llm_explanation="",
         scope=_summary_db_only_page_scope(db, data_source_id, meta),
     )
-
-
-def _get_recent_values_db_only(
-    db: Session,
-    name: str,
-    source_id: str,
-    limit: int = 100,
-    since=None,
-    until=None,
-) -> list[tuple[object, float]]:
-    """Get recent values using only DB—no embedding/LLM cold start."""
-    meta = _get_channel_meta(db, source_id, name)
-    if not meta:
-        raise ValueError(f"Telemetry not found: {name}")
-    stmt = (
-        select(TelemetryData.timestamp, TelemetryData.value)
-        .where(
-            TelemetryData.telemetry_id == meta.id,
-            TelemetryData.stream_id == source_id,
-        )
-        .order_by(desc(TelemetryData.timestamp), desc(TelemetryData.sequence))
-        .limit(limit)
-    )
-    if since is not None:
-        stmt = stmt.where(TelemetryData.timestamp >= since)
-    if until is not None:
-        stmt = stmt.where(TelemetryData.timestamp <= until)
-    rows = db.execute(stmt).fetchall()
-    return [(row[0], float(row[1])) for row in rows]
-
 
 def get_summary(
     name: str,

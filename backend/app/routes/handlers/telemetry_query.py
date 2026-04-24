@@ -1,4 +1,3 @@
-from datetime import datetime
 from typing import Optional
 from urllib.parse import unquote
 
@@ -25,6 +24,7 @@ from app.models.schemas import (
 from app.models.telemetry import TelemetryData, TelemetryMetadata
 from app.routes.handlers.scope import (
     _get_channel_meta,
+    _get_recent_values_db_only,
     _get_scoped_recent_values,
     _parse_iso_datetime_param,
     _resolve_detail_data_scope,
@@ -39,7 +39,7 @@ from app.services.overview_service import (
     get_watchlist,
     remove_from_watchlist,
 )
-from app.services.source_stream_service import normalize_source_id, resolve_latest_stream_id
+from app.services.source_stream_service import normalize_source_id
 from app.services.statistics_service import StatisticsService
 from app.services.telemetry_inventory_service import get_telemetry_inventory_for_source
 from app.utils.subsystem import infer_subsystem
@@ -246,37 +246,6 @@ def get_channel_streams(
             for row in rows
         ]
     )
-
-
-def _get_recent_values_db_only(
-    db: Session,
-    name: str,
-    source_id: str,
-    limit: int = 100,
-    since=None,
-    until=None,
-) -> list[tuple[datetime, float]]:
-    """Get recent values using only DB—no embedding/LLM cold start. source_id filters when telemetry_data is source-aware."""
-    data_source_id = resolve_latest_stream_id(db, source_id)
-    meta = _get_channel_meta(db, source_id, name)
-    if not meta:
-        raise ValueError(f"Telemetry not found: {name}")
-    stmt = (
-        select(TelemetryData.timestamp, TelemetryData.value)
-        .where(
-            TelemetryData.telemetry_id == meta.id,
-            TelemetryData.stream_id == data_source_id,
-        )
-        .order_by(desc(TelemetryData.timestamp), desc(TelemetryData.sequence))
-        .limit(limit)
-    )
-    if since is not None:
-        stmt = stmt.where(TelemetryData.timestamp >= since)
-    if until is not None:
-        stmt = stmt.where(TelemetryData.timestamp <= until)
-    rows = db.execute(stmt).fetchall()
-    return [(r[0], float(r[1])) for r in rows]
-
 
 def get_recent(
     name: str,

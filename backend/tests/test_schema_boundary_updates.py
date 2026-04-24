@@ -405,12 +405,12 @@ def test_get_recent_values_db_only_preserves_explicit_stream_scope(monkeypatch) 
     db = MagicMock()
 
     monkeypatch.setattr(
-        telemetry_query_handlers,
+        telemetry_scope,
         "resolve_latest_stream_id",
         lambda _db, source_id: source_id,
     )
     monkeypatch.setattr(
-        telemetry_query_handlers,
+        telemetry_scope,
         "_get_channel_meta",
         lambda _db, _source_id, _name: SimpleNamespace(id=telemetry_id),
     )
@@ -422,7 +422,7 @@ def test_get_recent_values_db_only_preserves_explicit_stream_scope(monkeypatch) 
 
     db.execute.side_effect = fake_execute
 
-    rows = telemetry_query_handlers._get_recent_values_db_only(
+    rows = telemetry_scope._get_recent_values_db_only(
         db,
         "VBAT",
         limit=5,
@@ -431,6 +431,41 @@ def test_get_recent_values_db_only_preserves_explicit_stream_scope(monkeypatch) 
 
     assert rows == [(timestamp, 1.0)]
     assert any("stream-a" in params.values() for params in captured_params)
+
+
+def test_get_recent_values_db_only_resolves_latest_stream_for_logical_source(monkeypatch) -> None:
+    timestamp = datetime(2026, 3, 31, 12, 0, tzinfo=timezone.utc)
+    telemetry_id = uuid4()
+    captured_params: list[dict[str, object]] = []
+    db = MagicMock()
+
+    monkeypatch.setattr(
+        telemetry_scope,
+        "resolve_latest_stream_id",
+        lambda _db, source_id: f"{source_id}-latest",
+    )
+    monkeypatch.setattr(
+        telemetry_scope,
+        "_get_channel_meta",
+        lambda _db, _source_id, _name: SimpleNamespace(id=telemetry_id),
+    )
+
+    def fake_execute(statement):
+        compiled = statement.compile()
+        captured_params.append(dict(compiled.params))
+        return _FetchAllResult([(timestamp, 1.2)])
+
+    db.execute.side_effect = fake_execute
+
+    rows = telemetry_scope._get_recent_values_db_only(
+        db,
+        "VBAT",
+        source_id="logical-source",
+        limit=1,
+    )
+
+    assert rows == [(timestamp, 1.2)]
+    assert any("logical-source-latest" in params.values() for params in captured_params)
 
 
 def test_summary_for_registered_channel_without_samples_returns_no_data(monkeypatch) -> None:
