@@ -33,12 +33,14 @@ from app.lib.audit import audit_log
 from app.realtime.bus import get_realtime_bus
 from app.realtime.feed_health import get_feed_health_tracker
 from app.services.channel_alias_service import resolve_channel_name
+from app.services.feed_health_service import serialize_feed_health, upsert_feed_health_snapshot
 from app.services.ops_events_service import write_event as write_ops_event
 from app.services.realtime_service import create_discovered_channel_metadata
 from app.services.source_stream_service import normalize_source_id, register_stream, resolve_active_stream_id
 from app.services.telemetry_service import _compute_state
 from app.utils.coordinates import ecef_to_lla, eci_to_lla
 from app.utils.subsystem import infer_subsystem
+from platform_common.messaging import Subjects, get_messaging
 
 logger = logging.getLogger(__name__)
 
@@ -318,7 +320,19 @@ class RealtimeProcessor:
                 seen_at=recv_time,
                 activate=False,
             )
-        get_feed_health_tracker().record_reception(source_id)
+        tracker = get_feed_health_tracker()
+        tracker.record_reception(source_id)
+        feed_health = upsert_feed_health_snapshot(
+            db,
+            source_id=source_id,
+            status=tracker.get_status(source_id),
+            now=recv_time,
+        )
+        get_messaging().publish_nowait(
+            Subjects.FEED_HEALTH,
+            event_type="telemetry.feed_health.updated",
+            payload=serialize_feed_health(feed_health),
+        )
 
         # Persist to Timescale. Use a savepoint so duplicate sample retries do not
         # roll back a newly discovered metadata row created earlier in this transaction.
@@ -557,6 +571,11 @@ class RealtimeProcessor:
 
         # Broadcast telemetry update
         self._broadcast_telemetry_update(update)
+        get_messaging().publish_nowait(
+            Subjects.TELEMETRY_UPDATE,
+            event_type="telemetry.update.published",
+            payload=update.model_dump(),
+        )
 
         # Orbit: if this source has a position mapping and channel is lat/lon/alt, buffer and maybe push
         self._maybe_submit_orbit_sample(db, source_id, stream_id, channel_name, event.value, gen_time)

@@ -270,12 +270,14 @@ def test_orbit_status_rejects_legacy_source_id_query_param() -> None:
 
 
 def test_telemetry_routes_expose_stream_paths_not_run_paths() -> None:
-    source = Path("backend/app/routes/telemetry.py").read_text()
+    source = Path("backend/app/routes/telemetry_query.py").read_text()
 
-    assert '@router.get("/sources/{source_id}/streams"' in source
-    assert '@router.get("/{name}/streams"' in source
-    assert '@router.get("/sources/{source_id}/channels/{name}/streams"' in source
+    assert '"/{name}/streams"' in source
+    assert '"/sources/{source_id}/channels/{name}/streams"' in source
 
-    assert '@router.get("/sources/{source_id}/runs"' not in source
-    assert '@router.get("/{name}/runs"' not in source
-    assert '@router.get("/sources/{source_id}/channels/{name}/runs"' not in source
+    source_registry = Path("backend/app/routes/source_registry.py").read_text()
+    assert '"/sources/{source_id}/streams"' in source_registry
+
+    assert '"/sources/{source_id}/runs"' not in source_registry
+    assert '"/{name}/runs"' not in source
+    assert '"/sources/{source_id}/channels/{name}/runs"' not in source

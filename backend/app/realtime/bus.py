@@ -12,6 +12,7 @@ from collections.abc import Callable
 from typing import Any
 
 from app.models.schemas import MeasurementEvent
+from platform_common.messaging import Subjects, get_messaging
 
 logger = logging.getLogger(__name__)
 
@@ -39,6 +40,11 @@ class InProcessEventBus:
         """Publish a measurement event (non-blocking). Returns False if dropped."""
         try:
             self._measurement_queue.put_nowait(event)
+            get_messaging().publish_nowait(
+                Subjects.TELEMETRY_MEASUREMENT,
+                event_type="telemetry.measurement.received",
+                payload=event.model_dump(),
+            )
             return True
         except asyncio.QueueFull:
             logger.warning("Measurement queue full, dropping event for %s", event.channel_name)
@@ -65,6 +71,11 @@ class InProcessEventBus:
         """Publish an alert lifecycle event."""
         try:
             self._alert_queue.put_nowait(event)
+            get_messaging().publish_nowait(
+                Subjects.TELEMETRY_ALERT,
+                event_type="telemetry.alert.lifecycle",
+                payload=event,
+            )
         except asyncio.QueueFull:
             logger.warning("Alert queue full, dropping alert event")
 

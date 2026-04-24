@@ -221,7 +221,7 @@ def test_inventory_route_returns_channels(monkeypatch) -> None:
     db = MagicMock()
     app.dependency_overrides[get_db] = lambda: db
     monkeypatch.setattr(
-        "app.routes.telemetry.get_telemetry_inventory_for_source",
+        "app.routes.handlers.telemetry_query.get_telemetry_inventory_for_source",
         lambda *_args, **_kwargs: [
             {
                 "name": "VBAT",

@@ -11,13 +11,13 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.lib.audit import audit_log
 from app.models.telemetry import TelemetrySource
-from app.orbit import reset_source as reset_orbit_source
 from app.services.source_stream_service import (
     StreamIdConflictError,
     SourceNotFoundError,
     clear_active_stream,
     register_stream,
 )
+from platform_common.messaging import Subjects, get_messaging
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -216,7 +216,11 @@ async def simulator_start(
         stream_id = result.get("stream_id")
         try:
             clear_active_stream(resolved_source_id, db=db)
-            reset_orbit_source(resolved_source_id)
+            get_messaging().publish_nowait(
+                Subjects.ORBIT_RESET,
+                event_type="telemetry.orbit.reset",
+                payload={"source_id": resolved_source_id},
+            )
             if isinstance(stream_id, str) and stream_id:
                 register_stream(
                     db,
@@ -347,7 +351,11 @@ async def simulator_stop(
     try:
         result = await _proxy_post(base_url, "/stop")
         clear_active_stream(resolved_source_id, db=db)
-        reset_orbit_source(resolved_source_id)
+        get_messaging().publish_nowait(
+            Subjects.ORBIT_RESET,
+            event_type="telemetry.orbit.reset",
+            payload={"source_id": resolved_source_id},
+        )
         audit_log("simulator.stop", destination=resolved_source_id)
         return result
     except (httpx.ConnectError, httpx.TimeoutException) as e:

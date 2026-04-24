@@ -857,6 +857,30 @@ def test_process_measurement_does_not_record_feed_health_for_rejected_stream(mon
         def record_reception(self, source_id: str) -> None:
             recorded.append(source_id)
 
+        @staticmethod
+        def get_status(_source_id: str) -> dict[str, object]:
+            return {
+                "last_reception_time": datetime(2026, 3, 26, 12, 0, 2, tzinfo=timezone.utc),
+                "approx_rate_hz": 1.0,
+                "drop_count": 0,
+            }
+
+        @staticmethod
+        def get_status(_source_id: str) -> dict[str, object]:
+            return {
+                "last_reception_time": datetime(2026, 3, 26, 12, 0, 2, tzinfo=timezone.utc),
+                "approx_rate_hz": 1.0,
+                "drop_count": 0,
+            }
+
+        @staticmethod
+        def get_status(_source_id: str) -> dict[str, object]:
+            return {
+                "last_reception_time": datetime(2026, 3, 26, 12, 0, 2, tzinfo=timezone.utc),
+                "approx_rate_hz": 1.0,
+                "drop_count": 0,
+            }
+
     meta = TelemetryMetadata(
         id=uuid4(),
         source_id="vehicle-a",
@@ -931,6 +955,14 @@ def test_process_measurement_duplicate_insert_refreshes_stream_and_feed_health(m
         def record_reception(self, source_id: str) -> None:
             recorded.append(source_id)
 
+        @staticmethod
+        def get_status(_source_id: str) -> dict[str, object]:
+            return {
+                "last_reception_time": datetime(2026, 3, 26, 12, 0, 2, tzinfo=timezone.utc),
+                "approx_rate_hz": 1.0,
+                "drop_count": 0,
+            }
+
     meta = TelemetryMetadata(
         id=uuid4(),
         source_id="vehicle-a",
@@ -971,7 +1003,7 @@ def test_process_measurement_duplicate_insert_refreshes_stream_and_feed_health(m
         else None
     )
     db.begin_nested.return_value = savepoint
-    db.flush.side_effect = IntegrityError("insert", {}, Exception("duplicate key"))
+    db.flush.side_effect = [None, IntegrityError("insert", {}, Exception("duplicate key"))]
 
     monkeypatch.setattr(
         "app.realtime.processor.get_feed_health_tracker",
@@ -1312,11 +1344,22 @@ def test_process_measurement_duplicate_first_dynamic_sample_keeps_discovered_met
     db.get.return_value = None
     db.add.side_effect = added.append
     db.begin_nested.return_value = savepoint
-    db.flush.side_effect = IntegrityError("insert", {}, Exception("duplicate key"))
+    db.flush.side_effect = [None, IntegrityError("insert", {}, Exception("duplicate key"))]
 
     monkeypatch.setattr(
         "app.realtime.processor.create_discovered_channel_metadata",
         lambda *args, **kwargs: meta,
+    )
+    monkeypatch.setattr(
+        "app.realtime.processor.get_feed_health_tracker",
+        lambda: SimpleNamespace(
+            record_reception=lambda _source_id: None,
+            get_status=lambda _source_id: {
+                "last_reception_time": datetime(2026, 3, 26, 12, 0, 1, tzinfo=timezone.utc),
+                "approx_rate_hz": 1.0,
+                "drop_count": 0,
+            },
+        ),
     )
     monkeypatch.setattr(processor, "_broadcast_telemetry_update", updates.append)
     monkeypatch.setattr(
