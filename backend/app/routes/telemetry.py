@@ -2,7 +2,6 @@
 
 from fastapi import APIRouter
 
-from app.routes._telemetry_handlers import *  # noqa: F401,F403
 from app.routes import source_registry, telemetry_ingest_admin, telemetry_intelligence, telemetry_query
 
 router = APIRouter()

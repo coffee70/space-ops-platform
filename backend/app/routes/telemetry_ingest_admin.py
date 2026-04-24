@@ -2,7 +2,7 @@
 
 from fastapi import APIRouter
 
-from app.routes import _telemetry_handlers as handlers
+from app.routes.handlers import telemetry_ingest_admin as handlers
 
 router = APIRouter()
 

@@ -2,7 +2,7 @@
 
 from fastapi import APIRouter
 
-from app.routes import _telemetry_handlers as handlers
+from app.routes.handlers import source_registry as handlers
 
 router = APIRouter()
 

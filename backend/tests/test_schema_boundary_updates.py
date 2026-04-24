@@ -33,7 +33,12 @@ from app.models.schemas import (
 from app.models.telemetry import TelemetrySource
 from app.routes import ops as ops_routes
 from app.routes import realtime as realtime_routes
-from app.routes import _telemetry_handlers as telemetry_routes
+from app.routes import telemetry as telemetry_routes
+from app.routes.handlers import scope as telemetry_scope
+from app.routes.handlers import source_registry as source_registry_handlers
+from app.routes.handlers import telemetry_ingest_admin as telemetry_ingest_handlers
+from app.routes.handlers import telemetry_intelligence as telemetry_intelligence_handlers
+from app.routes.handlers import telemetry_query as telemetry_query_handlers
 from app.services import overview_service as overview_service_module
 from app.services import realtime_service
 from app.services.source_stream_service import (
@@ -96,24 +101,27 @@ def test_telemetry_routes_use_source_id_request_fields(monkeypatch) -> None:
             }
             return len(data)
 
-    monkeypatch.setattr(telemetry_routes, "TelemetryService", FakeService)
-    monkeypatch.setattr(telemetry_routes, "audit_log", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(telemetry_intelligence_handlers, "TelemetryService", FakeService)
+    monkeypatch.setattr(telemetry_intelligence_handlers, "audit_log", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(telemetry_ingest_handlers, "TelemetryService", FakeService)
+    monkeypatch.setattr(telemetry_ingest_handlers, "audit_log", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(telemetry_query_handlers, "audit_log", lambda *_args, **_kwargs: None)
 
     add_calls: list[tuple[str, str]] = []
     monkeypatch.setattr(
-        telemetry_routes,
+        telemetry_query_handlers,
         "add_to_watchlist",
         lambda _db, source_id, telemetry_name: add_calls.append((source_id, telemetry_name)),
     )
 
-    telemetry_routes.create_schema(
+    telemetry_intelligence_handlers.create_schema(
         body=TelemetrySchemaCreate(source_id="source-a", name="VBAT", units="V"),
         db=MagicMock(),
         embedding=object(),
         llm=object(),
     )
 
-    telemetry_routes.ingest_data(
+    telemetry_ingest_handlers.ingest_data(
         body=TelemetryDataIngest(
             telemetry_name="VBAT",
             data=[{"timestamp": "2026-03-28T12:00:00Z", "value": 4.2}],
@@ -127,7 +135,7 @@ def test_telemetry_routes_use_source_id_request_fields(monkeypatch) -> None:
         llm=object(),
     )
 
-    telemetry_routes.add_watchlist(
+    telemetry_query_handlers.add_watchlist(
         body=WatchlistAddRequest(source_id="source-a", telemetry_name="VBAT"),
         db=MagicMock(),
     )
@@ -155,10 +163,10 @@ def test_telemetry_routes_use_source_id_request_fields(monkeypatch) -> None:
 def test_set_active_stream_registers_new_stream_ids(monkeypatch) -> None:
     captured: dict[str, object] = {}
 
-    monkeypatch.setattr(telemetry_routes, "audit_log", lambda *_args, **_kwargs: None)
-    monkeypatch.setattr(telemetry_routes, "get_stream_source_id", lambda *_args: None)
+    monkeypatch.setattr(source_registry_handlers, "audit_log", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(source_registry_handlers, "get_stream_source_id", lambda *_args: None)
     monkeypatch.setattr(
-        telemetry_routes,
+        source_registry_handlers,
         "register_stream",
         lambda _db, *, source_id, stream_id, **_kwargs: captured.update(
             source_id=source_id,
@@ -166,7 +174,7 @@ def test_set_active_stream_registers_new_stream_ids(monkeypatch) -> None:
         ),
     )
 
-    response = telemetry_routes.set_active_stream(
+    response = source_registry_handlers.set_active_stream(
         body=ActiveStreamUpdate(
             source_id="source-a",
             stream_id="2d2cc0c2-5a5a-4ac6-8f2d-7d04d6c35b0e",
@@ -188,14 +196,14 @@ def test_set_active_stream_registers_new_stream_ids(monkeypatch) -> None:
 
 def test_set_active_stream_idle_clears_active_stream(monkeypatch) -> None:
     cleared: list[str] = []
-    monkeypatch.setattr(telemetry_routes, "audit_log", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(source_registry_handlers, "audit_log", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(
-        telemetry_routes,
+        source_registry_handlers,
         "clear_active_stream",
         lambda source_id, *, db=None: cleared.append(source_id),
     )
 
-    response = telemetry_routes.set_active_stream(
+    response = source_registry_handlers.set_active_stream(
         body=ActiveStreamUpdate(source_id="source-a", state="idle"),
         db=MagicMock(),
     )
@@ -225,9 +233,13 @@ def test_source_observation_request_rejects_invalid_time_range() -> None:
 def test_source_observation_routes_normalize_source_and_call_service(monkeypatch) -> None:
     calls: dict[str, object] = {}
 
-    monkeypatch.setattr(telemetry_routes, "normalize_source_id", lambda source_id: f"normalized-{source_id}")
     monkeypatch.setattr(
-        telemetry_routes,
+        source_registry_handlers,
+        "normalize_source_id",
+        lambda source_id: f"normalized-{source_id}",
+    )
+    monkeypatch.setattr(
+        source_registry_handlers,
         "upsert_source_observations",
         lambda db, *, source_id, batch, now: calls.update(
             {"source_id": source_id, "provider": batch.provider, "now": now}
@@ -235,7 +247,7 @@ def test_source_observation_routes_normalize_source_and_call_service(monkeypatch
         or SimpleNamespace(inserted=1, deleted=2),
     )
 
-    response = telemetry_routes.batch_upsert_source_observations(
+    response = source_registry_handlers.batch_upsert_source_observations(
         source_id="source-a",
         body=SourceObservationBatchUpsert(
             provider="satnogs",
@@ -258,7 +270,7 @@ def test_source_observation_routes_normalize_source_and_call_service(monkeypatch
 
 def test_runtime_route_signature_no_longer_accepts_run_id() -> None:
     with pytest.raises(TypeError):
-        telemetry_routes.get_summary_for_source(
+        telemetry_intelligence_handlers.get_summary_for_source(
             source_id="source-a",
             name="VBAT",
             run_id="legacy-run",
@@ -268,25 +280,25 @@ def test_runtime_route_signature_no_longer_accepts_run_id() -> None:
 
 def test_resolve_scoped_stream_id_defaults_to_latest_stream(monkeypatch) -> None:
     db = MagicMock()
-    monkeypatch.setattr(telemetry_routes, "normalize_source_id", lambda source_id: source_id)
-    monkeypatch.setattr(telemetry_routes, "resolve_active_stream_id", lambda _db, source_id: source_id)
+    monkeypatch.setattr(telemetry_scope, "normalize_source_id", lambda source_id: source_id)
+    monkeypatch.setattr(telemetry_scope, "resolve_active_stream_id", lambda _db, source_id: source_id)
     db.execute.return_value = _ScalarResult("source-a-2026-03-28T12-00-00Z")
 
     assert (
-        telemetry_routes._resolve_scoped_stream_id(db, "source-a")
+        telemetry_scope._resolve_scoped_stream_id(db, "source-a")
         == "source-a-2026-03-28T12-00-00Z"
     )
 
 
 def test_resolve_scoped_stream_id_rejects_invalid_explicit_stream(monkeypatch) -> None:
     monkeypatch.setattr(
-        telemetry_routes,
+        telemetry_scope,
         "ensure_stream_belongs_to_source",
         lambda _db, _source_id, _stream_id: (_ for _ in ()).throw(ValueError("Stream not found for source")),
     )
 
     with pytest.raises(HTTPException) as exc_info:
-        telemetry_routes._resolve_scoped_stream_id(MagicMock(), "source-a", "bad-stream")
+        telemetry_scope._resolve_scoped_stream_id(MagicMock(), "source-a", "bad-stream")
 
     assert exc_info.value.status_code == 404
 
@@ -393,12 +405,12 @@ def test_get_recent_values_db_only_preserves_explicit_stream_scope(monkeypatch) 
     db = MagicMock()
 
     monkeypatch.setattr(
-        telemetry_routes,
+        telemetry_query_handlers,
         "resolve_latest_stream_id",
         lambda _db, source_id: source_id,
     )
     monkeypatch.setattr(
-        telemetry_routes,
+        telemetry_query_handlers,
         "_get_channel_meta",
         lambda _db, _source_id, _name: SimpleNamespace(id=telemetry_id),
     )
@@ -410,7 +422,7 @@ def test_get_recent_values_db_only_preserves_explicit_stream_scope(monkeypatch) 
 
     db.execute.side_effect = fake_execute
 
-    rows = telemetry_routes._get_recent_values_db_only(
+    rows = telemetry_query_handlers._get_recent_values_db_only(
         db,
         "VBAT",
         limit=5,
@@ -443,11 +455,19 @@ def test_summary_for_registered_channel_without_samples_returns_no_data(monkeypa
         def _recompute_one(self, _telemetry_id, *, source_id):
             return None
 
-    monkeypatch.setattr(telemetry_routes, "_get_channel_meta", lambda _db, _source_id, _name: meta)
-    monkeypatch.setattr(telemetry_routes, "get_aliases_by_telemetry_ids", lambda *_args, **_kwargs: {})
-    monkeypatch.setattr(telemetry_routes, "StatisticsService", FakeStatisticsService)
+    monkeypatch.setattr(
+        telemetry_intelligence_handlers,
+        "_get_channel_meta",
+        lambda _db, _source_id, _name: meta,
+    )
+    monkeypatch.setattr(
+        telemetry_intelligence_handlers,
+        "get_aliases_by_telemetry_ids",
+        lambda *_args, **_kwargs: {},
+    )
+    monkeypatch.setattr(telemetry_intelligence_handlers, "StatisticsService", FakeStatisticsService)
 
-    result = telemetry_routes._get_explanation_summary_db_only(
+    result = telemetry_intelligence_handlers._get_explanation_summary_db_only(
         db,
         "ISS_POS_LON_DEG",
         source_id="iss-source",
@@ -463,10 +483,14 @@ def test_summary_for_registered_channel_without_samples_returns_no_data(monkeypa
 
 
 def test_summary_for_unknown_channel_still_fails(monkeypatch) -> None:
-    monkeypatch.setattr(telemetry_routes, "_get_channel_meta", lambda _db, _source_id, _name: None)
+    monkeypatch.setattr(
+        telemetry_intelligence_handlers,
+        "_get_channel_meta",
+        lambda _db, _source_id, _name: None,
+    )
 
     with pytest.raises(ValueError, match="Telemetry not found"):
-        telemetry_routes._get_explanation_summary_db_only(
+        telemetry_intelligence_handlers._get_explanation_summary_db_only(
             MagicMock(),
             "UNKNOWN",
             source_id="iss-source",
@@ -625,7 +649,7 @@ def test_ensure_stream_belongs_to_source_rejects_unknown_explicit_source_stream(
 
 
 def test_parse_detail_scope_latest_ignores_stray_since_without_error() -> None:
-    scope = telemetry_routes._parse_detail_scope_params(
+    scope = telemetry_scope._parse_detail_scope_params(
         scope="latest",
         stream_ids=["should-be-ignored"],
         since="not-an-iso8601-timestamp",
@@ -638,13 +662,13 @@ def test_parse_detail_scope_latest_ignores_stray_since_without_error() -> None:
 def test_detail_page_scope_payload_streams() -> None:
     since = datetime(2026, 1, 1, 12, 0, tzinfo=timezone.utc)
     until = datetime(2026, 1, 2, 12, 0, tzinfo=timezone.utc)
-    detail = telemetry_routes.DetailDataScope(
+    detail = telemetry_scope.DetailDataScope(
         mode="streams",
         stream_ids=("a", "b"),
         since=since,
         until=until,
     )
-    payload = telemetry_routes._detail_page_scope_payload(detail)
+    payload = telemetry_scope._detail_page_scope_payload(detail)
     assert payload.mode == "streams"
     assert payload.stream_count == 2
     assert payload.stream_ids == ["a", "b"]
