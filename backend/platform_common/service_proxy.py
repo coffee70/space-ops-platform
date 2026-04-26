@@ -47,7 +47,11 @@ def build_service_proxy_url(service_slug: str, path: str = "") -> str:
 
 
 async def proxy_request(service_slug: str, request: Request, *, path: str = "") -> Response:
-    headers = {key: value for key, value in request.headers.items() if key.lower() not in HOP_BY_HOP_HEADERS}
+    headers = {
+        key: value
+        for key, value in request.headers.items()
+        if key.lower() not in HOP_BY_HOP_HEADERS and key.lower() != "host"
+    }
     body = await request.body()
     upstream = _kernel_service_proxy_url(service_slug, path, request.url.query)
 

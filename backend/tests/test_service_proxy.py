@@ -89,8 +89,9 @@ def test_proxy_request_does_not_call_registry_services(monkeypatch) -> None:
         "http://localhost:8100/internal/runtime-services/"
         "telemetry-ingest-service/telemetry/feed-health?source_id=alpha"
     )
-    assert call["headers"]["host"] == "testserver"
-    assert "connection" not in {key.lower() for key in call["headers"]}
+    forwarded_headers = {key.lower() for key in call["headers"]}
+    assert "host" not in forwarded_headers
+    assert "connection" not in forwarded_headers
     assert call["content"] is None
     assert call["timeout"] == 30.0
     assert call["follow_redirects"] is False
