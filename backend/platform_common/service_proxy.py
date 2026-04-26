@@ -19,6 +19,8 @@ HOP_BY_HOP_HEADERS = {
     "upgrade",
 }
 
+REQUEST_HEADERS_NOT_FORWARDED = HOP_BY_HOP_HEADERS | {"host"}
+
 
 def _join_url_path(base_path: str, path: str = "") -> str:
     segments = [segment.strip("/") for segment in (base_path, path) if segment and segment.strip("/")]
@@ -50,7 +52,7 @@ async def proxy_request(service_slug: str, request: Request, *, path: str = "") 
     headers = {
         key: value
         for key, value in request.headers.items()
-        if key.lower() not in HOP_BY_HOP_HEADERS and key.lower() != "host"
+        if key.lower() not in REQUEST_HEADERS_NOT_FORWARDED
     }
     body = await request.body()
     upstream = _kernel_service_proxy_url(service_slug, path, request.url.query)
