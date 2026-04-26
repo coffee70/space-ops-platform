@@ -10,38 +10,11 @@ from platform_common import service_proxy
 from platform_common.web import create_service_app
 
 
-@pytest.fixture(autouse=True)
-def clear_service_proxy_cache() -> None:
-    service_proxy.clear_runtime_endpoint_cache()
-    yield
-    service_proxy.clear_runtime_endpoint_cache()
-
-
-class _SyncClient:
-    responses: list[httpx.Response] = []
-    calls: list[tuple[str, str, dict | None]] = []
-
-    def __init__(self, *, timeout: float, follow_redirects: bool):
-        self.timeout = timeout
-        self.follow_redirects = follow_redirects
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, exc_type, exc, tb):
-        return False
-
-    def get(self, url: str, params: dict | None = None) -> httpx.Response:
-        self.calls.append(("GET", url, params))
-        assert self.responses
-        return self.responses.pop(0)
-
-
 class _AsyncClient:
-    registry_responses: list[httpx.Response] = []
     request_results: list[httpx.Response | Exception] = []
-    registry_calls: list[str] = []
-    request_calls: list[tuple[str, str]] = []
+    get_results: list[httpx.Response | Exception] = []
+    request_calls: list[dict] = []
+    get_calls: list[dict] = []
 
     def __init__(self, *, timeout: float, follow_redirects: bool):
         self.timeout = timeout
@@ -54,12 +27,31 @@ class _AsyncClient:
         return False
 
     async def get(self, url: str, params: dict | None = None) -> httpx.Response:
-        self.registry_calls.append(url)
-        assert self.registry_responses
-        return self.registry_responses.pop(0)
+        self.get_calls.append(
+            {
+                "url": url,
+                "params": params,
+                "timeout": self.timeout,
+                "follow_redirects": self.follow_redirects,
+            }
+        )
+        assert self.get_results
+        result = self.get_results.pop(0)
+        if isinstance(result, Exception):
+            raise result
+        return result
 
     async def request(self, method: str, url: str, headers: dict | None = None, content: bytes | None = None):
-        self.request_calls.append((method, url))
+        self.request_calls.append(
+            {
+                "method": method,
+                "url": url,
+                "headers": headers or {},
+                "content": content,
+                "timeout": self.timeout,
+                "follow_redirects": self.follow_redirects,
+            }
+        )
         assert self.request_results
         result = self.request_results.pop(0)
         if isinstance(result, Exception):
@@ -67,97 +59,16 @@ class _AsyncClient:
         return result
 
 
-def _service_payload(*, host: str = "telemetry-ingest-service-dep-1", port: int = 8080, proxy_base_path: str = "") -> dict:
-    return {
-        "unit_id": "telemetry-ingest-service",
-        "display_name": "Telemetry Ingest Service",
-        "package_owner": "space-ops-platform",
-        "runtime_kind": "service",
-        "runtime_template": "python-service",
-        "source_path": "project/space-ops-platform",
-        "active_deployment_id": "dep_123",
-        "deployment_status": "healthy",
-        "health_status": "passing",
-        "discovery_metadata_json": {"service_slug": "telemetry-ingest-service"},
-        "runtime_endpoint": {
-            "service_name": host,
-            "host": host,
-            "port": port,
-            "proxy_base_path": proxy_base_path,
-            "health_path": "/health",
-        },
-    }
-
-
-def test_build_service_proxy_url_uses_registry_runtime_endpoint(monkeypatch) -> None:
-    _SyncClient.calls = []
-    _SyncClient.responses = [httpx.Response(200, json=_service_payload(host="registry-host", proxy_base_path="/runtime"))]
-    monkeypatch.setattr(service_proxy.httpx, "Client", _SyncClient)
-
+def test_build_service_proxy_url_uses_kernel_internal_service_proxy() -> None:
     url = service_proxy.build_service_proxy_url("telemetry-ingest-service", "telemetry/feed-health")
 
-    assert url == "http://registry-host:8080/runtime/telemetry/feed-health"
-    assert _SyncClient.calls == [
-        ("GET", "http://localhost:8100/registry/services/telemetry-ingest-service", None)
-    ]
+    assert url == "http://localhost:8100/internal/runtime-services/telemetry-ingest-service/telemetry/feed-health"
 
 
-def test_build_service_proxy_url_uses_cache_until_ttl_expires(monkeypatch) -> None:
-    _SyncClient.calls = []
-    _SyncClient.responses = [
-        httpx.Response(200, json=_service_payload(host="first-host")),
-        httpx.Response(200, json=_service_payload(host="second-host")),
-    ]
-    monkeypatch.setattr(service_proxy.httpx, "Client", _SyncClient)
-
-    first = service_proxy.build_service_proxy_url("telemetry-ingest-service", "telemetry/feed-health")
-    second = service_proxy.build_service_proxy_url("telemetry-ingest-service", "telemetry/feed-health")
-    cached = service_proxy._runtime_endpoint_cache["telemetry-ingest-service"]
-    service_proxy._runtime_endpoint_cache["telemetry-ingest-service"] = service_proxy.CachedRuntimeEndpoint(
-        endpoint=cached.endpoint,
-        expires_at=0.0,
-    )
-    refreshed = service_proxy.build_service_proxy_url("telemetry-ingest-service", "telemetry/feed-health")
-
-    assert first == "http://first-host:8080/telemetry/feed-health"
-    assert second == first
-    assert refreshed == "http://second-host:8080/telemetry/feed-health"
-    assert len(_SyncClient.calls) == 2
-
-
-def test_build_service_proxy_url_propagates_registry_errors(monkeypatch) -> None:
-    _SyncClient.responses = [httpx.Response(404, json={"detail": "service not found"})]
-    monkeypatch.setattr(service_proxy.httpx, "Client", _SyncClient)
-
-    with pytest.raises(service_proxy.HTTPException) as exc:
-        service_proxy.build_service_proxy_url("missing-service")
-
-    assert exc.value.status_code == 404
-    assert exc.value.detail == "service not found"
-
-
-def test_build_service_proxy_url_rejects_missing_runtime_endpoint(monkeypatch) -> None:
-    _SyncClient.responses = [httpx.Response(502, json={"detail": "service has no active runtime"})]
-    monkeypatch.setattr(service_proxy.httpx, "Client", _SyncClient)
-
-    with pytest.raises(service_proxy.HTTPException) as exc:
-        service_proxy.build_service_proxy_url("telemetry-ingest-service")
-
-    assert exc.value.status_code == 502
-    assert exc.value.detail == "service has no active runtime"
-
-
-def test_proxy_request_invalidates_cache_and_retries_once_on_connect_error(monkeypatch) -> None:
-    _AsyncClient.registry_calls = []
+def test_proxy_request_does_not_call_registry_services(monkeypatch) -> None:
     _AsyncClient.request_calls = []
-    _AsyncClient.registry_responses = [
-        httpx.Response(200, json=_service_payload(host="stale-host")),
-        httpx.Response(200, json=_service_payload(host="fresh-host")),
-    ]
-    _AsyncClient.request_results = [
-        httpx.ConnectError("stale endpoint"),
-        httpx.Response(200, json={"ok": True}),
-    ]
+    _AsyncClient.get_calls = []
+    _AsyncClient.request_results = [httpx.Response(200, json={"ok": True})]
     monkeypatch.setattr(service_proxy.httpx, "AsyncClient", _AsyncClient)
 
     app = FastAPI()
@@ -166,18 +77,67 @@ def test_proxy_request_invalidates_cache_and_retries_once_on_connect_error(monke
     async def run_proxy(request: Request):
         return await service_proxy.proxy_request("telemetry-ingest-service", request, path="telemetry/feed-health")
 
-    response = TestClient(app).get("/proxy?source_id=alpha")
+    response = TestClient(app).get("/proxy?source_id=alpha", headers={"connection": "close"})
 
     assert response.status_code == 200
     assert response.json() == {"ok": True}
-    assert _AsyncClient.registry_calls == [
-        "http://localhost:8100/registry/services/telemetry-ingest-service",
-        "http://localhost:8100/registry/services/telemetry-ingest-service",
+    assert _AsyncClient.get_calls == []
+    assert len(_AsyncClient.request_calls) == 1
+    call = _AsyncClient.request_calls[0]
+    assert call["method"] == "GET"
+    assert call["url"] == (
+        "http://localhost:8100/internal/runtime-services/"
+        "telemetry-ingest-service/telemetry/feed-health?source_id=alpha"
+    )
+    assert call["headers"]["host"] == "testserver"
+    assert "connection" not in {key.lower() for key in call["headers"]}
+    assert call["content"] is None
+    assert call["timeout"] == 30.0
+    assert call["follow_redirects"] is False
+
+
+@pytest.mark.anyio
+async def test_fetch_service_json_uses_kernel_internal_service_proxy(monkeypatch) -> None:
+    _AsyncClient.request_calls = []
+    _AsyncClient.get_calls = []
+    _AsyncClient.get_results = [httpx.Response(200, json={"status": "passing"})]
+    monkeypatch.setattr(service_proxy.httpx, "AsyncClient", _AsyncClient)
+
+    payload = await service_proxy.fetch_service_json(
+        "telemetry-ingest-service",
+        "telemetry/feed-health",
+        params={"source_id": "alpha"},
+    )
+
+    assert payload == {"status": "passing"}
+    assert _AsyncClient.request_calls == []
+    assert _AsyncClient.get_calls == [
+        {
+            "url": (
+                "http://localhost:8100/internal/runtime-services/"
+                "telemetry-ingest-service/telemetry/feed-health"
+            ),
+            "params": {"source_id": "alpha"},
+            "timeout": 15.0,
+            "follow_redirects": False,
+        }
     ]
-    assert _AsyncClient.request_calls == [
-        ("GET", "http://stale-host:8080/telemetry/feed-health?source_id=alpha"),
-        ("GET", "http://fresh-host:8080/telemetry/feed-health?source_id=alpha"),
-    ]
+
+
+def test_proxy_request_returns_502_when_control_plane_unavailable(monkeypatch) -> None:
+    _AsyncClient.request_results = [httpx.ConnectError("control plane unavailable")]
+    monkeypatch.setattr(service_proxy.httpx, "AsyncClient", _AsyncClient)
+
+    app = FastAPI()
+
+    @app.get("/proxy")
+    async def run_proxy(request: Request):
+        return await service_proxy.proxy_request("telemetry-ingest-service", request, path="telemetry/feed-health")
+
+    response = TestClient(app).get("/proxy")
+
+    assert response.status_code == 502
+    assert response.json()["detail"] == "service proxy unavailable"
 
 
 def test_gateway_routes_proxy_expected_service_paths(monkeypatch) -> None:
