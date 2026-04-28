@@ -404,8 +404,220 @@ def upgrade() -> None:
         postgresql_where=sa.text("external_id IS NOT NULL"),
     )
 
+    op.create_table(
+        "ai_conversations",
+        sa.Column("id", UUID(as_uuid=True), primary_key=True, nullable=False),
+        sa.Column("title", sa.Text(), nullable=True),
+        sa.Column("created_by", sa.Text(), nullable=True),
+        sa.Column("mission_id", sa.Text(), nullable=True),
+        sa.Column("vehicle_id", sa.Text(), nullable=True),
+        sa.Column("execution_mode", sa.Text(), nullable=False, server_default="read_only"),
+        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
+        sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
+    )
+
+    op.create_table(
+        "ai_conversation_messages",
+        sa.Column("id", UUID(as_uuid=True), primary_key=True, nullable=False),
+        sa.Column(
+            "conversation_id",
+            UUID(as_uuid=True),
+            sa.ForeignKey("ai_conversations.id", ondelete="CASCADE"),
+            nullable=False,
+        ),
+        sa.Column("role", sa.Text(), nullable=False),
+        sa.Column("content", sa.Text(), nullable=False),
+        sa.Column("metadata_json", JSONB(), nullable=False),
+        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
+    )
+    op.create_index(
+        "ix_ai_conversation_messages_conversation_created",
+        "ai_conversation_messages",
+        ["conversation_id", "created_at"],
+    )
+
+    op.create_table(
+        "ai_tool_definitions",
+        sa.Column("id", UUID(as_uuid=True), primary_key=True, nullable=False),
+        sa.Column("name", sa.Text(), nullable=False),
+        sa.Column("description", sa.Text(), nullable=False),
+        sa.Column("category", sa.Text(), nullable=False),
+        sa.Column("layer_target", sa.Text(), nullable=False),
+        sa.Column("backing_service", sa.Text(), nullable=True),
+        sa.Column("backing_api", sa.Text(), nullable=True),
+        sa.Column("read_write_classification", sa.Text(), nullable=False),
+        sa.Column("required_execution_mode", sa.Text(), nullable=False),
+        sa.Column("enabled", sa.Boolean(), nullable=False, server_default=sa.text("true")),
+        sa.Column("requires_confirmation", sa.Boolean(), nullable=False, server_default=sa.text("false")),
+        sa.Column("input_schema_json", JSONB(), nullable=False),
+        sa.Column("output_schema_json", JSONB(), nullable=False),
+        sa.Column("audit_policy_json", JSONB(), nullable=False),
+        sa.Column("redaction_policy_json", JSONB(), nullable=False),
+        sa.Column("show_result_in_ui", sa.Boolean(), nullable=False, server_default=sa.text("true")),
+        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
+        sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
+    )
+    op.create_index("ix_ai_tool_definitions_name", "ai_tool_definitions", ["name"], unique=True)
+
+    op.create_table(
+        "ai_tool_calls",
+        sa.Column("id", UUID(as_uuid=True), primary_key=True, nullable=False),
+        sa.Column(
+            "conversation_id",
+            UUID(as_uuid=True),
+            sa.ForeignKey("ai_conversations.id", ondelete="SET NULL"),
+            nullable=True,
+        ),
+        sa.Column("agent_run_id", UUID(as_uuid=True), nullable=False),
+        sa.Column("request_id", UUID(as_uuid=True), nullable=False),
+        sa.Column("tool_call_id", UUID(as_uuid=True), nullable=False),
+        sa.Column(
+            "message_id",
+            UUID(as_uuid=True),
+            sa.ForeignKey("ai_conversation_messages.id", ondelete="SET NULL"),
+            nullable=True,
+        ),
+        sa.Column("tool_name", sa.Text(), nullable=False),
+        sa.Column("input_json", JSONB(), nullable=False),
+        sa.Column("redacted_input_json", JSONB(), nullable=False),
+        sa.Column("output_json", JSONB(), nullable=True),
+        sa.Column("status", sa.Text(), nullable=False),
+        sa.Column("started_at", sa.DateTime(timezone=True), nullable=False),
+        sa.Column("completed_at", sa.DateTime(timezone=True), nullable=True),
+        sa.Column("error_message", sa.Text(), nullable=True),
+    )
+    op.create_index("ix_ai_tool_calls_conversation_started", "ai_tool_calls", ["conversation_id", "started_at"])
+    op.create_index("ix_ai_tool_calls_agent_run_started", "ai_tool_calls", ["agent_run_id", "started_at"])
+    op.create_index("ix_ai_tool_calls_tool_call_id", "ai_tool_calls", ["tool_call_id"], unique=True)
+
+    op.create_table(
+        "ai_agent_events",
+        sa.Column("id", UUID(as_uuid=True), primary_key=True, nullable=False),
+        sa.Column(
+            "conversation_id",
+            UUID(as_uuid=True),
+            sa.ForeignKey("ai_conversations.id", ondelete="SET NULL"),
+            nullable=True,
+        ),
+        sa.Column("agent_run_id", UUID(as_uuid=True), nullable=False),
+        sa.Column("request_id", UUID(as_uuid=True), nullable=False),
+        sa.Column("tool_call_id", UUID(as_uuid=True), nullable=True),
+        sa.Column("sequence", sa.Integer(), nullable=False),
+        sa.Column("emitted_by", sa.Text(), nullable=False),
+        sa.Column("event_type", sa.Text(), nullable=False),
+        sa.Column("payload_json", JSONB(), nullable=False),
+        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
+    )
+    op.create_index("ix_ai_agent_events_conversation_created", "ai_agent_events", ["conversation_id", "created_at"])
+    op.create_index("ix_ai_agent_events_agent_sequence", "ai_agent_events", ["agent_run_id", "sequence"], unique=True)
+
+    op.create_table(
+        "ai_documents",
+        sa.Column("id", UUID(as_uuid=True), primary_key=True, nullable=False),
+        sa.Column("title", sa.Text(), nullable=False),
+        sa.Column("document_type", sa.Text(), nullable=False),
+        sa.Column("source_uri", sa.Text(), nullable=True),
+        sa.Column("mission_id", sa.Text(), nullable=True),
+        sa.Column("vehicle_id", sa.Text(), nullable=True),
+        sa.Column("subsystem_id", sa.Text(), nullable=True),
+        sa.Column("tags_json", JSONB(), nullable=False),
+        sa.Column("description", sa.Text(), nullable=True),
+        sa.Column("content_hash", sa.Text(), nullable=False),
+        sa.Column("ingestion_status", sa.Text(), nullable=False),
+        sa.Column("ingestion_error", sa.Text(), nullable=True),
+        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
+        sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
+    )
+    op.create_index("ix_ai_documents_scope", "ai_documents", ["mission_id", "vehicle_id", "subsystem_id"])
+    op.create_index("ix_ai_documents_ingestion_status", "ai_documents", ["ingestion_status"])
+
+    op.create_table(
+        "ai_document_chunks",
+        sa.Column("id", UUID(as_uuid=True), primary_key=True, nullable=False),
+        sa.Column(
+            "document_id",
+            UUID(as_uuid=True),
+            sa.ForeignKey("ai_documents.id", ondelete="CASCADE"),
+            nullable=False,
+        ),
+        sa.Column("chunk_index", sa.Integer(), nullable=False),
+        sa.Column("content", sa.Text(), nullable=False),
+        sa.Column("metadata_json", JSONB(), nullable=False),
+        sa.Column("embedding", Vector(384), nullable=True),
+        sa.Column("embedding_model", sa.Text(), nullable=False),
+        sa.Column("content_hash", sa.Text(), nullable=False),
+        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
+    )
+    op.create_index("ix_ai_document_chunks_document_chunk", "ai_document_chunks", ["document_id", "chunk_index"])
+
+    op.create_table(
+        "ai_code_repositories",
+        sa.Column("id", UUID(as_uuid=True), primary_key=True, nullable=False),
+        sa.Column("name", sa.Text(), nullable=False),
+        sa.Column("source_uri", sa.Text(), nullable=False),
+        sa.Column("layer", sa.Text(), nullable=False),
+        sa.Column("default_branch", sa.Text(), nullable=False, server_default="main"),
+        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
+        sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
+    )
+
+    op.create_table(
+        "ai_code_chunks",
+        sa.Column("id", UUID(as_uuid=True), primary_key=True, nullable=False),
+        sa.Column(
+            "repository_id",
+            UUID(as_uuid=True),
+            sa.ForeignKey("ai_code_repositories.id", ondelete="CASCADE"),
+            nullable=False,
+        ),
+        sa.Column("branch", sa.Text(), nullable=False),
+        sa.Column("commit_sha", sa.Text(), nullable=False),
+        sa.Column("file_path", sa.Text(), nullable=False),
+        sa.Column("language", sa.Text(), nullable=True),
+        sa.Column("symbol_name", sa.Text(), nullable=True),
+        sa.Column("symbol_type", sa.Text(), nullable=True),
+        sa.Column("start_line", sa.Integer(), nullable=True),
+        sa.Column("end_line", sa.Integer(), nullable=True),
+        sa.Column("content", sa.Text(), nullable=False),
+        sa.Column("content_hash", sa.Text(), nullable=False),
+        sa.Column("embedding", Vector(384), nullable=True),
+        sa.Column("embedding_model", sa.Text(), nullable=False),
+        sa.Column("metadata_json", JSONB(), nullable=False),
+        sa.Column("indexed_at", sa.DateTime(timezone=True), nullable=False),
+    )
+    op.create_index("ix_ai_code_chunks_repo_branch_commit_path", "ai_code_chunks", ["repository_id", "branch", "commit_sha", "file_path"])
+
 
 def downgrade() -> None:
+    op.drop_index("ix_ai_code_chunks_repo_branch_commit_path", table_name="ai_code_chunks")
+    op.drop_table("ai_code_chunks")
+
+    op.drop_table("ai_code_repositories")
+
+    op.drop_index("ix_ai_document_chunks_document_chunk", table_name="ai_document_chunks")
+    op.drop_table("ai_document_chunks")
+
+    op.drop_index("ix_ai_documents_ingestion_status", table_name="ai_documents")
+    op.drop_index("ix_ai_documents_scope", table_name="ai_documents")
+    op.drop_table("ai_documents")
+
+    op.drop_index("ix_ai_agent_events_agent_sequence", table_name="ai_agent_events")
+    op.drop_index("ix_ai_agent_events_conversation_created", table_name="ai_agent_events")
+    op.drop_table("ai_agent_events")
+
+    op.drop_index("ix_ai_tool_calls_tool_call_id", table_name="ai_tool_calls")
+    op.drop_index("ix_ai_tool_calls_agent_run_started", table_name="ai_tool_calls")
+    op.drop_index("ix_ai_tool_calls_conversation_started", table_name="ai_tool_calls")
+    op.drop_table("ai_tool_calls")
+
+    op.drop_index("ix_ai_tool_definitions_name", table_name="ai_tool_definitions")
+    op.drop_table("ai_tool_definitions")
+
+    op.drop_index("ix_ai_conversation_messages_conversation_created", table_name="ai_conversation_messages")
+    op.drop_table("ai_conversation_messages")
+
+    op.drop_table("ai_conversations")
+
     op.drop_index(
         "uq_source_observations_source_external",
         table_name="source_observations",

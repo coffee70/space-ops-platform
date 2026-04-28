@@ -61,3 +61,33 @@ async def proxy_ops_events(request: Request):
 @router.api_route("/ops/feed-status", methods=["GET"])
 async def proxy_feed_status(request: Request):
     return await proxy_request("telemetry-ingest-service", request, path="telemetry/feed-health")
+
+
+def _resolve_intelligence_service(path: str) -> tuple[str, str]:
+    if path.startswith("agent/"):
+        return "agent-runtime-service", path[len("agent/") :]
+    if path == "agent":
+        return "agent-runtime-service", ""
+    if path.startswith("context/"):
+        return "context-retrieval-service", path[len("context/") :]
+    if path == "context":
+        return "context-retrieval-service", ""
+    if path.startswith("documents/") or path == "documents":
+        suffix = path[len("documents/") :] if path.startswith("documents/") else ""
+        return "document-knowledge-service", suffix
+    if path.startswith("code/") or path == "code":
+        suffix = path[len("code/") :] if path.startswith("code/") else ""
+        return "code-intelligence-service", suffix
+    if path.startswith("tools/execute"):
+        suffix = path[len("tools/execute") :].lstrip("/")
+        return "tool-execution-service", suffix
+    if path.startswith("tools/") or path == "tools":
+        suffix = path[len("tools/") :] if path.startswith("tools/") else ""
+        return "tool-registry-service", suffix
+    raise HTTPException(status_code=404, detail="Unknown intelligence route")
+
+
+@router.api_route("/intelligence/{path:path}", methods=["GET", "POST", "PATCH", "PUT", "DELETE", "HEAD"])
+async def proxy_intelligence(request: Request, path: str):
+    service_slug, target_path = _resolve_intelligence_service(path)
+    return await proxy_request(service_slug, request, path=target_path)

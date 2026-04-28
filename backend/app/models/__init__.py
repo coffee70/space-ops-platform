@@ -12,6 +12,17 @@ from app.models.telemetry import (
     TelemetryStream,
     WatchlistEntry,
 )
+from app.models.intelligence import (
+    AgentEvent,
+    CodeChunk,
+    CodeRepository,
+    Conversation,
+    ConversationMessageRecord,
+    Document,
+    DocumentChunk,
+    ToolCall,
+    ToolDefinition,
+)
 
 __all__ = [
     "SourceObservation",
@@ -24,4 +35,13 @@ __all__ = [
     "TelemetryCurrent",
     "TelemetryAlert",
     "TelemetryAlertNote",
+    "Conversation",
+    "ConversationMessageRecord",
+    "ToolDefinition",
+    "ToolCall",
+    "AgentEvent",
+    "Document",
+    "DocumentChunk",
+    "CodeRepository",
+    "CodeChunk",
 ]

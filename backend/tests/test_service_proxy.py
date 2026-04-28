@@ -156,12 +156,24 @@ def test_gateway_routes_proxy_expected_service_paths(monkeypatch) -> None:
     telemetry = client.get("/telemetry/sources")
     vehicle_configs = client.get("/vehicle-configs")
     feed_status = client.get("/ops/feed-status")
+    intelligence_agent = client.get("/intelligence/agent/health")
+    intelligence_docs = client.get("/intelligence/documents/documents")
+    intelligence_tools = client.get("/intelligence/tools/tools")
+    intelligence_execute = client.post("/intelligence/tools/execute")
 
     assert telemetry.status_code == 200
     assert vehicle_configs.status_code == 200
     assert feed_status.status_code == 200
+    assert intelligence_agent.status_code == 200
+    assert intelligence_docs.status_code == 200
+    assert intelligence_tools.status_code == 200
+    assert intelligence_execute.status_code == 200
     assert calls == [
         ("source-registry-service", "telemetry/sources"),
         ("vehicle-config-service", "vehicle-configs/"),
         ("telemetry-ingest-service", "telemetry/feed-health"),
+        ("agent-runtime-service", "health"),
+        ("document-knowledge-service", "documents"),
+        ("tool-registry-service", "tools"),
+        ("tool-execution-service", ""),
     ]
