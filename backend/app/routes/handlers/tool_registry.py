@@ -12,7 +12,12 @@ from app.models.intelligence import ToolDefinition
 
 STRICT_EMPTY_INPUT = {'type': 'object', 'properties': {}, 'additionalProperties': False}
 
-MVP_TOOL_NAMES: frozenset[str] = frozenset(
+GET_TELEMETRY_SCHEMA_TOOL_BACKING: tuple[str, str] = (
+    'telemetry-query-service',
+    'GET /telemetry/inventory?source_id={source_id}',
+)
+
+SUPPORTED_TOOL_NAMES: frozenset[str] = frozenset(
     {
         'list_available_tools',
         'list_platform_services',
@@ -61,7 +66,14 @@ TOOL_INPUT_SCHEMAS: dict[str, dict] = {
     'list_runtime_templates': STRICT_EMPTY_INPUT,
     'list_runtime_services': STRICT_EMPTY_INPUT,
     'list_managed_repositories': STRICT_EMPTY_INPUT,
-    'get_telemetry_schema': STRICT_EMPTY_INPUT,
+    'get_telemetry_schema': {
+        'type': 'object',
+        'properties': {
+            'source_id': {'type': 'string', 'minLength': 1, 'maxLength': 256},
+        },
+        'required': ['source_id'],
+        'additionalProperties': False,
+    },
     'query_recent_telemetry': {
         'type': 'object',
         'properties': {
@@ -208,7 +220,7 @@ TOOL_INPUT_SCHEMAS: dict[str, dict] = {
 
 
 def _delete_stale_tool_definitions(db: Session) -> int:
-    stale = db.query(ToolDefinition).filter(ToolDefinition.name.notin_(tuple(MVP_TOOL_NAMES)))
+    stale = db.query(ToolDefinition).filter(ToolDefinition.name.notin_(tuple(SUPPORTED_TOOL_NAMES)))
     count_before = stale.count()
     stale.delete(synchronize_session=False)
     return count_before
@@ -280,7 +292,7 @@ def seed_tools(db: Session = Depends(get_db)):
         seeded += 1
 
     read_tools = [
-        ('list_available_tools', 'List currently registered MVP tools.', 'platform_discovery', 'layer2', 'read_only'),
+        ('list_available_tools', 'List currently registered supported tools.', 'platform_discovery', 'layer2', 'read_only'),
         ('list_platform_services', 'List platform services.', 'platform_discovery', 'layer1', 'read_only'),
         ('get_platform_service', 'Get platform service details by slug.', 'platform_discovery', 'layer1', 'read_only'),
         ('list_platform_applications', 'List platform applications.', 'platform_discovery', 'layer1', 'read_only'),
@@ -288,7 +300,7 @@ def seed_tools(db: Session = Depends(get_db)):
         ('list_runtime_templates', 'List available runtime templates.', 'layer1_runtime', 'layer1', 'read_only'),
         ('list_runtime_services', 'List runtime units (managed services/apps).', 'layer1_runtime', 'layer1', 'read_only'),
         ('list_managed_repositories', 'List managed fork repository roots.', 'code_intelligence', 'layer1', 'read_only'),
-        ('get_telemetry_schema', 'Get telemetry channel schema.', 'telemetry', 'layer2', 'read_only'),
+        ('get_telemetry_schema', 'Get source-scoped telemetry inventory (schema-bearing channel metadata).', 'telemetry', 'layer2', 'read_only'),
         ('query_recent_telemetry', 'Query recent values for a telemetry channel.', 'telemetry', 'layer2', 'read_only'),
         ('list_sources_or_adapters', 'List telemetry sources and adapters.', 'telemetry', 'layer2', 'read_only'),
         ('list_documents', 'List uploaded mission and vehicle documents.', 'documents', 'layer2', 'read_only'),
@@ -309,7 +321,7 @@ def seed_tools(db: Session = Depends(get_db)):
         'list_runtime_templates': ('control-plane', 'GET /templates'),
         'list_runtime_services': ('control-plane', 'GET /registry/units'),
         'list_managed_repositories': ('control-plane', 'GET /code/roots'),
-        'get_telemetry_schema': ('platform-api-gateway', 'GET /telemetry/schema'),
+        'get_telemetry_schema': GET_TELEMETRY_SCHEMA_TOOL_BACKING,
         'query_recent_telemetry': ('platform-api-gateway', 'GET /telemetry/{name}/recent'),
         'list_sources_or_adapters': ('platform-api-gateway', 'GET /telemetry/sources'),
         'list_documents': ('document-knowledge-service', 'GET /intelligence/documents'),

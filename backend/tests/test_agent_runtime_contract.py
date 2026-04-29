@@ -377,7 +377,7 @@ async def test_tool_execution_pre_execution_rejections_do_not_emit_started_or_pe
         "create_working_branch",
     ],
 )
-async def test_mvp_write_tools_reject_read_only_mode(tool_name: str) -> None:
+async def test_write_tools_reject_read_only_mode(tool_name: str) -> None:
     db = MagicMock()
     db.query.return_value.filter.return_value.one_or_none.return_value = SimpleNamespace(
         name=tool_name,
@@ -441,10 +441,10 @@ def _tool_row(
 
 
 @pytest.mark.anyio
-async def test_list_available_tools_returns_filtered_mvp_metadata(monkeypatch) -> None:
+async def test_list_available_tools_returns_filtered_supported_metadata(monkeypatch) -> None:
     monkeypatch.setattr(
         tool_execution,
-        "MVP_TOOL_NAMES",
+        "SUPPORTED_TOOL_NAMES",
         frozenset({"deploy_service_or_application", "get_platform_service", "list_available_tools"}),
     )
     rows = sorted(
@@ -471,7 +471,7 @@ async def test_list_available_tools_returns_filtered_mvp_metadata(monkeypatch) -
             ),
             _tool_row(
                 name="list_available_tools",
-                description="Enumerate registered MVP tools.",
+                description="Enumerate registered supported tools.",
                 category="platform_discovery",
                 layer_target="layer2",
                 read_write_classification="read",
@@ -485,7 +485,7 @@ async def test_list_available_tools_returns_filtered_mvp_metadata(monkeypatch) -
 
     list_tool_definition = SimpleNamespace(
         name="list_available_tools",
-        description="Enumerate registered MVP tools.",
+        description="Enumerate registered supported tools.",
         category="platform_discovery",
         layer_target="layer2",
         read_write_classification="read",

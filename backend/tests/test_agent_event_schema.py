@@ -9,7 +9,7 @@ def _payload(event_type: str) -> dict:
     return {field: f"{field}-value" for field in REQUIRED_PAYLOAD_FIELDS[event_type]}
 
 
-def test_every_fixed_mvp_event_type_validates_required_payload_fields() -> None:
+def test_every_fixed_event_type_validates_required_payload_fields() -> None:
     for event_type in REQUIRED_PAYLOAD_FIELDS:
         event = raw_event(
             event_type=event_type,

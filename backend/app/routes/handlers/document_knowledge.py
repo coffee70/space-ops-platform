@@ -194,7 +194,7 @@ def search_documents(body: dict, db: Session = Depends(get_db)):
             continue
         if not chunk.embedding:
             continue
-        # naive score for MVP
+        # naive relevance score baseline
         score = 1.0 / (1.0 + abs(len(chunk.content) - len(query)))
         scored.append(
             {

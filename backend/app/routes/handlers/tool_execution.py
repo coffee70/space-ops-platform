@@ -12,7 +12,7 @@ from app.database import get_db
 from app.intelligence.events import raw_event
 from app.intelligence.redaction import redact
 from app.intelligence.tool_metadata import tool_summary
-from app.routes.handlers.tool_registry import MVP_TOOL_NAMES
+from app.routes.handlers.tool_registry import SUPPORTED_TOOL_NAMES
 from app.intelligence.schemas import ToolExecutionRequest
 from app.intelligence.tool_validation import ToolInputValidationError, ToolSchemaDefinitionError, validate_tool_input
 from app.intelligence.trace import extract_trace
@@ -82,7 +82,7 @@ async def _execute_mapped_tool(name: str, tool_input: dict, *, db: Session):
     if name == 'list_available_tools':
         tools = (
             db.query(ToolDefinition)
-            .filter(ToolDefinition.enabled.is_(True), ToolDefinition.name.in_(tuple(sorted(MVP_TOOL_NAMES))))
+            .filter(ToolDefinition.enabled.is_(True), ToolDefinition.name.in_(tuple(sorted(SUPPORTED_TOOL_NAMES))))
             .order_by(ToolDefinition.name.asc())
             .all()
         )
@@ -159,7 +159,11 @@ async def _execute_mapped_tool(name: str, tool_input: dict, *, db: Session):
 
     # --- Telemetry ---
     if name == 'get_telemetry_schema':
-        return await _runtime_get('telemetry-intelligence-service', 'telemetry/schema')
+        return await _runtime_get(
+            'telemetry-query-service',
+            'telemetry/inventory',
+            params={'source_id': tool_input['source_id']},
+        )
 
     if name == 'query_recent_telemetry':
         ch = tool_input['name']

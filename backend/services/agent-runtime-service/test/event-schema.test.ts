@@ -7,7 +7,7 @@ function validPayload(eventType: keyof typeof AGENT_EVENT_REQUIRED_PAYLOAD_FIELD
   return Object.fromEntries(AGENT_EVENT_REQUIRED_PAYLOAD_FIELDS[eventType].map((field) => [field, `${field}-value`]));
 }
 
-test("every fixed MVP event type validates required payload fields", () => {
+test("every fixed event type validates required payload fields", () => {
   for (const eventType of Object.keys(AGENT_EVENT_REQUIRED_PAYLOAD_FIELDS) as Array<keyof typeof AGENT_EVENT_REQUIRED_PAYLOAD_FIELDS>) {
     assert.equal(validateAgentEventPayload(eventType, validPayload(eventType), eventType.startsWith("tool.") ? "tool-call-1" : null), eventType);
   }
