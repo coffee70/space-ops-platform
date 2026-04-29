@@ -158,7 +158,7 @@ async function orchestrateChat(input: {
     });
     await stream.emitRawEvents(context.raw_events);
 
-    const toolDefinitions = await dependencies.toolRegistryClient.listTools();
+    const toolDefinitions = await dependencies.toolRegistryClient.listTools(input.trace);
     const tools = createToolSet({
       toolDefinitions,
       toolExecutionClient: dependencies.toolExecutionClient,

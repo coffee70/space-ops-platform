@@ -170,7 +170,7 @@ export interface ContextRetrievalClient {
 }
 
 export interface ToolRegistryClient {
-  listTools(): Promise<ToolDefinition[]>;
+  listTools(trace: TraceEnvelope): Promise<ToolDefinition[]>;
 }
 
 export interface ToolExecutionClient {

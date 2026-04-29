@@ -116,9 +116,12 @@ export class FakeContextClient implements ContextRetrievalClient {
 }
 
 export class FakeToolRegistryClient implements ToolRegistryClient {
+  traces: TraceEnvelope[] = [];
+
   constructor(private readonly definitions: ToolDefinition[]) {}
 
-  async listTools(): Promise<ToolDefinition[]> {
+  async listTools(trace: TraceEnvelope): Promise<ToolDefinition[]> {
+    this.traces.push(trace);
     return this.definitions;
   }
 }

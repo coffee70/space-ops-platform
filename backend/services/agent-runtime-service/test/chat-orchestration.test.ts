@@ -10,6 +10,28 @@ test("chat orchestration emits backend-owned run, context, tool, and completion 
     title: "AI Engineer Session",
     execution_mode: "read_only",
   });
+  const toolRegistry = new FakeToolRegistryClient([
+    {
+      name: "get_runtime_service",
+      description: "Get runtime service details.",
+      category: "layer1_runtime",
+      layer_target: "layer1",
+      read_write_classification: "read",
+      required_execution_mode: "read_only",
+      enabled: true,
+      requires_confirmation: false,
+      input_schema_json: {
+        type: "object",
+        properties: {
+          service_slug: {
+            type: "string",
+            description: "Service slug to inspect.",
+          },
+        },
+        required: ["service_slug"],
+      },
+    },
+  ]);
 
   const toolExecution = new FakeToolExecutionClient({
     conversation_id: conversation.id,
@@ -50,28 +72,7 @@ test("chat orchestration emits backend-owned run, context, tool, and completion 
         payload: { context_packet_id: "ctx-1" },
       },
     ]),
-    toolRegistryClient: new FakeToolRegistryClient([
-      {
-        name: "get_runtime_service",
-        description: "Get runtime service details.",
-        category: "layer1_runtime",
-        layer_target: "layer1",
-        read_write_classification: "read",
-        required_execution_mode: "read_only",
-        enabled: true,
-        requires_confirmation: false,
-        input_schema_json: {
-          type: "object",
-          properties: {
-            service_slug: {
-              type: "string",
-              description: "Service slug to inspect.",
-            },
-          },
-          required: ["service_slug"],
-        },
-      },
-    ]),
+    toolRegistryClient: toolRegistry,
     toolExecutionClient: toolExecution,
     modelRunner: {
       async *stream(input) {
@@ -126,5 +127,13 @@ test("chat orchestration emits backend-owned run, context, tool, and completion 
   assert.equal(delta.delta, "Runtime service ownership corrected.");
   assert.equal(delta.agent_run_id, "agent-run-1");
   assert.equal(delta.request_id, "request-1");
+  assert.deepEqual(toolRegistry.traces, [
+    {
+      conversation_id: conversation.id,
+      agent_run_id: "agent-run-1",
+      request_id: "request-1",
+      tool_call_id: null,
+    },
+  ]);
   assert.equal(toolExecution.calls.length, 1);
 });
