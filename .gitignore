@@ -8,3 +8,6 @@ __pycache__/
 .coverage
 htmlcov/
 tmp/
+node_modules/
+backend/services/*/dist/
+backend/services/*/build/

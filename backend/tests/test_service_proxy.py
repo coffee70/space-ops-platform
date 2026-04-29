@@ -41,7 +41,7 @@ class _AsyncClient:
             raise result
         return result
 
-    async def request(self, method: str, url: str, headers: dict | None = None, content: bytes | None = None):
+    def build_request(self, method: str, url: str, headers: dict | None = None, content: bytes | None = None):
         self.request_calls.append(
             {
                 "method": method,
@@ -52,11 +52,27 @@ class _AsyncClient:
                 "follow_redirects": self.follow_redirects,
             }
         )
+        return {
+            "method": method,
+            "url": url,
+            "headers": headers or {},
+            "content": content,
+        }
+
+    async def send(self, request: dict, *, stream: bool = False):
         assert self.request_results
         result = self.request_results.pop(0)
         if isinstance(result, Exception):
             raise result
         return result
+
+    async def aclose(self):
+        return None
+
+
+class _StreamingResponse(httpx.Response):
+    async def aiter_bytes(self):
+        yield self.content
 
 
 def test_build_service_proxy_url_uses_kernel_internal_service_proxy() -> None:
@@ -68,7 +84,7 @@ def test_build_service_proxy_url_uses_kernel_internal_service_proxy() -> None:
 def test_proxy_request_does_not_call_registry_services(monkeypatch) -> None:
     _AsyncClient.request_calls = []
     _AsyncClient.get_calls = []
-    _AsyncClient.request_results = [httpx.Response(200, json={"ok": True})]
+    _AsyncClient.request_results = [_StreamingResponse(200, json={"ok": True})]
     monkeypatch.setattr(service_proxy.httpx, "AsyncClient", _AsyncClient)
 
     app = FastAPI()
@@ -139,6 +155,24 @@ def test_proxy_request_returns_502_when_control_plane_unavailable(monkeypatch) -
 
     assert response.status_code == 502
     assert response.json()["detail"] == "service proxy unavailable"
+
+
+def test_proxy_request_streams_upstream_body(monkeypatch) -> None:
+    _AsyncClient.request_calls = []
+    _AsyncClient.request_results = [_StreamingResponse(200, content=b'{"part":1}\n{"part":2}\n', headers={"content-type": "application/x-ndjson"})]
+    monkeypatch.setattr(service_proxy.httpx, "AsyncClient", _AsyncClient)
+
+    app = FastAPI()
+
+    @app.get("/proxy")
+    async def run_proxy(request: Request):
+        return await service_proxy.proxy_request("agent-runtime-service", request, path="agent/chat")
+
+    response = TestClient(app).get("/proxy")
+
+    assert response.status_code == 200
+    assert response.text == '{"part":1}\n{"part":2}\n'
+    assert response.headers["content-type"].startswith("application/x-ndjson")
 
 
 def test_gateway_routes_proxy_expected_service_paths(monkeypatch) -> None:

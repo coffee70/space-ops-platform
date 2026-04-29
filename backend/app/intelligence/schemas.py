@@ -33,6 +33,7 @@ class ToolExecutionResponse(BaseModel):
     tool_call_id: str
     status: Literal["completed", "failed", "confirmation_required"]
     output: dict[str, Any] = Field(default_factory=dict)
+    raw_events: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class ContextPacketRequest(BaseModel):
@@ -58,6 +59,7 @@ class ContextPacketResponse(BaseModel):
     truncated: bool
     truncation_reasons: list[str] = Field(default_factory=list)
     data: dict[str, Any] = Field(default_factory=dict)
+    raw_events: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class ToolDefinitionSummary(BaseModel):

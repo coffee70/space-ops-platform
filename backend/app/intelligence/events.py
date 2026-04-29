@@ -35,6 +35,23 @@ ALLOWED_EVENT_TYPES = {
 }
 
 
+def raw_event(
+    *,
+    event_type: str,
+    payload: dict[str, Any],
+    emitted_by: str,
+    tool_call_id: str | None = None,
+) -> dict[str, Any]:
+    if event_type not in ALLOWED_EVENT_TYPES:
+        raise ValueError(f"unsupported event type: {event_type}")
+    return {
+        "event_type": event_type,
+        "payload": redact(payload),
+        "emitted_by": emitted_by,
+        "tool_call_id": tool_call_id,
+    }
+
+
 def emit_event(
     db: Session,
     *,

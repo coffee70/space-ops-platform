@@ -2,13 +2,13 @@ from __future__ import annotations
 
 import uuid
 
-from fastapi import Depends, HTTPException
+from fastapi import Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.intelligence.events import emit_event
+from app.intelligence.events import raw_event
+from app.intelligence.trace import extract_trace
 from app.models.intelligence import ToolDefinition
-from app.routes.handlers import code_intelligence, document_knowledge
 
 MAX_PACKET_CHARS = 24_000
 MAX_DOC_CHUNKS = 6
@@ -23,10 +23,11 @@ def _truncate(value: str, limit: int):
     return value[:limit], True
 
 
-def context_packet(body: dict, db: Session = Depends(get_db)):
-    conversation_id = body.get("conversation_id")
-    agent_run_id = body.get("agent_run_id")
-    request_id = body.get("request_id")
+def context_packet(body: dict, request: Request, db: Session = Depends(get_db)):
+    trace = extract_trace(request, require_run=False, require_conversation=False)
+    conversation_id = body.get("conversation_id") or trace.get("conversation_id")
+    agent_run_id = body.get("agent_run_id") or trace.get("agent_run_id")
+    request_id = body.get("request_id") or trace.get("request_id")
     message = body.get("message", "")
     if not agent_run_id or not request_id:
         raise HTTPException(status_code=400, detail="agent_run_id and request_id are required")
@@ -47,12 +48,16 @@ def context_packet(body: dict, db: Session = Depends(get_db)):
     }
 
     if include_docs:
+        from app.routes.handlers import document_knowledge
+
         packet["mission_documents"] = document_knowledge.search_documents(
             {"query": message, "mission_id": body.get("mission_id"), "vehicle_id": body.get("vehicle_id"), "limit": MAX_DOC_CHUNKS},
             db,
         )[:MAX_DOC_CHUNKS]
 
     if include_code:
+        from app.routes.handlers import code_intelligence
+
         packet["code_context"] = code_intelligence.search_code({"query": message, "branch": "main", "limit": MAX_CODE_CHUNKS}, db)[:MAX_CODE_CHUNKS]
 
     if include_platform:
@@ -83,8 +88,7 @@ def context_packet(body: dict, db: Session = Depends(get_db)):
         truncation_reasons.append("context_packet_chars")
 
     context_packet_id = str(uuid.uuid4())
-    emit_event(
-        db,
+    resolved_event = raw_event(
         event_type="context.resolved",
         payload={
             "context_packet_id": context_packet_id,
@@ -95,10 +99,6 @@ def context_packet(body: dict, db: Session = Depends(get_db)):
             "truncated": bool(truncation_reasons),
             "truncation_reasons": truncation_reasons,
         },
-        conversation_id=conversation_id,
-        agent_run_id=agent_run_id,
-        request_id=request_id,
-        sequence=1,
         emitted_by="context-retrieval-service",
     )
 
@@ -114,4 +114,5 @@ def context_packet(body: dict, db: Session = Depends(get_db)):
         "truncated": bool(truncation_reasons),
         "truncation_reasons": truncation_reasons,
         "data": packet,
+        "raw_events": [resolved_event],
     }

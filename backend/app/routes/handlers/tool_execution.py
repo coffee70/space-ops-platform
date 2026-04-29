@@ -4,14 +4,15 @@ from datetime import datetime, timezone
 import uuid
 
 import httpx
-from fastapi import Depends, HTTPException
+from fastapi import Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 
 from app.config import get_settings
 from app.database import get_db
-from app.intelligence.events import emit_event
+from app.intelligence.events import raw_event
 from app.intelligence.redaction import redact
 from app.intelligence.schemas import ToolExecutionRequest
+from app.intelligence.trace import extract_trace
 from app.models.intelligence import ToolCall, ToolDefinition
 
 READ_ONLY_MODES = {'read_only', 'suggest'}
@@ -71,7 +72,14 @@ async def _execute_mapped_tool(name: str, tool_input: dict):
     raise HTTPException(status_code=501, detail=f'tool handler not implemented: {name}')
 
 
-async def execute_tool(body: ToolExecutionRequest, db: Session = Depends(get_db)):
+async def execute_tool(body: ToolExecutionRequest, request: Request, db: Session = Depends(get_db)):
+    trace = extract_trace(request, require_run=True, require_conversation=False)
+    conversation_id = body.conversation_id or trace.get("conversation_id")
+    agent_run_id = body.agent_run_id or trace["agent_run_id"]
+    request_id = body.request_id or trace["request_id"]
+    tool_call_id = body.tool_call_id or trace.get("tool_call_id")
+    if not tool_call_id:
+        raise HTTPException(status_code=400, detail="tool_call_id is required")
     tool = db.query(ToolDefinition).filter(ToolDefinition.name == body.tool_name).one_or_none()
     if not tool:
         raise HTTPException(status_code=404, detail='tool not found')
@@ -81,19 +89,20 @@ async def execute_tool(body: ToolExecutionRequest, db: Session = Depends(get_db)
         raise HTTPException(status_code=403, detail='write tool not allowed in current execution mode')
     if tool.requires_confirmation and not body.input.get('confirmation_token'):
         return {
-            'conversation_id': body.conversation_id,
-            'agent_run_id': body.agent_run_id,
-            'request_id': body.request_id,
-            'tool_call_id': body.tool_call_id,
+            'conversation_id': conversation_id,
+            'agent_run_id': agent_run_id,
+            'request_id': request_id,
+            'tool_call_id': tool_call_id,
             'status': 'confirmation_required',
             'output': {'message': 'confirmation token required'},
+            'raw_events': [],
         }
 
     call = ToolCall(
-        conversation_id=uuid.UUID(body.conversation_id) if body.conversation_id else None,
-        agent_run_id=uuid.UUID(body.agent_run_id),
-        request_id=uuid.UUID(body.request_id),
-        tool_call_id=uuid.UUID(body.tool_call_id),
+        conversation_id=uuid.UUID(conversation_id) if conversation_id else None,
+        agent_run_id=uuid.UUID(agent_run_id),
+        request_id=uuid.UUID(request_id),
+        tool_call_id=uuid.UUID(tool_call_id),
         message_id=uuid.UUID(body.message_id) if body.message_id else None,
         tool_name=body.tool_name,
         input_json=body.input,
@@ -104,20 +113,46 @@ async def execute_tool(body: ToolExecutionRequest, db: Session = Depends(get_db)
     db.add(call)
     db.flush()
 
-    emit_event(db,event_type='tool.started',payload={'tool_name': body.tool_name,'category': tool.category,'read_write_classification': tool.read_write_classification,'input_preview': redact(body.input)},conversation_id=body.conversation_id,agent_run_id=body.agent_run_id,request_id=body.request_id,tool_call_id=body.tool_call_id,sequence=1,emitted_by='tool-execution-service')
-
     try:
         output = await _execute_mapped_tool(body.tool_name, body.input)
         call.status = 'completed'
         call.output_json = output
         call.completed_at = datetime.now(timezone.utc)
-        emit_event(db,event_type='tool.completed',payload={'tool_name': body.tool_name,'status': 'completed','result_preview': redact(output),'duration_ms': int((call.completed_at - call.started_at).total_seconds() * 1000)},conversation_id=body.conversation_id,agent_run_id=body.agent_run_id,request_id=body.request_id,tool_call_id=body.tool_call_id,sequence=2,emitted_by='tool-execution-service')
+        raw_events = [
+            raw_event(
+                event_type='tool.completed',
+                payload={'tool_name': body.tool_name, 'status': 'completed', 'result_preview': redact(output), 'duration_ms': int((call.completed_at - call.started_at).total_seconds() * 1000)},
+                emitted_by='tool-execution-service',
+                tool_call_id=tool_call_id,
+            )
+        ]
         if body.tool_name in {'navigate_to_application', 'open_workspace_file'}:
-            emit_event(db,event_type='navigation.requested',payload=output,conversation_id=body.conversation_id,agent_run_id=body.agent_run_id,request_id=body.request_id,tool_call_id=body.tool_call_id,sequence=3,emitted_by='tool-execution-service')
-        return {'conversation_id': body.conversation_id,'agent_run_id': body.agent_run_id,'request_id': body.request_id,'tool_call_id': body.tool_call_id,'status': 'completed','output': output}
+            raw_events.append(
+                raw_event(
+                    event_type='navigation.requested',
+                    payload=output,
+                    emitted_by='tool-execution-service',
+                    tool_call_id=tool_call_id,
+                )
+            )
+        return {'conversation_id': conversation_id,'agent_run_id': agent_run_id,'request_id': request_id,'tool_call_id': tool_call_id,'status': 'completed','output': output,'raw_events': raw_events}
     except Exception as exc:
         call.status = 'failed'
         call.error_message = str(exc)
         call.completed_at = datetime.now(timezone.utc)
-        emit_event(db,event_type='tool.failed',payload={'tool_name': body.tool_name,'error_code': 'tool_execution_failed','message': str(exc),'duration_ms': int((call.completed_at - call.started_at).total_seconds() * 1000)},conversation_id=body.conversation_id,agent_run_id=body.agent_run_id,request_id=body.request_id,tool_call_id=body.tool_call_id,sequence=2,emitted_by='tool-execution-service')
-        raise
+        return {
+            'conversation_id': conversation_id,
+            'agent_run_id': agent_run_id,
+            'request_id': request_id,
+            'tool_call_id': tool_call_id,
+            'status': 'failed',
+            'output': {'error_code': 'tool_execution_failed', 'message': str(exc)},
+            'raw_events': [
+                raw_event(
+                    event_type='tool.failed',
+                    payload={'tool_name': body.tool_name, 'error_code': 'tool_execution_failed', 'message': str(exc), 'duration_ms': int((call.completed_at - call.started_at).total_seconds() * 1000)},
+                    emitted_by='tool-execution-service',
+                    tool_call_id=tool_call_id,
+                )
+            ],
+        }
