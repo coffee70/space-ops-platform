@@ -42,6 +42,17 @@ test("chat orchestration emits backend-owned run, context, tool, and completion 
     output: { service_slug: "agent-runtime-service" },
     raw_events: [
       {
+        event_type: "tool.started",
+        emitted_by: "tool-execution-service",
+        tool_call_id: "tool-call-1",
+        payload: {
+          tool_name: "get_runtime_service",
+          category: "layer1_runtime",
+          read_write_classification: "read",
+          input_preview: { service_slug: "agent-runtime-service" },
+        },
+      },
+      {
         event_type: "tool.completed",
         emitted_by: "tool-execution-service",
         tool_call_id: "tool-call-1",
@@ -117,6 +128,22 @@ test("chat orchestration emits backend-owned run, context, tool, and completion 
   assert.deepEqual(
     events.map((event) => event.event.sequence),
     [1, 2, 3, 4, 5, 6, 7, 8],
+  );
+  const startedEvents = events.filter((chunk) => chunk.event.event_type === "tool.started");
+  assert.equal(startedEvents.length, 1);
+  assert.equal(startedEvents[0]?.event.payload.tool_name, "get_runtime_service");
+
+  const lifecycleEvents = events.filter((chunk) => chunk.event.event_type.startsWith("tool."));
+  assert.deepEqual(
+    lifecycleEvents.map((chunk) => chunk.event.event_type),
+    ["tool.started", "tool.completed"],
+  );
+  assert.ok(
+    lifecycleEvents.every((chunk) => (chunk.event as { emitted_by?: string }).emitted_by === "tool-execution-service"),
+  );
+  assert.deepEqual(
+    lifecycleEvents.map((chunk) => (chunk.event as { tool_call_id?: string | null }).tool_call_id),
+    ["tool-call-1", "tool-call-1"],
   );
 
   const delta = events.find((chunk) => chunk.event.event_type === "message.delta")?.event;

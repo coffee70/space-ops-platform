@@ -5,7 +5,6 @@ import { buildSystemPrompt } from "../ai/prompts.js";
 import { createToolSet } from "../ai/tools.js";
 import { AgentEventStream } from "../events/stream.js";
 import { RunSequencer } from "../events/sequencer.js";
-import { redactAndTruncate } from "../events/schema.js";
 import { runFallback } from "../fallback.js";
 import { createTrace } from "../trace.js";
 import type { ChatInputMessage, ContextPacketResponse, ExecutionMode, RawEventFact, RunDependencies } from "../types.js";
@@ -180,18 +179,8 @@ async function orchestrateChat(input: {
       toolExecutionClient: dependencies.toolExecutionClient,
       trace: input.trace,
       executionMode: input.executionMode,
-      emitToolStarted: async (definition, toolCallId, args) => {
+      onToolCallRequested: () => {
         toolCallCount += 1;
-        await stream.emitEvent(
-          "tool.started",
-          {
-            tool_name: definition.name,
-            category: definition.category,
-            read_write_classification: definition.read_write_classification,
-            input_preview: redactAndTruncate(args),
-          },
-          { toolCallId, emittedBy: "agent-runtime-service" },
-        );
       },
       emitRawToolEvents: async (events) => {
         await stream.emitRawEvents(events as RawEventFact[] | undefined);

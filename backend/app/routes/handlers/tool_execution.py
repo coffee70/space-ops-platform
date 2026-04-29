@@ -68,7 +68,12 @@ async def _execute_mapped_tool(name: str, tool_input: dict):
         path = tool_input.get('path')
         if not path:
             raise HTTPException(status_code=400, detail='path is required')
-        return {'action': 'open_workspace_file', 'path': path}
+        return {
+            'action': 'open_workspace_file',
+            'application_id': 'workspace',
+            'route_path': '/apps/workspace',
+            'path': path,
+        }
     raise HTTPException(status_code=501, detail=f'tool handler not implemented: {name}')
 
 
@@ -112,6 +117,17 @@ async def execute_tool(body: ToolExecutionRequest, request: Request, db: Session
     )
     db.add(call)
     db.flush()
+    started_event = raw_event(
+        event_type='tool.started',
+        payload={
+            'tool_name': tool.name,
+            'category': tool.category,
+            'read_write_classification': tool.read_write_classification,
+            'input_preview': redact(body.input),
+        },
+        emitted_by='tool-execution-service',
+        tool_call_id=tool_call_id,
+    )
 
     try:
         output = await _execute_mapped_tool(body.tool_name, body.input)
@@ -119,6 +135,7 @@ async def execute_tool(body: ToolExecutionRequest, request: Request, db: Session
         call.output_json = output
         call.completed_at = datetime.now(timezone.utc)
         raw_events = [
+            started_event,
             raw_event(
                 event_type='tool.completed',
                 payload={'tool_name': body.tool_name, 'status': 'completed', 'result_preview': redact(output), 'duration_ms': int((call.completed_at - call.started_at).total_seconds() * 1000)},
@@ -148,6 +165,7 @@ async def execute_tool(body: ToolExecutionRequest, request: Request, db: Session
             'status': 'failed',
             'output': {'error_code': 'tool_execution_failed', 'message': str(exc)},
             'raw_events': [
+                started_event,
                 raw_event(
                     event_type='tool.failed',
                     payload={'tool_name': body.tool_name, 'error_code': 'tool_execution_failed', 'message': str(exc), 'duration_ms': int((call.completed_at - call.started_at).total_seconds() * 1000)},
