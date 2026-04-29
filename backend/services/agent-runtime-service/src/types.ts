@@ -103,6 +103,7 @@ export interface ContextPacketResponse {
   tool_definition_count: number;
   truncated: boolean;
   truncation_reasons: string[];
+  failed_sources?: Array<{ service: string; failure_type: string }>;
   data: Record<string, unknown>;
   raw_events?: RawEventFact[];
 }

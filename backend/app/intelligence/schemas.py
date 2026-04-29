@@ -61,6 +61,7 @@ class ContextPacketResponse(BaseModel):
     tool_definition_count: int
     truncated: bool
     truncation_reasons: list[str] = Field(default_factory=list)
+    failed_sources: list[dict[str, str]] = Field(default_factory=list)
     data: dict[str, Any] = Field(default_factory=dict)
     raw_events: list[dict[str, Any]] = Field(default_factory=list)
 
