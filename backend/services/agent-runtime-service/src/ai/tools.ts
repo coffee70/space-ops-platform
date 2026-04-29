@@ -15,51 +15,79 @@ function canUseTool(requiredMode: ExecutionMode, executionMode: ExecutionMode): 
   return rank[executionMode] >= rank[requiredMode];
 }
 
-function schemaToZod(schema: unknown): ZodTypeAny {
+type JsonSchema = {
+  type?: string;
+  properties?: Record<string, JsonSchema>;
+  required?: string[];
+  additionalProperties?: boolean;
+  items?: JsonSchema;
+  enum?: Array<string | number | boolean>;
+  description?: string;
+  minLength?: number;
+  maxLength?: number;
+  minimum?: number;
+  maximum?: number;
+};
+
+function applyCommonConstraints(schema: JsonSchema, field: ZodTypeAny): ZodTypeAny {
+  let constrained = field;
+  if (schema.description) constrained = constrained.describe(schema.description);
+  return constrained;
+}
+
+function schemaNodeToZod(schema: JsonSchema): ZodTypeAny {
+  switch (schema.type) {
+    case "string": {
+      let value = z.string();
+      if (typeof schema.minLength === "number") value = value.min(schema.minLength);
+      if (typeof schema.maxLength === "number") value = value.max(schema.maxLength);
+      if (Array.isArray(schema.enum) && schema.enum.length > 0 && schema.enum.every((item) => typeof item === "string")) {
+        const options = schema.enum as [string, ...string[]];
+        return applyCommonConstraints(schema, z.enum(options));
+      }
+      return applyCommonConstraints(schema, value);
+    }
+    case "integer": {
+      let value = z.number().int();
+      if (typeof schema.minimum === "number") value = value.min(schema.minimum);
+      if (typeof schema.maximum === "number") value = value.max(schema.maximum);
+      return applyCommonConstraints(schema, value);
+    }
+    case "number": {
+      let value = z.number();
+      if (typeof schema.minimum === "number") value = value.min(schema.minimum);
+      if (typeof schema.maximum === "number") value = value.max(schema.maximum);
+      return applyCommonConstraints(schema, value);
+    }
+    case "boolean":
+      return applyCommonConstraints(schema, z.boolean());
+    case "array":
+      return applyCommonConstraints(schema, z.array(schema.items ? schemaNodeToZod(schema.items) : z.unknown()));
+    case "object": {
+      const properties = schema.properties ?? {};
+      const required = new Set(schema.required ?? []);
+      const shape: Record<string, ZodTypeAny> = {};
+      for (const [key, propSchema] of Object.entries(properties)) {
+        const prop = schemaNodeToZod(propSchema);
+        shape[key] = required.has(key) ? prop : prop.optional();
+      }
+      const objectSchema = z.object(shape);
+      return applyCommonConstraints(schema, schema.additionalProperties === false ? objectSchema.strict() : objectSchema);
+    }
+    default:
+      return z.unknown();
+  }
+}
+
+export function schemaToZod(schema: unknown): ZodTypeAny {
   if (!schema || typeof schema !== "object") {
-    return z.object({}).passthrough();
+    return z.object({}).strict();
   }
-
-  const typedSchema = schema as { type?: string; properties?: Record<string, unknown>; required?: string[] };
-  if (typedSchema.type !== "object" || !typedSchema.properties) {
-    return z.object({}).passthrough();
+  const typedSchema = schema as JsonSchema;
+  if (typedSchema.type !== "object") {
+    return z.object({}).strict();
   }
-
-  const required = new Set(typedSchema.required ?? []);
-  const shape: Record<string, ZodTypeAny> = {};
-
-  for (const [key, value] of Object.entries(typedSchema.properties)) {
-    const property = value as { type?: string; description?: string };
-    let field: ZodTypeAny;
-    switch (property.type) {
-      case "number":
-      case "integer":
-        field = z.number();
-        break;
-      case "boolean":
-        field = z.boolean();
-        break;
-      case "array":
-        field = z.array(z.any());
-        break;
-      case "object":
-        field = z.object({}).passthrough();
-        break;
-      default:
-        field = z.string();
-        break;
-    }
-
-    if (property.description) {
-      field = field.describe(property.description);
-    }
-    if (!required.has(key)) {
-      field = field.optional();
-    }
-    shape[key] = field;
-  }
-
-  return z.object(shape).passthrough();
+  return schemaNodeToZod(typedSchema);
 }
 
 export function createToolSet(input: {

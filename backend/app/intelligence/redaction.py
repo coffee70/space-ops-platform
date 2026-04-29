@@ -4,14 +4,28 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 
-SENSITIVE_KEYS = {"authorization", "api_key", "token", "password", "cookie", "set-cookie", "secret"}
+SENSITIVE_KEY_FRAGMENTS = {
+    "authorization",
+    "api_key",
+    "apikey",
+    "access_token",
+    "refresh_token",
+    "token",
+    "password",
+    "passwd",
+    "cookie",
+    "set-cookie",
+    "secret",
+    "client_secret",
+}
 
 
 def redact(value):
     if isinstance(value, Mapping):
         out = {}
         for k, v in value.items():
-            if str(k).lower() in SENSITIVE_KEYS:
+            key = str(k).lower()
+            if any(fragment in key for fragment in SENSITIVE_KEY_FRAGMENTS):
                 out[k] = "***REDACTED***"
             else:
                 out[k] = redact(v)

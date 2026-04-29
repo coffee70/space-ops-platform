@@ -45,6 +45,13 @@ async def test_tool_execution_returns_raw_events_and_keeps_tool_call_record(monk
         category="layer1_runtime",
         read_write_classification="read",
         requires_confirmation=False,
+        required_execution_mode="read_only",
+        input_schema_json={
+            "type": "object",
+            "properties": {"service_slug": {"type": "string"}},
+            "required": ["service_slug"],
+            "additionalProperties": False,
+        },
     )
 
     async def fake_execute(*_args, **_kwargs):
@@ -96,6 +103,13 @@ async def test_tool_execution_returns_started_then_failed_on_mapped_failure(monk
         category="layer1_runtime",
         read_write_classification="read",
         requires_confirmation=False,
+        required_execution_mode="read_only",
+        input_schema_json={
+            "type": "object",
+            "properties": {"service_slug": {"type": "string"}},
+            "required": ["service_slug"],
+            "additionalProperties": False,
+        },
     )
 
     async def fake_execute(*_args, **_kwargs):
@@ -140,6 +154,12 @@ async def test_tool_execution_confirmation_required_does_not_start_or_persist_ru
         category="write_future",
         read_write_classification="write",
         requires_confirmation=True,
+        required_execution_mode="execute",
+        input_schema_json={
+            "type": "object",
+            "properties": {},
+            "additionalProperties": False,
+        },
     )
 
     response = await tool_execution.execute_tool(
@@ -205,6 +225,8 @@ async def test_tool_execution_pre_execution_rejections_do_not_emit_started_or_pe
         category="layer1_runtime",
         read_write_classification="read",
         requires_confirmation=False,
+        required_execution_mode="read_only",
+        input_schema_json={"type": "object", "properties": {}, "additionalProperties": False},
     )
     with pytest.raises(tool_execution.HTTPException) as disabled_exc:
         await tool_execution.execute_tool(
@@ -238,6 +260,8 @@ async def test_tool_execution_pre_execution_rejections_do_not_emit_started_or_pe
         category="write_future",
         read_write_classification="write",
         requires_confirmation=False,
+        required_execution_mode="execute",
+        input_schema_json={"type": "object", "properties": {}, "additionalProperties": False},
     )
     with pytest.raises(tool_execution.HTTPException) as mode_exc:
         await tool_execution.execute_tool(
@@ -262,3 +286,209 @@ async def test_tool_execution_pre_execution_rejections_do_not_emit_started_or_pe
     assert mode_exc.value.status_code == 403
     db_write.add.assert_not_called()
     db_write.flush.assert_not_called()
+
+    # write tool in suggest mode
+    db_suggest = MagicMock()
+    db_suggest.query.return_value.filter.return_value.one_or_none.return_value = SimpleNamespace(
+        name="apply_patch",
+        enabled=True,
+        category="write_future",
+        read_write_classification="write",
+        requires_confirmation=False,
+        required_execution_mode="execute",
+        input_schema_json={"type": "object", "properties": {}, "additionalProperties": False},
+    )
+    with pytest.raises(tool_execution.HTTPException) as suggest_exc:
+        await tool_execution.execute_tool(
+            tool_execution.ToolExecutionRequest(
+                conversation_id="11111111-1111-1111-1111-111111111111",
+                agent_run_id="22222222-2222-2222-2222-222222222222",
+                request_id="33333333-3333-3333-3333-333333333333",
+                tool_call_id="44444444-4444-4444-4444-444444444444",
+                tool_name="apply_patch",
+                input={},
+                execution_mode="suggest",
+            ),
+            request=_request(
+                {
+                    "x-agent-run-id": "22222222-2222-2222-2222-222222222222",
+                    "x-request-id": "33333333-3333-3333-3333-333333333333",
+                    "x-tool-call-id": "44444444-4444-4444-4444-444444444444",
+                }
+            ),
+            db=db_suggest,
+        )
+    assert suggest_exc.value.status_code == 403
+    db_suggest.add.assert_not_called()
+    db_suggest.flush.assert_not_called()
+
+    # schema validation: unknown, missing, wrong type
+    db_schema = MagicMock()
+    db_schema.query.return_value.filter.return_value.one_or_none.return_value = SimpleNamespace(
+        name="get_runtime_service",
+        enabled=True,
+        category="layer1_runtime",
+        read_write_classification="read",
+        requires_confirmation=False,
+        required_execution_mode="read_only",
+        input_schema_json={
+            "type": "object",
+            "properties": {
+                "service_slug": {"type": "string"},
+                "line": {"type": "integer"},
+            },
+            "required": ["service_slug"],
+            "additionalProperties": False,
+        },
+    )
+    with pytest.raises(tool_execution.HTTPException) as unknown_exc:
+        await tool_execution.execute_tool(
+            tool_execution.ToolExecutionRequest(
+                conversation_id="11111111-1111-1111-1111-111111111111",
+                agent_run_id="22222222-2222-2222-2222-222222222222",
+                request_id="33333333-3333-3333-3333-333333333333",
+                tool_call_id="44444444-4444-4444-4444-444444444444",
+                tool_name="get_runtime_service",
+                input={"service_slug": "agent-runtime-service", "extra": "nope"},
+                execution_mode="read_only",
+            ),
+            request=_request(
+                {
+                    "x-agent-run-id": "22222222-2222-2222-2222-222222222222",
+                    "x-request-id": "33333333-3333-3333-3333-333333333333",
+                    "x-tool-call-id": "44444444-4444-4444-4444-444444444444",
+                }
+            ),
+            db=db_schema,
+        )
+    assert unknown_exc.value.status_code == 400
+    assert unknown_exc.value.detail["error_code"] == "tool_input_validation_failed"
+    db_schema.add.assert_not_called()
+    db_schema.flush.assert_not_called()
+
+    with pytest.raises(tool_execution.HTTPException) as missing_required_exc:
+        await tool_execution.execute_tool(
+            tool_execution.ToolExecutionRequest(
+                conversation_id="11111111-1111-1111-1111-111111111111",
+                agent_run_id="22222222-2222-2222-2222-222222222222",
+                request_id="33333333-3333-3333-3333-333333333333",
+                tool_call_id="44444444-4444-4444-4444-444444444444",
+                tool_name="get_runtime_service",
+                input={"line": 10},
+                execution_mode="read_only",
+            ),
+            request=_request(
+                {
+                    "x-agent-run-id": "22222222-2222-2222-2222-222222222222",
+                    "x-request-id": "33333333-3333-3333-3333-333333333333",
+                    "x-tool-call-id": "44444444-4444-4444-4444-444444444444",
+                }
+            ),
+            db=db_schema,
+        )
+    assert missing_required_exc.value.status_code == 400
+
+    with pytest.raises(tool_execution.HTTPException) as wrong_type_exc:
+        await tool_execution.execute_tool(
+            tool_execution.ToolExecutionRequest(
+                conversation_id="11111111-1111-1111-1111-111111111111",
+                agent_run_id="22222222-2222-2222-2222-222222222222",
+                request_id="33333333-3333-3333-3333-333333333333",
+                tool_call_id="44444444-4444-4444-4444-444444444444",
+                tool_name="get_runtime_service",
+                input={"service_slug": "agent-runtime-service", "line": "oops"},
+                execution_mode="read_only",
+            ),
+            request=_request(
+                {
+                    "x-agent-run-id": "22222222-2222-2222-2222-222222222222",
+                    "x-request-id": "33333333-3333-3333-3333-333333333333",
+                    "x-tool-call-id": "44444444-4444-4444-4444-444444444444",
+                }
+            ),
+            db=db_schema,
+        )
+    assert wrong_type_exc.value.status_code == 400
+    db_write.add.assert_not_called()
+    db_write.flush.assert_not_called()
+
+
+@pytest.mark.anyio
+async def test_confirmation_token_allows_execution(monkeypatch) -> None:
+    db = MagicMock()
+    db.query.return_value.filter.return_value.one_or_none.return_value = SimpleNamespace(
+        name="create_working_branch",
+        enabled=True,
+        category="write_future",
+        read_write_classification="write",
+        requires_confirmation=True,
+        required_execution_mode="execute",
+        input_schema_json={"type": "object", "properties": {}, "additionalProperties": False},
+    )
+
+    async def fake_execute(*_args, **_kwargs):
+        return {"ok": True}
+
+    monkeypatch.setattr(tool_execution, "_execute_mapped_tool", fake_execute)
+
+    response = await tool_execution.execute_tool(
+        tool_execution.ToolExecutionRequest(
+            conversation_id="11111111-1111-1111-1111-111111111111",
+            agent_run_id="22222222-2222-2222-2222-222222222222",
+            request_id="33333333-3333-3333-3333-333333333333",
+            tool_call_id="44444444-4444-4444-4444-444444444444",
+            tool_name="create_working_branch",
+            input={},
+            confirmation_token="confirmed",
+            execution_mode="execute",
+        ),
+        request=_request(
+            {
+                "x-agent-run-id": "22222222-2222-2222-2222-222222222222",
+                "x-request-id": "33333333-3333-3333-3333-333333333333",
+                "x-tool-call-id": "44444444-4444-4444-4444-444444444444",
+            }
+        ),
+        db=db,
+    )
+    assert response["status"] == "completed"
+    db.add.assert_called_once()
+    db.flush.assert_called_once()
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("tool_name", ["scaffold_service", "apply_patch", "create_commit", "deploy_service_or_application"])
+async def test_mvp_write_tools_reject_read_only_mode(tool_name: str) -> None:
+    db = MagicMock()
+    db.query.return_value.filter.return_value.one_or_none.return_value = SimpleNamespace(
+        name=tool_name,
+        enabled=True,
+        category="write_future",
+        read_write_classification="write",
+        requires_confirmation=False,
+        required_execution_mode="execute",
+        input_schema_json={"type": "object", "properties": {}, "additionalProperties": False},
+    )
+    with pytest.raises(tool_execution.HTTPException) as mode_exc:
+        await tool_execution.execute_tool(
+            tool_execution.ToolExecutionRequest(
+                conversation_id="11111111-1111-1111-1111-111111111111",
+                agent_run_id="22222222-2222-2222-2222-222222222222",
+                request_id="33333333-3333-3333-3333-333333333333",
+                tool_call_id="44444444-4444-4444-4444-444444444444",
+                tool_name=tool_name,
+                input={},
+                execution_mode="read_only",
+            ),
+            request=_request(
+                {
+                    "x-agent-run-id": "22222222-2222-2222-2222-222222222222",
+                    "x-request-id": "33333333-3333-3333-3333-333333333333",
+                    "x-tool-call-id": "44444444-4444-4444-4444-444444444444",
+                }
+            ),
+            db=db,
+        )
+    assert mode_exc.value.status_code == 403
+    db.add.assert_not_called()
+    db.flush.assert_not_called()

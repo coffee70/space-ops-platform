@@ -1,5 +1,6 @@
 import { traceHeaders } from "../trace.js";
 import type { RuntimeConfig, ToolExecutionClient, ToolExecutionResponse, TraceEnvelope } from "../types.js";
+import { z } from "zod";
 
 function serviceUrl(config: RuntimeConfig, serviceSlug: string, path: string): string {
   return `${config.controlPlaneUrl.replace(/\/$/, "")}/internal/runtime-services/${serviceSlug}/${path.replace(/^\//, "")}`;
@@ -43,6 +44,18 @@ export class HttpToolExecutionClient implements ToolExecutionClient {
       throw new Error(detail || "Tool execution failed");
     }
 
-    return (await response.json()) as ToolExecutionResponse;
+    const payload = await response.json();
+    const parsed = z
+      .object({
+        conversation_id: z.string().nullable(),
+        agent_run_id: z.string(),
+        request_id: z.string(),
+        tool_call_id: z.string(),
+        status: z.enum(["completed", "failed", "confirmation_required"]),
+        output: z.record(z.unknown()).default({}),
+        raw_events: z.array(z.record(z.unknown())).optional(),
+      })
+      .parse(payload);
+    return parsed as ToolExecutionResponse;
   }
 }

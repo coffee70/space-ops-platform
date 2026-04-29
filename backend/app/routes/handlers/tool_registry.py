@@ -9,6 +9,140 @@ from app.database import get_db
 from app.intelligence.tooling import API_INVENTORY
 from app.models.intelligence import ToolDefinition
 
+STRICT_EMPTY_INPUT = {'type': 'object', 'properties': {}, 'additionalProperties': False}
+
+TOOL_INPUT_SCHEMAS: dict[str, dict] = {
+    'list_available_tools': STRICT_EMPTY_INPUT,
+    'list_platform_services': STRICT_EMPTY_INPUT,
+    'get_platform_service': {
+        'type': 'object',
+        'properties': {'service_slug': {'type': 'string', 'minLength': 1, 'maxLength': 128}},
+        'required': ['service_slug'],
+        'additionalProperties': False,
+    },
+    'list_platform_applications': STRICT_EMPTY_INPUT,
+    'get_platform_application': {
+        'type': 'object',
+        'properties': {'application_id': {'type': 'string', 'minLength': 1, 'maxLength': 128}},
+        'required': ['application_id'],
+        'additionalProperties': False,
+    },
+    'list_runtime_templates': STRICT_EMPTY_INPUT,
+    'list_runtime_services': STRICT_EMPTY_INPUT,
+    'get_runtime_service': {
+        'type': 'object',
+        'properties': {'service_slug': {'type': 'string', 'minLength': 1, 'maxLength': 128}},
+        'required': ['service_slug'],
+        'additionalProperties': False,
+    },
+    'list_managed_repositories': STRICT_EMPTY_INPUT,
+    'get_telemetry_schema': STRICT_EMPTY_INPUT,
+    'query_recent_telemetry': {
+        'type': 'object',
+        'properties': {
+            'name': {'type': 'string', 'minLength': 1, 'maxLength': 160},
+            'limit': {'type': 'integer', 'minimum': 1, 'maximum': 500},
+        },
+        'required': ['name'],
+        'additionalProperties': False,
+    },
+    'list_sources_or_adapters': STRICT_EMPTY_INPUT,
+    'get_service_health': {
+        'type': 'object',
+        'properties': {'service_slug': {'type': 'string', 'minLength': 1, 'maxLength': 128}},
+        'required': ['service_slug'],
+        'additionalProperties': False,
+    },
+    'list_documents': {
+        'type': 'object',
+        'properties': {
+            'mission_id': {'type': 'string', 'maxLength': 128},
+            'vehicle_id': {'type': 'string', 'maxLength': 128},
+            'limit': {'type': 'integer', 'minimum': 1, 'maximum': 100},
+        },
+        'additionalProperties': False,
+    },
+    'get_document': {
+        'type': 'object',
+        'properties': {'document_id': {'type': 'string', 'format': 'uuid'}},
+        'required': ['document_id'],
+        'additionalProperties': False,
+    },
+    'search_documents': {
+        'type': 'object',
+        'properties': {
+            'query': {'type': 'string', 'minLength': 1, 'maxLength': 2000},
+            'mission_id': {'type': 'string', 'maxLength': 128},
+            'vehicle_id': {'type': 'string', 'maxLength': 128},
+            'subsystem_id': {'type': 'string', 'maxLength': 128},
+            'limit': {'type': 'integer', 'minimum': 1, 'maximum': 25},
+        },
+        'required': ['query'],
+        'additionalProperties': False,
+    },
+    'trigger_document_reingestion': {
+        'type': 'object',
+        'properties': {'document_id': {'type': 'string', 'format': 'uuid'}},
+        'required': ['document_id'],
+        'additionalProperties': False,
+    },
+    'search_codebase': {
+        'type': 'object',
+        'properties': {
+            'query': {'type': 'string', 'minLength': 1, 'maxLength': 2000},
+            'repository': {'type': 'string', 'maxLength': 256},
+            'branch': {'type': 'string', 'maxLength': 256},
+            'limit': {'type': 'integer', 'minimum': 1, 'maximum': 50},
+        },
+        'required': ['query'],
+        'additionalProperties': False,
+    },
+    'read_source_file': {
+        'type': 'object',
+        'properties': {
+            'repository': {'type': 'string', 'minLength': 1, 'maxLength': 256},
+            'path': {'type': 'string', 'minLength': 1, 'maxLength': 2000},
+            'branch': {'type': 'string', 'maxLength': 256},
+        },
+        'required': ['repository', 'path'],
+        'additionalProperties': False,
+    },
+    'get_related_code_context': {
+        'type': 'object',
+        'properties': {
+            'repository': {'type': 'string', 'minLength': 1, 'maxLength': 256},
+            'path': {'type': 'string', 'minLength': 1, 'maxLength': 2000},
+            'branch': {'type': 'string', 'maxLength': 256},
+            'line': {'type': 'integer', 'minimum': 1},
+            'limit': {'type': 'integer', 'minimum': 1, 'maximum': 25},
+        },
+        'required': ['repository', 'path'],
+        'additionalProperties': False,
+    },
+    'navigate_to_application': {
+        'type': 'object',
+        'properties': {
+            'application_id': {'type': 'string', 'minLength': 1, 'maxLength': 128},
+            'route_path': {'type': 'string', 'pattern': '^/apps/.*', 'maxLength': 2000},
+        },
+        'required': ['application_id'],
+        'additionalProperties': False,
+    },
+    'open_workspace_file': {
+        'type': 'object',
+        'properties': {'path': {'type': 'string', 'minLength': 1, 'maxLength': 2000}},
+        'required': ['path'],
+        'additionalProperties': False,
+    },
+}
+
+CONFIRMATION_REQUIRED_SCHEMA = {
+    'type': 'object',
+    'properties': {'confirmation_token': {'type': 'string', 'minLength': 1, 'maxLength': 128}},
+    'required': ['confirmation_token'],
+    'additionalProperties': False,
+}
+
 
 def _summary(tool: ToolDefinition) -> dict:
     return {
@@ -74,7 +208,7 @@ def seed_tools(db: Session = Depends(get_db)):
             'requires_confirmation': requires_confirmation,
             'backing_service': backing_service,
             'backing_api': backing_api,
-            'input_schema_json': {'type': 'object', 'properties': {}},
+            'input_schema_json': TOOL_INPUT_SCHEMAS.get(name, STRICT_EMPTY_INPUT),
             'output_schema_json': {'type': 'object'},
             'audit_policy_json': {'log_inputs': True, 'log_outputs': True},
             'redaction_policy_json': {'redact_keys': ['authorization', 'api_key', 'token', 'cookie']},
@@ -116,7 +250,19 @@ def seed_tools(db: Session = Depends(get_db)):
         upsert(name=tool[0],description=tool[1],category=tool[2],layer_target=tool[3],read_write=tool[4],execution_mode=tool[5],enabled=tool[6],requires_confirmation=tool[7],backing_service=tool[8],backing_api=tool[9])
 
     for name in ['create_working_branch','scaffold_service','scaffold_application','apply_patch','create_commit','submit_change','deploy_service_or_application','create_derived_telemetry_definition','create_monitoring_rule']:
-        upsert(name=name,description=f'{name.replace("_", " ").capitalize()} (future write tool).',category='write_future',layer_target='layer1',read_write='write',execution_mode='execute',enabled=False,requires_confirmation=True)
+        upsert(
+            name=name,
+            description=f'{name.replace("_", " ").capitalize()} (future write tool).',
+            category='write_future',
+            layer_target='layer1',
+            read_write='write',
+            execution_mode='execute',
+            enabled=False,
+            requires_confirmation=True,
+        )
+        tool = db.query(ToolDefinition).filter(ToolDefinition.name == name).one_or_none()
+        if tool:
+            tool.input_schema_json = CONFIRMATION_REQUIRED_SCHEMA
 
     return {'seeded': seeded, 'total': db.query(ToolDefinition).count(), 'inventory_sections': list(API_INVENTORY.keys())}
 

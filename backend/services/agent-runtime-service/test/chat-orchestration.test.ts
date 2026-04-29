@@ -160,6 +160,7 @@ test("chat orchestration emits backend-owned run, context, tool, and completion 
     },
   ]);
   assert.equal(toolExecution.calls.length, 1);
+  assert.equal(toolExecution.calls[0]?.tool_name, "get_runtime_service");
 });
 
 test("invalid downstream raw events become canonical error events", async () => {
