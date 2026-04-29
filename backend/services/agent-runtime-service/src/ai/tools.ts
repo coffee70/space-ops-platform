@@ -67,7 +67,7 @@ export function createToolSet(input: {
   toolExecutionClient: ToolExecutionClient;
   trace: TraceEnvelope;
   executionMode: ExecutionMode;
-  emitToolStarted: (toolName: string, toolCallId: string, args: Record<string, unknown>) => Promise<void>;
+  emitToolStarted: (definition: ToolDefinition, toolCallId: string, args: Record<string, unknown>) => Promise<void>;
   emitRawToolEvents: (events: RawEventFact[] | undefined) => Promise<void>;
 }): ToolSet {
   const toolEntries = input.toolDefinitions
@@ -81,7 +81,7 @@ export function createToolSet(input: {
           const normalizedArgs = typeof args === "object" && args !== null ? (args as Record<string, unknown>) : {};
           const toolCallId = options.toolCallId ?? crypto.randomUUID();
 
-          await input.emitToolStarted(definition.name, toolCallId, normalizedArgs);
+          await input.emitToolStarted(definition, toolCallId, normalizedArgs);
           const response = await input.toolExecutionClient.execute({
             trace: withToolTrace(input.trace, toolCallId),
             tool_name: definition.name,

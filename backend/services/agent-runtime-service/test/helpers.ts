@@ -115,6 +115,21 @@ export class FakeContextClient implements ContextRetrievalClient {
   }
 }
 
+export function contextResolvedEvent(contextPacketId = "ctx-1"): RawEventFact {
+  return {
+    event_type: "context.resolved",
+    emitted_by: "context-retrieval-service",
+    payload: {
+      context_packet_id: contextPacketId,
+      document_chunk_count: 0,
+      code_chunk_count: 0,
+      platform_metadata_bytes: 0,
+      tool_definition_count: 0,
+      truncated: false,
+    },
+  };
+}
+
 export class FakeToolRegistryClient implements ToolRegistryClient {
   traces: TraceEnvelope[] = [];
 

@@ -75,24 +75,13 @@ export interface RawEventFact {
 export interface PersistedEvent {
   id: string;
   event_type: string;
-  conversation_id: string;
+  conversation_id: string | null;
   agent_run_id: string;
   request_id: string;
-  tool_call_id?: string | null;
+  tool_call_id: string | null;
   sequence: number;
   emitted_by: string;
   payload: Record<string, unknown>;
-  created_at: string;
-}
-
-export interface MessageDeltaChunk {
-  kind: "message.delta";
-  conversation_id: string;
-  agent_run_id: string;
-  request_id: string;
-  message_id: string | null;
-  sequence: number;
-  delta: string;
   created_at: string;
 }
 
@@ -101,7 +90,7 @@ export interface EventChunk {
   event: PersistedEvent;
 }
 
-export type StreamChunk = EventChunk | MessageDeltaChunk;
+export type StreamChunk = EventChunk;
 
 export interface ContextPacketResponse {
   conversation_id: string | null;

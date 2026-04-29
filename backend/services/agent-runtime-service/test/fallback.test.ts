@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { createApp } from "../src/server.js";
-import { FakeContextClient, FakeToolExecutionClient, FakeToolRegistryClient, MemoryConversationStore, parseNdjson } from "./helpers.js";
+import { contextResolvedEvent, FakeContextClient, FakeToolExecutionClient, FakeToolRegistryClient, MemoryConversationStore, parseNdjson } from "./helpers.js";
 
 test("fallback path still emits runtime-owned completion lifecycle", async () => {
   const store = new MemoryConversationStore();
@@ -23,13 +23,7 @@ test("fallback path still emits runtime-owned completion lifecycle", async () =>
       requestTimeoutMs: 1000,
     },
     store,
-    contextClient: new FakeContextClient([
-      {
-        event_type: "context.resolved",
-        emitted_by: "context-retrieval-service",
-        payload: { context_packet_id: "ctx-1" },
-      },
-    ]),
+    contextClient: new FakeContextClient([contextResolvedEvent()]),
     toolRegistryClient: new FakeToolRegistryClient([]),
     toolExecutionClient: new FakeToolExecutionClient({
       conversation_id: conversation.id,
@@ -59,11 +53,13 @@ test("fallback path still emits runtime-owned completion lifecycle", async () =>
 
   assert.equal(response.status, 200);
   const chunks = parseNdjson(await response.text());
-  const delta = chunks.find((chunk) => chunk.kind === "message.delta") as { delta: string };
-  assert.match(delta.delta, /Model API key is not configured/);
+  const delta = chunks.find((chunk) => chunk.kind === "event" && (chunk as { event: { event_type: string } }).event.event_type === "message.delta") as {
+    event: { payload: { text_delta: string } };
+  };
+  assert.match(delta.event.payload.text_delta, /Model API key is not configured/);
 
   const eventTypes = chunks
     .filter((chunk) => chunk.kind === "event")
     .map((chunk) => (chunk as { event: { event_type: string } }).event.event_type);
-  assert.deepEqual(eventTypes, ["run.started", "context.requested", "context.resolved", "message.completed", "run.completed"]);
+  assert.deepEqual(eventTypes, ["run.started", "context.requested", "context.resolved", "message.delta", "message.completed", "run.completed"]);
 });

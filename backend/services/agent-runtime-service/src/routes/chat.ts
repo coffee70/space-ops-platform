@@ -5,6 +5,7 @@ import { buildSystemPrompt } from "../ai/prompts.js";
 import { createToolSet } from "../ai/tools.js";
 import { AgentEventStream } from "../events/stream.js";
 import { RunSequencer } from "../events/sequencer.js";
+import { redactAndTruncate } from "../events/schema.js";
 import { runFallback } from "../fallback.js";
 import { createTrace } from "../trace.js";
 import type { ChatInputMessage, ContextPacketResponse, ExecutionMode, RawEventFact, RunDependencies } from "../types.js";
@@ -29,6 +30,13 @@ const chatRequestSchema = z.object({
     )
     .min(1),
 });
+
+const CONTEXT_LIMITS = {
+  document_chunks: 6,
+  code_chunks: 6,
+  platform_metadata_bytes: 6000,
+  tool_definitions: 20,
+};
 
 function buildRetrievalPlan(message: string): {
   documents: boolean;
@@ -71,6 +79,10 @@ function emptyContext(trace: { conversation_id: string; agent_run_id: string; re
     },
     raw_events: [event],
   };
+}
+
+function contentPreview(content: string): string {
+  return content.length > 300 ? `${content.slice(0, 300)}...<truncated>` : content;
 }
 
 export function registerChatRoutes(app: Hono, dependencies: RunDependencies): void {
@@ -128,7 +140,7 @@ async function orchestrateChat(input: {
   const { dependencies, stream } = input;
 
   try {
-    await dependencies.store.appendMessage({
+    const userMessage = await dependencies.store.appendMessage({
       conversationId: input.trace.conversation_id,
       role: "user",
       content: input.latestUserMessage,
@@ -140,11 +152,14 @@ async function orchestrateChat(input: {
 
     await stream.emitEvent("run.started", {
       execution_mode: input.executionMode,
+      message_id: userMessage.id,
+      user_message_preview: contentPreview(input.latestUserMessage),
     });
 
     const retrievalPlan = buildRetrievalPlan(input.latestUserMessage);
     await stream.emitEvent("context.requested", {
-      retrieval_plan: retrievalPlan.summary,
+      retrieval_plan: retrievalPlan,
+      limits: CONTEXT_LIMITS,
     });
 
     const context = await resolveContext({
@@ -159,17 +174,21 @@ async function orchestrateChat(input: {
     await stream.emitRawEvents(context.raw_events);
 
     const toolDefinitions = await dependencies.toolRegistryClient.listTools(input.trace);
+    let toolCallCount = 0;
     const tools = createToolSet({
       toolDefinitions,
       toolExecutionClient: dependencies.toolExecutionClient,
       trace: input.trace,
       executionMode: input.executionMode,
-      emitToolStarted: async (toolName, toolCallId, args) => {
+      emitToolStarted: async (definition, toolCallId, args) => {
+        toolCallCount += 1;
         await stream.emitEvent(
           "tool.started",
           {
-            tool_name: toolName,
-            input_preview: args,
+            tool_name: definition.name,
+            category: definition.category,
+            read_write_classification: definition.read_write_classification,
+            input_preview: redactAndTruncate(args),
           },
           { toolCallId, emittedBy: "agent-runtime-service" },
         );
@@ -193,6 +212,7 @@ async function orchestrateChat(input: {
         stream,
         userMessage: input.latestUserMessage,
         executionMode: input.executionMode,
+        contextPacketId: context.context_packet_id,
         persistAssistantMessage: async (content) =>
           dependencies.store.appendMessage({
             conversationId: input.trace.conversation_id,
@@ -233,14 +253,16 @@ async function orchestrateChat(input: {
         agent_run_id: input.trace.agent_run_id,
         request_id: input.trace.request_id,
       },
-    });
-    await stream.emitEvent("message.completed", {
-      message_id: assistantMessage.id,
-      role: "assistant",
-    });
-    await stream.emitEvent("run.completed", {
-      completion_mode: "model",
-    });
+      });
+      await stream.emitEvent("message.completed", {
+        message_id: assistantMessage.id,
+        content_preview: contentPreview(finalAssistantText),
+      });
+      await stream.emitEvent("run.completed", {
+        assistant_message_id: assistantMessage.id,
+        tool_call_count: toolCallCount,
+        context_packet_id: context.context_packet_id,
+      });
     await stream.close();
   } catch (error) {
     await stream.fail(error);

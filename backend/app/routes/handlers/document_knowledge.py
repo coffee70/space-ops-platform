@@ -88,6 +88,17 @@ async def create_document(
 
     try:
         provider = get_embedding_provider()
+        if conversation_id and agent_run_id and request_id:
+            emit_event(
+                db,
+                event_type="document.ingestion_started",
+                payload={"document_id": str(doc.id), "chunking_strategy": "fixed_1200_overlap_120", "embedding_model": DEFAULT_EMBEDDING_MODEL},
+                conversation_id=conversation_id,
+                agent_run_id=agent_run_id,
+                request_id=request_id,
+                sequence=2,
+                emitted_by="document-knowledge-service",
+            )
         chunks = chunk_text(raw, max_chars=1200, overlap=120)
         for idx, chunk in enumerate(chunks):
             db.add(
@@ -119,7 +130,7 @@ async def create_document(
                 conversation_id=conversation_id,
                 agent_run_id=agent_run_id,
                 request_id=request_id,
-                sequence=2,
+                sequence=3,
                 emitted_by="document-knowledge-service",
             )
     except Exception as exc:
@@ -134,7 +145,7 @@ async def create_document(
                 conversation_id=conversation_id,
                 agent_run_id=agent_run_id,
                 request_id=request_id,
-                sequence=2,
+                sequence=3,
                 emitted_by="document-knowledge-service",
             )
         raise

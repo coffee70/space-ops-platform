@@ -126,7 +126,7 @@ async def execute_tool(body: ToolExecutionRequest, request: Request, db: Session
                 tool_call_id=tool_call_id,
             )
         ]
-        if body.tool_name in {'navigate_to_application', 'open_workspace_file'}:
+        if body.tool_name == 'navigate_to_application':
             raw_events.append(
                 raw_event(
                     event_type='navigation.requested',

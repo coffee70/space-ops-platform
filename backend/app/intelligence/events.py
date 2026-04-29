@@ -11,28 +11,41 @@ from app.models.intelligence import AgentEvent
 from app.intelligence.redaction import redact
 
 
-ALLOWED_EVENT_TYPES = {
-    "run.started",
-    "run.completed",
-    "run.failed",
-    "context.requested",
-    "context.resolved",
-    "context.failed",
-    "tool.started",
-    "tool.completed",
-    "tool.failed",
-    "document.uploaded",
-    "document.ingestion_started",
-    "document.ingestion_completed",
-    "document.ingestion_failed",
-    "code.index_started",
-    "code.index_completed",
-    "code.index_failed",
-    "navigation.requested",
-    "message.delta",
-    "message.completed",
-    "error",
+REQUIRED_PAYLOAD_FIELDS = {
+    "run.started": {"execution_mode", "message_id", "user_message_preview"},
+    "run.completed": {"assistant_message_id", "tool_call_count"},
+    "run.failed": {"error_code", "message"},
+    "context.requested": {"retrieval_plan", "limits"},
+    "context.resolved": {"context_packet_id", "document_chunk_count", "code_chunk_count", "platform_metadata_bytes", "tool_definition_count", "truncated"},
+    "context.failed": {"error_code", "message"},
+    "tool.started": {"tool_name", "category", "read_write_classification", "input_preview"},
+    "tool.completed": {"tool_name", "status", "result_preview", "duration_ms"},
+    "tool.failed": {"tool_name", "error_code", "message", "duration_ms"},
+    "document.uploaded": {"document_id", "title", "document_type", "content_hash"},
+    "document.ingestion_started": {"document_id", "chunking_strategy", "embedding_model"},
+    "document.ingestion_completed": {"document_id", "chunk_count", "embedding_model", "duration_ms"},
+    "document.ingestion_failed": {"document_id", "error_code", "message"},
+    "code.index_started": {"repository", "branch", "commit_sha"},
+    "code.index_completed": {"repository", "branch", "commit_sha", "file_count", "chunk_count", "duration_ms"},
+    "code.index_failed": {"repository", "branch", "error_code", "message"},
+    "navigation.requested": {"action", "application_id", "route_path"},
+    "message.delta": {"text_delta"},
+    "message.completed": {"message_id", "content_preview"},
+    "error": {"error_code", "message", "source"},
 }
+
+
+ALLOWED_EVENT_TYPES = set(REQUIRED_PAYLOAD_FIELDS)
+
+
+def validate_event(event_type: str, payload: dict[str, Any], tool_call_id: str | None = None) -> None:
+    if event_type not in ALLOWED_EVENT_TYPES:
+        raise ValueError(f"unsupported event type: {event_type}")
+    missing = sorted(REQUIRED_PAYLOAD_FIELDS[event_type] - payload.keys())
+    if missing:
+        raise ValueError(f"event {event_type} missing required payload field(s): {', '.join(missing)}")
+    if event_type.startswith("tool.") and not tool_call_id:
+        raise ValueError(f"event {event_type} requires tool_call_id")
 
 
 def raw_event(
@@ -42,8 +55,7 @@ def raw_event(
     emitted_by: str,
     tool_call_id: str | None = None,
 ) -> dict[str, Any]:
-    if event_type not in ALLOWED_EVENT_TYPES:
-        raise ValueError(f"unsupported event type: {event_type}")
+    validate_event(event_type, payload, tool_call_id)
     return {
         "event_type": event_type,
         "payload": redact(payload),
@@ -64,8 +76,7 @@ def emit_event(
     emitted_by: str,
     tool_call_id: str | None = None,
 ) -> AgentEvent:
-    if event_type not in ALLOWED_EVENT_TYPES:
-        raise ValueError(f"unsupported event type: {event_type}")
+    validate_event(event_type, payload, tool_call_id)
     event = AgentEvent(
         conversation_id=conversation_id,
         agent_run_id=agent_run_id,

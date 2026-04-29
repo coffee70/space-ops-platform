@@ -1,4 +1,5 @@
 import { RunSequencer } from "./sequencer.js";
+import { redactAndTruncate, validateAgentEventPayload } from "./schema.js";
 import type { ConversationStore, PersistedEvent, RawEventFact, StreamChunk, TraceEnvelope } from "../types.js";
 
 const encoder = new TextEncoder();
@@ -38,16 +39,19 @@ export class AgentEventStream {
   }
 
   async emitEvent(eventType: string, payload: Record<string, unknown>, input?: { emittedBy?: string; toolCallId?: string | null }): Promise<PersistedEvent> {
+    const toolCallId = input?.toolCallId ?? null;
+    validateAgentEventPayload(eventType, payload, toolCallId);
+    const safePayload = redactAndTruncate(payload) as Record<string, unknown>;
     const sequence = this.#sequencer.next();
     const persistedEvent = await this.#store.appendEvent({
       conversation_id: this.#trace.conversation_id,
       agent_run_id: this.#trace.agent_run_id,
       request_id: this.#trace.request_id,
-      tool_call_id: input?.toolCallId ?? null,
+      tool_call_id: toolCallId,
       sequence,
       emitted_by: input?.emittedBy ?? "agent-runtime-service",
       event_type: eventType,
-      payload,
+      payload: safePayload,
       created_at: this.#now().toISOString(),
     });
 
@@ -61,23 +65,24 @@ export class AgentEventStream {
 
   async emitRawEvents(events: RawEventFact[] | undefined): Promise<void> {
     for (const event of events ?? []) {
-      await this.emitEvent(event.event_type, event.payload, {
-        emittedBy: event.emitted_by,
-        toolCallId: event.tool_call_id ?? null,
-      });
+      try {
+        await this.emitEvent(event.event_type, event.payload, {
+          emittedBy: event.emitted_by,
+          toolCallId: event.tool_call_id ?? null,
+        });
+      } catch (error) {
+        await this.emitEvent("error", {
+          error_code: "invalid_downstream_event",
+          message: error instanceof Error ? error.message : "Invalid downstream event",
+          source: event.emitted_by || "downstream-service",
+        });
+      }
     }
   }
 
-  async emitMessageDelta(delta: string, messageId: string | null = null): Promise<void> {
-    await this.#write({
-      kind: "message.delta",
-      conversation_id: this.#trace.conversation_id,
-      agent_run_id: this.#trace.agent_run_id,
-      request_id: this.#trace.request_id,
-      message_id: messageId,
-      sequence: this.#sequencer.next(),
-      delta,
-      created_at: this.#now().toISOString(),
+  async emitMessageDelta(delta: string): Promise<PersistedEvent> {
+    return this.emitEvent("message.delta", {
+      text_delta: delta,
     });
   }
 

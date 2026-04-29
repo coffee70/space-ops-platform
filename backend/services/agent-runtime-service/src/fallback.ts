@@ -5,6 +5,7 @@ export async function runFallback(input: {
   stream: AgentEventStream;
   userMessage: string;
   executionMode: string;
+  contextPacketId?: string | null;
   persistAssistantMessage: (content: string) => Promise<ConversationMessageRecord>;
 }): Promise<ConversationMessageRecord> {
   const text = [
@@ -19,10 +20,12 @@ export async function runFallback(input: {
   const assistantMessage = await input.persistAssistantMessage(text);
   await input.stream.emitEvent("message.completed", {
     message_id: assistantMessage.id,
-    role: "assistant",
+    content_preview: text.slice(0, 300),
   });
   await input.stream.emitEvent("run.completed", {
-    completion_mode: "fallback",
+    assistant_message_id: assistantMessage.id,
+    tool_call_count: 0,
+    context_packet_id: input.contextPacketId ?? null,
   });
   return assistantMessage;
 }

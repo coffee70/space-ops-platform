@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { createApp } from "../src/server.js";
-import { FakeContextClient, FakeToolExecutionClient, FakeToolRegistryClient, MemoryConversationStore } from "./helpers.js";
+import { contextResolvedEvent, FakeContextClient, FakeToolExecutionClient, FakeToolRegistryClient, MemoryConversationStore } from "./helpers.js";
 
 test("chat stream delivers message deltas before completion across multiple chunks", async () => {
   const store = new MemoryConversationStore();
@@ -23,13 +23,7 @@ test("chat stream delivers message deltas before completion across multiple chun
       requestTimeoutMs: 1000,
     },
     store,
-    contextClient: new FakeContextClient([
-      {
-        event_type: "context.resolved",
-        emitted_by: "context-retrieval-service",
-        payload: { context_packet_id: "ctx-1" },
-      },
-    ]),
+    contextClient: new FakeContextClient([contextResolvedEvent()]),
     toolRegistryClient: new FakeToolRegistryClient([]),
     toolExecutionClient: new FakeToolExecutionClient({
       conversation_id: conversation.id,
@@ -85,10 +79,9 @@ test("chat stream delivers message deltas before completion across multiple chun
       const line = buffer.slice(0, newlineIndex).trim();
       buffer = buffer.slice(newlineIndex + 1);
       if (line.length > 0) {
-        const payload = JSON.parse(line) as
-          | { kind: "message.delta"; delta: string }
-          | { kind: "event"; event: { event_type: string } };
-        if (payload.kind === "message.delta") {
+        const payload = JSON.parse(line) as { kind: "event"; event: { event_type: string; payload: Record<string, unknown> } };
+        assert.equal(payload.kind, "event");
+        if (payload.event.event_type === "message.delta") {
           deltaCount += 1;
           eventOrder.push("message.delta");
         } else {
