@@ -97,7 +97,7 @@ test("chat orchestration emits backend-owned run, context, tool, and completion 
     })(),
   });
 
-  const response = await app.request("/agent/chat", {
+  const response = await app.request("/chat", {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({
@@ -206,7 +206,7 @@ test("invalid downstream raw events become canonical error events", async () => 
     },
   });
 
-  const response = await app.request("/agent/chat", {
+  const response = await app.request("/chat", {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({

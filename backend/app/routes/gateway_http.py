@@ -64,26 +64,18 @@ async def proxy_feed_status(request: Request):
 
 
 def _resolve_intelligence_service(path: str) -> tuple[str, str]:
-    if path.startswith("agent/"):
-        return "agent-runtime-service", path[len("agent/") :]
-    if path == "agent":
-        return "agent-runtime-service", ""
-    if path.startswith("context/"):
-        return "context-retrieval-service", path[len("context/") :]
-    if path == "context":
-        return "context-retrieval-service", ""
-    if path.startswith("documents/") or path == "documents":
-        suffix = path[len("documents/") :] if path.startswith("documents/") else ""
-        return "document-knowledge-service", suffix
-    if path.startswith("code/") or path == "code":
-        suffix = path[len("code/") :] if path.startswith("code/") else ""
-        return "code-intelligence-service", suffix
-    if path.startswith("tools/execute"):
-        suffix = path[len("tools/execute") :].lstrip("/")
-        return "tool-execution-service", suffix
-    if path.startswith("tools/") or path == "tools":
-        suffix = path[len("tools/") :] if path.startswith("tools/") else ""
-        return "tool-registry-service", suffix
+    if path == "agent" or path.startswith("agent/"):
+        return "agent-runtime-service", path[len("agent/") :] if path.startswith("agent/") else ""
+    if path == "context" or path.startswith("context/"):
+        return "context-retrieval-service", path[len("context/") :] if path.startswith("context/") else ""
+    if path == "documents" or path.startswith("documents/"):
+        return "document-knowledge-service", path[len("documents/") :] if path.startswith("documents/") else ""
+    if path == "code" or path.startswith("code/"):
+        return "code-intelligence-service", path[len("code/") :] if path.startswith("code/") else ""
+    if path == "tools/execute" or path.startswith("tools/execute/"):
+        return "tool-execution-service", path[len("tools/") :]
+    if path == "tools/definitions" or path.startswith("tools/definitions/"):
+        return "tool-registry-service", path[len("tools/") :]
     raise HTTPException(status_code=404, detail="Unknown intelligence route")
 
 

@@ -34,7 +34,7 @@ async def _cp_get(path: str, params: dict | None = None) -> dict:
 
 async def _execute_mapped_tool(name: str, tool_input: dict):
     if name == 'list_available_tools':
-        return {'message': 'Use tool registry /tools endpoint for full list.'}
+        return {'message': 'Use tool registry /intelligence/tools/definitions endpoint for full list.'}
     if name == 'list_platform_services':
         return await _cp_get('registry/services')
     if name == 'get_platform_service':

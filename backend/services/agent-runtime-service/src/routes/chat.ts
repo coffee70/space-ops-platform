@@ -85,7 +85,7 @@ function contentPreview(content: string): string {
 }
 
 export function registerChatRoutes(app: Hono, dependencies: RunDependencies): void {
-  app.post("/agent/chat", async (c) => {
+  app.post("/chat", async (c) => {
     const payload = chatRequestSchema.parse(await c.req.json());
     const conversation = await dependencies.store.getConversation(payload.conversation_id);
     if (!conversation) {

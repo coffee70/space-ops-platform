@@ -166,7 +166,7 @@ def test_proxy_request_streams_upstream_body(monkeypatch) -> None:
 
     @app.get("/proxy")
     async def run_proxy(request: Request):
-        return await service_proxy.proxy_request("agent-runtime-service", request, path="agent/chat")
+        return await service_proxy.proxy_request("agent-runtime-service", request, path="chat")
 
     response = TestClient(app).get("/proxy")
 
@@ -187,27 +187,39 @@ def test_gateway_routes_proxy_expected_service_paths(monkeypatch) -> None:
     app.include_router(gateway_http.router)
     client = TestClient(app)
 
-    telemetry = client.get("/telemetry/sources")
-    vehicle_configs = client.get("/vehicle-configs")
-    feed_status = client.get("/ops/feed-status")
-    intelligence_agent = client.get("/intelligence/agent/health")
-    intelligence_docs = client.get("/intelligence/documents/documents")
-    intelligence_tools = client.get("/intelligence/tools/tools")
-    intelligence_execute = client.post("/intelligence/tools/execute")
+    chat_body = {
+        "conversation_id": "00000000-0000-0000-0000-000000000001",
+        "messages": [{"role": "user", "content": "hi"}],
+    }
 
-    assert telemetry.status_code == 200
-    assert vehicle_configs.status_code == 200
-    assert feed_status.status_code == 200
-    assert intelligence_agent.status_code == 200
-    assert intelligence_docs.status_code == 200
-    assert intelligence_tools.status_code == 200
-    assert intelligence_execute.status_code == 200
+    assert client.get("/telemetry/sources").status_code == 200
+    assert client.get("/vehicle-configs").status_code == 200
+    assert client.get("/ops/feed-status").status_code == 200
+    assert client.post("/intelligence/agent/chat", json=chat_body).status_code == 200
+    assert client.get("/intelligence/agent/conversations").status_code == 200
+    assert client.get("/intelligence/agent/health").status_code == 200
+    assert client.post("/intelligence/context/packet", json={"agent_run_id": "a", "request_id": "r", "message": "m"}).status_code == 200
+    assert client.get("/intelligence/documents").status_code == 200
+    assert client.post("/intelligence/documents/search", json={"query": "q"}).status_code == 200
+    assert client.post("/intelligence/code/search", json={"query": "q", "branch": "main"}).status_code == 200
+    assert client.get("/intelligence/tools/definitions").status_code == 200
+    assert client.post("/intelligence/tools/definitions/seed").status_code == 200
+    assert client.get("/intelligence/tools/definitions/get_runtime_service").status_code == 200
+    assert client.post("/intelligence/tools/execute", json={}).status_code == 200
+
     assert calls == [
         ("source-registry-service", "telemetry/sources"),
         ("vehicle-config-service", "vehicle-configs/"),
         ("telemetry-ingest-service", "telemetry/feed-health"),
+        ("agent-runtime-service", "chat"),
+        ("agent-runtime-service", "conversations"),
         ("agent-runtime-service", "health"),
-        ("document-knowledge-service", "documents"),
-        ("tool-registry-service", "tools"),
-        ("tool-execution-service", ""),
+        ("context-retrieval-service", "packet"),
+        ("document-knowledge-service", ""),
+        ("document-knowledge-service", "search"),
+        ("code-intelligence-service", "search"),
+        ("tool-registry-service", "definitions"),
+        ("tool-registry-service", "definitions/seed"),
+        ("tool-registry-service", "definitions/get_runtime_service"),
+        ("tool-execution-service", "execute"),
     ]

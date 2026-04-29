@@ -56,7 +56,7 @@ test("tool execution client posts through tool-execution-service only", async ()
   }
 
   assert.equal(calls.length, 1);
-  assert.equal(calls[0]?.url, "http://localhost:8100/internal/runtime-services/tool-execution-service/tools/execute");
+  assert.equal(calls[0]?.url, "http://localhost:8100/internal/runtime-services/tool-execution-service/execute");
   const requestBody = JSON.parse(String(calls[0]?.init?.body ?? "{}")) as Record<string, unknown>;
   assert.deepEqual(requestBody.input, { service_slug: "agent-runtime-service" });
   assert.equal(requestBody.confirmation_token, null);

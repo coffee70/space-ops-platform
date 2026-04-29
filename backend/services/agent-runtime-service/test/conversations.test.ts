@@ -36,7 +36,7 @@ test("conversation endpoints create, list, and fetch messages", async () => {
   const store = new MemoryConversationStore();
   const app = createTestApp(store);
 
-  const createResponse = await app.request("/agent/conversations", {
+  const createResponse = await app.request("/conversations", {
     method: "POST",
     body: JSON.stringify({
       title: "AI Engineer Session",
@@ -55,13 +55,13 @@ test("conversation endpoints create, list, and fetch messages", async () => {
     content: "Inspect runtime service ownership.",
   });
 
-  const listResponse = await app.request("/agent/conversations");
+  const listResponse = await app.request("/conversations");
   assert.equal(listResponse.status, 200);
   const listed = (await listResponse.json()) as Array<{ id: string }>;
   assert.equal(listed.length, 1);
   assert.equal(listed[0].id, conversation.id);
 
-  const getResponse = await app.request(`/agent/conversations/${conversation.id}`);
+  const getResponse = await app.request(`/conversations/${conversation.id}`);
   assert.equal(getResponse.status, 200);
   const detail = (await getResponse.json()) as { messages: Array<{ content: string }> };
   assert.equal(detail.messages.length, 1);

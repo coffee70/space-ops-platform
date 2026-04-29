@@ -20,7 +20,7 @@ export class HttpContextRetrievalClient implements ContextRetrievalClient {
     execution_mode: string;
     retrieval_plan: RetrievalPlan;
   }): Promise<ContextPacketResponse> {
-    const response = await fetch(serviceUrl(this.#config, "context-retrieval-service", "context/packet"), {
+    const response = await fetch(serviceUrl(this.#config, "context-retrieval-service", "packet"), {
       method: "POST",
       headers: {
         "content-type": "application/json",

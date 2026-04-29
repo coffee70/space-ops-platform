@@ -21,7 +21,7 @@ export class HttpToolExecutionClient implements ToolExecutionClient {
     message_id?: string | null;
     confirmation_token?: string | null;
   }): Promise<ToolExecutionResponse> {
-    const response = await fetch(serviceUrl(this.#config, "tool-execution-service", "tools/execute"), {
+    const response = await fetch(serviceUrl(this.#config, "tool-execution-service", "execute"), {
       method: "POST",
       headers: {
         "content-type": "application/json",

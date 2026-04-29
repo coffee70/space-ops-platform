@@ -5,7 +5,8 @@ from fastapi import APIRouter
 from app.routes.handlers import tool_registry as handlers
 
 router = APIRouter()
-router.add_api_route('/tools', handlers.list_tools, methods=['GET'])
-router.add_api_route('/tools/{tool_name}', handlers.get_tool, methods=['GET'])
-router.add_api_route('/tools/seed', handlers.seed_tools, methods=['POST'])
-router.add_api_route('/tools/{tool_name}', handlers.patch_tool, methods=['PATCH'])
+# /definitions/seed before /definitions/{tool_name} (see route ordering guard).
+router.add_api_route("/definitions", handlers.list_tools, methods=["GET"])
+router.add_api_route("/definitions/seed", handlers.seed_tools, methods=["POST"])
+router.add_api_route("/definitions/{tool_name}", handlers.get_tool, methods=["GET"])
+router.add_api_route("/definitions/{tool_name}", handlers.patch_tool, methods=["PATCH"])

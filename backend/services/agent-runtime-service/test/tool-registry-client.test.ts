@@ -42,7 +42,7 @@ test("tool registry client forwards trace headers", async () => {
   assert.equal(fetchCalls.length, 1);
   assert.equal(
     fetchCalls[0].url,
-    "http://localhost:8100/internal/runtime-services/tool-registry-service/tools?include_full_metadata=true&enabled=true",
+    "http://localhost:8100/internal/runtime-services/tool-registry-service/definitions?include_full_metadata=true&enabled=true",
   );
   const headers = new Headers(fetchCalls[0].init?.headers);
   assert.equal(headers.get("content-type"), "application/json");

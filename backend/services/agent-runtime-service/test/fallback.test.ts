@@ -41,7 +41,7 @@ test("fallback path still emits runtime-owned completion lifecycle", async () =>
     },
   });
 
-  const response = await app.request("/agent/chat", {
+  const response = await app.request("/chat", {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({

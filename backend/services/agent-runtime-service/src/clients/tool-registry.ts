@@ -13,7 +13,7 @@ export class HttpToolRegistryClient implements ToolRegistryClient {
   }
 
   async listTools(trace: TraceEnvelope): Promise<ToolDefinition[]> {
-    const response = await fetch(serviceUrl(this.#config, "tool-registry-service", "tools?include_full_metadata=true&enabled=true"), {
+    const response = await fetch(serviceUrl(this.#config, "tool-registry-service", "definitions?include_full_metadata=true&enabled=true"), {
       headers: {
         "Content-Type": "application/json",
         ...traceHeaders(trace),

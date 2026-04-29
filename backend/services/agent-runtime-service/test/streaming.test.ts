@@ -45,7 +45,7 @@ test("chat stream delivers message deltas before completion across multiple chun
     },
   });
 
-  const response = await app.request("/agent/chat", {
+  const response = await app.request("/chat", {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({

@@ -11,18 +11,18 @@ const createConversationSchema = z.object({
 });
 
 export function registerConversationRoutes(app: Hono, dependencies: RunDependencies): void {
-  app.get("/agent/conversations", async (c) => {
+  app.get("/conversations", async (c) => {
     const conversations = await dependencies.store.listConversations();
     return c.json(conversations);
   });
 
-  app.post("/agent/conversations", async (c) => {
+  app.post("/conversations", async (c) => {
     const payload = createConversationSchema.parse(await c.req.json());
     const conversation = await dependencies.store.createConversation(payload);
     return c.json(conversation);
   });
 
-  app.get("/agent/conversations/:conversationId", async (c) => {
+  app.get("/conversations/:conversationId", async (c) => {
     const conversation = await dependencies.store.getConversation(c.req.param("conversationId"));
     if (!conversation) {
       return c.json({ detail: "conversation not found" }, 404);

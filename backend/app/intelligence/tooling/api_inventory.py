@@ -34,12 +34,12 @@ API_INVENTORY = {
             "GET /telemetry/sources": "read_only_tool:list_sources_or_adapters",
         },
         "intelligence": {
-            "GET /documents": "read_only_tool:list_documents",
-            "GET /documents/{document_id}": "read_only_tool:get_document",
-            "POST /documents/search": "read_only_tool:search_documents",
-            "POST /documents/{document_id}/reingest": "write_tool:trigger_document_reingestion",
-            "POST /code/search": "read_only_tool:search_codebase",
-            "POST /code/related-context": "read_only_tool:get_related_code_context",
+            "GET /intelligence/documents": "read_only_tool:list_documents",
+            "GET /intelligence/documents/{document_id}": "read_only_tool:get_document",
+            "POST /intelligence/documents/search": "read_only_tool:search_documents",
+            "POST /intelligence/documents/{document_id}/reingest": "write_tool:trigger_document_reingestion",
+            "POST /intelligence/code/search": "read_only_tool:search_codebase",
+            "POST /intelligence/code/related-context": "read_only_tool:get_related_code_context",
         },
     },
     "layer3": {
