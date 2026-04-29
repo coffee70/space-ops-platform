@@ -17,6 +17,11 @@ GET_TELEMETRY_SCHEMA_TOOL_BACKING: tuple[str, str] = (
     'GET /telemetry/inventory?source_id={source_id}',
 )
 
+QUERY_RECENT_TELEMETRY_TOOL_BACKING: tuple[str, str] = (
+    'telemetry-query-service',
+    'GET /telemetry/{name}/recent?source_id={source_id}&limit={limit}',
+)
+
 SUPPORTED_TOOL_NAMES: frozenset[str] = frozenset(
     {
         'list_available_tools',
@@ -77,10 +82,11 @@ TOOL_INPUT_SCHEMAS: dict[str, dict] = {
     'query_recent_telemetry': {
         'type': 'object',
         'properties': {
+            'source_id': {'type': 'string', 'minLength': 1, 'maxLength': 256},
             'name': {'type': 'string', 'minLength': 1, 'maxLength': 160},
             'limit': {'type': 'integer', 'minimum': 1, 'maximum': 500},
         },
-        'required': ['name'],
+        'required': ['source_id', 'name'],
         'additionalProperties': False,
     },
     'list_sources_or_adapters': STRICT_EMPTY_INPUT,
@@ -301,7 +307,7 @@ def seed_tools(db: Session = Depends(get_db)):
         ('list_runtime_services', 'List runtime units (managed services/apps).', 'layer1_runtime', 'layer1', 'read_only'),
         ('list_managed_repositories', 'List managed fork repository roots.', 'code_intelligence', 'layer1', 'read_only'),
         ('get_telemetry_schema', 'Get source-scoped telemetry inventory (schema-bearing channel metadata).', 'telemetry', 'layer2', 'read_only'),
-        ('query_recent_telemetry', 'Query recent values for a telemetry channel.', 'telemetry', 'layer2', 'read_only'),
+        ('query_recent_telemetry', 'Query recent values for a telemetry channel from a specific source.', 'telemetry', 'layer2', 'read_only'),
         ('list_sources_or_adapters', 'List telemetry sources and adapters.', 'telemetry', 'layer2', 'read_only'),
         ('list_documents', 'List uploaded mission and vehicle documents.', 'documents', 'layer2', 'read_only'),
         ('get_document', 'Get document metadata by id.', 'documents', 'layer2', 'read_only'),
@@ -322,7 +328,7 @@ def seed_tools(db: Session = Depends(get_db)):
         'list_runtime_services': ('control-plane', 'GET /registry/units'),
         'list_managed_repositories': ('control-plane', 'GET /code/roots'),
         'get_telemetry_schema': GET_TELEMETRY_SCHEMA_TOOL_BACKING,
-        'query_recent_telemetry': ('platform-api-gateway', 'GET /telemetry/{name}/recent'),
+        'query_recent_telemetry': QUERY_RECENT_TELEMETRY_TOOL_BACKING,
         'list_sources_or_adapters': ('platform-api-gateway', 'GET /telemetry/sources'),
         'list_documents': ('document-knowledge-service', 'GET /intelligence/documents'),
         'get_document': ('document-knowledge-service', 'GET /intelligence/documents/{document_id}'),

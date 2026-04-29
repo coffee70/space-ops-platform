@@ -27,7 +27,7 @@ API_INVENTORY = {
     "layer2": {
         "telemetry": {
             "GET /telemetry/inventory?source_id={source_id}": "read_only_tool:get_telemetry_schema",
-            "GET /telemetry/{name}/recent": "read_only_tool:query_recent_telemetry",
+            "GET /telemetry/{name}/recent?source_id={source_id}&limit={limit}": "read_only_tool:query_recent_telemetry",
         },
         "sources": {
             "GET /telemetry/sources": "read_only_tool:list_sources_or_adapters",

@@ -11,6 +11,10 @@ def test_get_telemetry_maps_to_source_scoped_inventory_get() -> None:
     assert telemetry["GET /telemetry/inventory?source_id={source_id}"] == "read_only_tool:get_telemetry_schema"
 
 
-def test_recent_telemetry_mapping_unchanged() -> None:
+def test_query_recent_telemetry_maps_to_source_scoped_recent_get() -> None:
     telemetry = API_INVENTORY["layer2"]["telemetry"]
-    assert telemetry["GET /telemetry/{name}/recent"] == "read_only_tool:query_recent_telemetry"
+    keys = telemetry.keys()
+    assert "GET /telemetry/{name}/recent" not in keys
+    scoped = "GET /telemetry/{name}/recent?source_id={source_id}&limit={limit}"
+    assert scoped in telemetry
+    assert telemetry[scoped] == "read_only_tool:query_recent_telemetry"

@@ -51,3 +51,22 @@ def test_get_telemetry_schema_backing_documents_query_service_inventory() -> Non
         "telemetry-query-service",
         "GET /telemetry/inventory?source_id={source_id}",
     )
+
+
+def test_query_recent_telemetry_requires_source_id_and_name() -> None:
+    schema = tool_registry.TOOL_INPUT_SCHEMAS["query_recent_telemetry"]
+    assert schema["required"] == ["source_id", "name"]
+    assert schema.get("additionalProperties") is False
+    validate_tool_input(schema, {"source_id": "simulator", "name": "battery_voltage"})
+    validate_tool_input(schema, {"source_id": "simulator", "name": "battery_voltage", "limit": 25})
+    with pytest.raises(ToolInputValidationError):
+        validate_tool_input(schema, {"name": "x"})
+    with pytest.raises(ToolInputValidationError):
+        validate_tool_input(schema, {"source_id": "sim", "name": "n", "x": True})
+
+
+def test_query_recent_telemetry_backing_documents_recent_endpoint() -> None:
+    assert tool_registry.QUERY_RECENT_TELEMETRY_TOOL_BACKING == (
+        "telemetry-query-service",
+        "GET /telemetry/{name}/recent?source_id={source_id}&limit={limit}",
+    )

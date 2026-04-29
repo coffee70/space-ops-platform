@@ -168,7 +168,11 @@ async def _execute_mapped_tool(name: str, tool_input: dict, *, db: Session):
     if name == 'query_recent_telemetry':
         ch = tool_input['name']
         lim = tool_input.get('limit') or 100
-        return await _runtime_get('telemetry-query-service', f'telemetry/{ch}/recent', params={'limit': lim})
+        return await _runtime_get(
+            'telemetry-query-service',
+            f'telemetry/{ch}/recent',
+            params={'source_id': tool_input['source_id'], 'limit': lim},
+        )
 
     if name == 'list_sources_or_adapters':
         return await _runtime_get('source-registry-service', 'telemetry/sources')
