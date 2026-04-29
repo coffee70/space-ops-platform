@@ -11,6 +11,7 @@ from app.config import get_settings
 from app.database import get_db
 from app.intelligence.events import raw_event
 from app.intelligence.redaction import redact
+from app.intelligence.tool_metadata import tool_summary
 from app.intelligence.schemas import ToolExecutionRequest
 from app.intelligence.tool_validation import ToolInputValidationError, ToolSchemaDefinitionError, validate_tool_input
 from app.intelligence.trace import extract_trace
@@ -32,9 +33,10 @@ async def _cp_get(path: str, params: dict | None = None) -> dict:
     return resp.json()
 
 
-async def _execute_mapped_tool(name: str, tool_input: dict):
+async def _execute_mapped_tool(name: str, tool_input: dict, *, db: Session):
     if name == 'list_available_tools':
-        return {'message': 'Use tool registry /intelligence/tools/definitions endpoint for full list.'}
+        tools = db.query(ToolDefinition).order_by(ToolDefinition.name.asc()).all()
+        return {'tools': [tool_summary(t) for t in tools]}
     if name == 'list_platform_services':
         return await _cp_get('registry/services')
     if name == 'get_platform_service':
@@ -158,7 +160,7 @@ async def execute_tool(body: ToolExecutionRequest, request: Request, db: Session
     )
 
     try:
-        output = await _execute_mapped_tool(body.tool_name, body.input)
+        output = await _execute_mapped_tool(body.tool_name, body.input, db=db)
         call.status = 'completed'
         call.output_json = redact(output)
         call.completed_at = datetime.now(timezone.utc)

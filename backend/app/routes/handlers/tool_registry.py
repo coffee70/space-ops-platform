@@ -6,6 +6,7 @@ from fastapi import Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from app.database import get_db
+from app.intelligence.tool_metadata import tool_summary
 from app.intelligence.tooling import API_INVENTORY
 from app.models.intelligence import ToolDefinition
 
@@ -136,19 +137,6 @@ TOOL_INPUT_SCHEMAS: dict[str, dict] = {
     },
 }
 
-def _summary(tool: ToolDefinition) -> dict:
-    return {
-        'name': tool.name,
-        'description': tool.description,
-        'category': tool.category,
-        'layer_target': tool.layer_target,
-        'read_write_classification': tool.read_write_classification,
-        'required_execution_mode': tool.required_execution_mode,
-        'enabled': tool.enabled,
-        'requires_confirmation': tool.requires_confirmation,
-        'input_schema_json': tool.input_schema_json,
-    }
-
 
 def list_tools(include_full_metadata: bool = Query(False), enabled: bool | None = Query(None), db: Session = Depends(get_db)):
     query = db.query(ToolDefinition)
@@ -158,7 +146,7 @@ def list_tools(include_full_metadata: bool = Query(False), enabled: bool | None 
     if include_full_metadata:
         return [
             {
-                **_summary(tool),
+                **tool_summary(tool),
                 'output_schema_json': tool.output_schema_json,
                 'audit_policy_json': tool.audit_policy_json,
                 'redaction_policy_json': tool.redaction_policy_json,
@@ -167,7 +155,7 @@ def list_tools(include_full_metadata: bool = Query(False), enabled: bool | None 
             }
             for tool in tools
         ]
-    return [_summary(tool) for tool in tools]
+    return [tool_summary(tool) for tool in tools]
 
 
 def get_tool(tool_name: str, db: Session = Depends(get_db)):
@@ -175,7 +163,7 @@ def get_tool(tool_name: str, db: Session = Depends(get_db)):
     if not tool:
         raise HTTPException(status_code=404, detail='tool not found')
     return {
-        **_summary(tool),
+        **tool_summary(tool),
         'output_schema_json': tool.output_schema_json,
         'audit_policy_json': tool.audit_policy_json,
         'redaction_policy_json': tool.redaction_policy_json,
@@ -267,4 +255,4 @@ def patch_tool(tool_name: str, body: dict, db: Session = Depends(get_db)):
     if 'required_execution_mode' in body:
         tool.required_execution_mode = str(body['required_execution_mode'])
     tool.updated_at = datetime.now(timezone.utc)
-    return _summary(tool)
+    return tool_summary(tool)

@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import json
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
 from starlette.requests import Request
 
+from app.intelligence.redaction import redact
+from app.models.intelligence import ToolCall
 from app.routes.handlers import context_retrieval, tool_execution
 
 
@@ -528,3 +531,213 @@ async def test_mvp_write_tools_reject_read_only_mode(tool_name: str) -> None:
     assert mode_exc.value.status_code == 403
     db.add.assert_not_called()
     db.flush.assert_not_called()
+
+
+_STRICT_EMPTY_INPUT = {"type": "object", "properties": {}, "additionalProperties": False}
+
+
+def _tool_row(
+    *,
+    name: str,
+    description: str,
+    category: str,
+    layer_target: str,
+    read_write_classification: str,
+    required_execution_mode: str,
+    enabled: bool,
+    requires_confirmation: bool,
+) -> SimpleNamespace:
+    return SimpleNamespace(
+        name=name,
+        description=description,
+        category=category,
+        layer_target=layer_target,
+        read_write_classification=read_write_classification,
+        required_execution_mode=required_execution_mode,
+        enabled=enabled,
+        requires_confirmation=requires_confirmation,
+        input_schema_json=_STRICT_EMPTY_INPUT,
+    )
+
+
+@pytest.mark.anyio
+async def test_list_available_tools_returns_real_metadata_including_disabled_writes() -> None:
+    db = MagicMock()
+    query_chain = MagicMock()
+    db.query.return_value = query_chain
+    query_chain.filter.return_value.one_or_none.return_value = _tool_row(
+        name="list_available_tools",
+        description="List currently registered tools.",
+        category="platform_discovery",
+        layer_target="layer2",
+        read_write_classification="read",
+        required_execution_mode="read_only",
+        enabled=True,
+        requires_confirmation=False,
+    )
+    query_chain.order_by.return_value.all.return_value = [
+        _tool_row(
+            name="deploy_service_or_application",
+            description="Future write tool.",
+            category="write_future",
+            layer_target="layer1",
+            read_write_classification="write",
+            required_execution_mode="execute",
+            enabled=False,
+            requires_confirmation=True,
+        ),
+        _tool_row(
+            name="get_runtime_service",
+            description="Get runtime service details.",
+            category="layer1_runtime",
+            layer_target="layer1",
+            read_write_classification="read",
+            required_execution_mode="read_only",
+            enabled=True,
+            requires_confirmation=False,
+        ),
+        _tool_row(
+            name="list_available_tools",
+            description="List currently registered tools.",
+            category="platform_discovery",
+            layer_target="layer2",
+            read_write_classification="read",
+            required_execution_mode="read_only",
+            enabled=True,
+            requires_confirmation=False,
+        ),
+    ]
+
+    response = await tool_execution.execute_tool(
+        tool_execution.ToolExecutionRequest(
+            conversation_id="11111111-1111-1111-1111-111111111111",
+            agent_run_id="22222222-2222-2222-2222-222222222222",
+            request_id="33333333-3333-3333-3333-333333333333",
+            tool_call_id="44444444-4444-4444-4444-444444444444",
+            tool_name="list_available_tools",
+            input={},
+            execution_mode="read_only",
+        ),
+        request=_request(
+            {
+                "x-agent-run-id": "22222222-2222-2222-2222-222222222222",
+                "x-request-id": "33333333-3333-3333-3333-333333333333",
+                "x-tool-call-id": "44444444-4444-4444-4444-444444444444",
+            }
+        ),
+        db=db,
+    )
+
+    assert response["status"] == "completed"
+    out = response["output"]
+    assert isinstance(out, dict)
+    assert set(out.keys()) == {"tools"}
+    tools = out["tools"]
+    assert len(tools) == 3
+    assert [e["name"] for e in tools] == ["deploy_service_or_application", "get_runtime_service", "list_available_tools"]
+
+    required_keys = {
+        "name",
+        "description",
+        "category",
+        "layer_target",
+        "read_write_classification",
+        "required_execution_mode",
+        "enabled",
+        "requires_confirmation",
+        "input_schema_json",
+    }
+    for entry in tools:
+        assert set(entry.keys()) == required_keys
+
+    deploy = next(e for e in tools if e["name"] == "deploy_service_or_application")
+    assert deploy["enabled"] is False
+    assert deploy["requires_confirmation"] is True
+
+    serialized = json.dumps(out)
+    for forbidden in ("Use tool registry", "/intelligence/", "http://", "https://"):
+        assert forbidden not in serialized
+
+    assert [e["event_type"] for e in response["raw_events"]] == ["tool.started", "tool.completed"]
+
+    db.add.assert_called_once()
+    db.flush.assert_called_once()
+    call_arg = db.add.call_args.args[0]
+    assert isinstance(call_arg, ToolCall)
+    assert call_arg.status == "completed"
+    assert call_arg.tool_name == "list_available_tools"
+    assert call_arg.output_json == redact(out)
+    assert call_arg.started_at is not None
+    assert call_arg.completed_at is not None
+
+
+@pytest.mark.anyio
+async def test_list_available_tools_does_not_return_instructional_placeholder() -> None:
+    db = MagicMock()
+    query_chain = MagicMock()
+    db.query.return_value = query_chain
+    query_chain.filter.return_value.one_or_none.return_value = _tool_row(
+        name="list_available_tools",
+        description="List currently registered tools.",
+        category="platform_discovery",
+        layer_target="layer2",
+        read_write_classification="read",
+        required_execution_mode="read_only",
+        enabled=True,
+        requires_confirmation=False,
+    )
+    query_chain.order_by.return_value.all.return_value = [
+        _tool_row(
+            name="deploy_service_or_application",
+            description="Future write tool.",
+            category="write_future",
+            layer_target="layer1",
+            read_write_classification="write",
+            required_execution_mode="execute",
+            enabled=False,
+            requires_confirmation=True,
+        ),
+        _tool_row(
+            name="get_runtime_service",
+            description="Get runtime service details.",
+            category="layer1_runtime",
+            layer_target="layer1",
+            read_write_classification="read",
+            required_execution_mode="read_only",
+            enabled=True,
+            requires_confirmation=False,
+        ),
+        _tool_row(
+            name="list_available_tools",
+            description="List currently registered tools.",
+            category="platform_discovery",
+            layer_target="layer2",
+            read_write_classification="read",
+            required_execution_mode="read_only",
+            enabled=True,
+            requires_confirmation=False,
+        ),
+    ]
+
+    response = await tool_execution.execute_tool(
+        tool_execution.ToolExecutionRequest(
+            conversation_id="11111111-1111-1111-1111-111111111111",
+            agent_run_id="22222222-2222-2222-2222-222222222222",
+            request_id="33333333-3333-3333-3333-333333333333",
+            tool_call_id="44444444-4444-4444-4444-444444444444",
+            tool_name="list_available_tools",
+            input={},
+            execution_mode="read_only",
+        ),
+        request=_request(
+            {
+                "x-agent-run-id": "22222222-2222-2222-2222-222222222222",
+                "x-request-id": "33333333-3333-3333-3333-333333333333",
+                "x-tool-call-id": "44444444-4444-4444-4444-444444444444",
+            }
+        ),
+        db=db,
+    )
+
+    dumped = json.dumps(response)
+    assert "Use tool registry" not in dumped
