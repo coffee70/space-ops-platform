@@ -17,9 +17,6 @@ def _request(headers: dict[str, str] | None = None) -> Request:
 
 
 def test_context_retrieval_returns_raw_events_without_persisting_agent_events(monkeypatch) -> None:
-    db = MagicMock()
-    db.query.return_value.order_by.return_value.limit.return_value.all.return_value = []
-
     payload = context_retrieval.context_packet(
         {
             "conversation_id": "11111111-1111-1111-1111-111111111111",
@@ -29,11 +26,9 @@ def test_context_retrieval_returns_raw_events_without_persisting_agent_events(mo
             "retrieval_instructions": {"documents": False, "code": False, "platform": False, "tools": False},
         },
         request=_request(),
-        db=db,
     )
 
     assert payload["raw_events"][0]["event_type"] == "context.resolved"
-    db.add.assert_not_called()
 
 
 @pytest.mark.anyio

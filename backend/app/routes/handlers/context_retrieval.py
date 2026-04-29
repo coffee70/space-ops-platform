@@ -2,10 +2,8 @@ from __future__ import annotations
 
 import uuid
 
-from fastapi import Depends, HTTPException, Request
-from sqlalchemy.orm import Session
+from fastapi import HTTPException, Request
 
-from app.database import get_db
 from app.intelligence.clients.context_retrieval_clients import ContextRetrievalClients, get_context_clients
 from app.intelligence.events import raw_event
 from app.intelligence.trace import extract_trace
@@ -41,7 +39,6 @@ def _record_failure(*, service: str, reason_prefix: str, exc: Exception, failed_
 def context_packet(
     body: dict,
     request: Request,
-    db: Session = Depends(get_db),
     clients: ContextRetrievalClients | None = None,
 ):
     clients = clients or get_context_clients()
