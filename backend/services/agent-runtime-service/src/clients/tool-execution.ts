@@ -19,6 +19,7 @@ export class HttpToolExecutionClient implements ToolExecutionClient {
     input: Record<string, unknown>;
     execution_mode: string;
     message_id?: string | null;
+    confirmation_token?: string | null;
   }): Promise<ToolExecutionResponse> {
     const response = await fetch(serviceUrl(this.#config, "tool-execution-service", "tools/execute"), {
       method: "POST",
@@ -35,6 +36,7 @@ export class HttpToolExecutionClient implements ToolExecutionClient {
         input: input.input,
         execution_mode: input.execution_mode,
         message_id: input.message_id ?? null,
+        confirmation_token: input.confirmation_token ?? null,
       }),
       signal: AbortSignal.timeout(this.#config.requestTimeoutMs),
     });

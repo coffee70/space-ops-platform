@@ -17,6 +17,16 @@ test("schemaToZod rejects unknown fields when additionalProperties is false", ()
   assert.equal(result.success, false);
 });
 
+test("schemaToZod rejects confirmation_token when tool schema is strict empty object", () => {
+  const schema = schemaToZod({
+    type: "object",
+    properties: {},
+    additionalProperties: false,
+  });
+  const result = schema.safeParse({ confirmation_token: "wrong-place" });
+  assert.equal(result.success, false);
+});
+
 test("createToolSet excludes disabled tools from active model tools", () => {
   const definitions: ToolDefinition[] = [
     {

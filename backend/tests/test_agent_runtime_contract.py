@@ -457,6 +457,47 @@ async def test_confirmation_token_allows_execution(monkeypatch) -> None:
 
 
 @pytest.mark.anyio
+async def test_confirmation_token_in_input_is_rejected_by_tool_schema() -> None:
+    db = MagicMock()
+    db.query.return_value.filter.return_value.one_or_none.return_value = SimpleNamespace(
+        name="create_working_branch",
+        enabled=True,
+        category="write_future",
+        read_write_classification="write",
+        requires_confirmation=True,
+        required_execution_mode="execute",
+        input_schema_json={"type": "object", "properties": {}, "additionalProperties": False},
+    )
+
+    with pytest.raises(tool_execution.HTTPException) as validation_exc:
+        await tool_execution.execute_tool(
+            tool_execution.ToolExecutionRequest(
+                conversation_id="11111111-1111-1111-1111-111111111111",
+                agent_run_id="22222222-2222-2222-2222-222222222222",
+                request_id="33333333-3333-3333-3333-333333333333",
+                tool_call_id="44444444-4444-4444-4444-444444444444",
+                tool_name="create_working_branch",
+                input={"confirmation_token": "wrong-place"},
+                confirmation_token="confirmed",
+                execution_mode="execute",
+            ),
+            request=_request(
+                {
+                    "x-agent-run-id": "22222222-2222-2222-2222-222222222222",
+                    "x-request-id": "33333333-3333-3333-3333-333333333333",
+                    "x-tool-call-id": "44444444-4444-4444-4444-444444444444",
+                }
+            ),
+            db=db,
+        )
+
+    assert validation_exc.value.status_code == 400
+    assert validation_exc.value.detail["error_code"] == "tool_input_validation_failed"
+    db.add.assert_not_called()
+    db.flush.assert_not_called()
+
+
+@pytest.mark.anyio
 @pytest.mark.parametrize("tool_name", ["scaffold_service", "apply_patch", "create_commit", "deploy_service_or_application"])
 async def test_mvp_write_tools_reject_read_only_mode(tool_name: str) -> None:
     db = MagicMock()

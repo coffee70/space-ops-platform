@@ -136,14 +136,6 @@ TOOL_INPUT_SCHEMAS: dict[str, dict] = {
     },
 }
 
-CONFIRMATION_REQUIRED_SCHEMA = {
-    'type': 'object',
-    'properties': {'confirmation_token': {'type': 'string', 'minLength': 1, 'maxLength': 128}},
-    'required': ['confirmation_token'],
-    'additionalProperties': False,
-}
-
-
 def _summary(tool: ToolDefinition) -> dict:
     return {
         'name': tool.name,
@@ -260,9 +252,6 @@ def seed_tools(db: Session = Depends(get_db)):
             enabled=False,
             requires_confirmation=True,
         )
-        tool = db.query(ToolDefinition).filter(ToolDefinition.name == name).one_or_none()
-        if tool:
-            tool.input_schema_json = CONFIRMATION_REQUIRED_SCHEMA
 
     return {'seeded': seeded, 'total': db.query(ToolDefinition).count(), 'inventory_sections': list(API_INVENTORY.keys())}
 
