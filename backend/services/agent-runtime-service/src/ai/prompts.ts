@@ -14,7 +14,7 @@ function summarizeHistory(messages: ChatInputMessage[]): string {
 
 function summarizeTools(tools: ToolDefinition[]): string {
   if (tools.length === 0) {
-    return "No tools are currently enabled.";
+    return "No tools are exposed for the current execution mode.";
   }
 
   return tools
@@ -42,7 +42,7 @@ export function buildSystemPrompt(input: {
     "Retrieved context packet:",
     JSON.stringify(input.context.data),
     "",
-    "Available tools:",
+    "Tools exposed in this execution mode (same list the runtime registers for tool calls — write-classification tools appear only when mode is execute or governed_execute):",
     summarizeTools(input.tools),
   ].join("\n");
 }

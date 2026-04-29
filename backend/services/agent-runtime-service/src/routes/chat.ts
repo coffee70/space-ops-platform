@@ -2,7 +2,7 @@ import type { Hono } from "hono";
 import { z } from "zod";
 
 import { buildSystemPrompt } from "../ai/prompts.js";
-import { createToolSet } from "../ai/tools.js";
+import { createToolSet, filterToolDefinitionsForExecutionMode } from "../ai/tools.js";
 import { AgentEventStream } from "../events/stream.js";
 import { RunSequencer } from "../events/sequencer.js";
 import { runFallback } from "../fallback.js";
@@ -173,6 +173,7 @@ async function orchestrateChat(input: {
     await stream.emitRawEvents(context.raw_events);
 
     const toolDefinitions = await dependencies.toolRegistryClient.listTools(input.trace);
+    const toolsForMode = filterToolDefinitionsForExecutionMode(toolDefinitions, input.executionMode);
     let toolCallCount = 0;
     const tools = createToolSet({
       toolDefinitions,
@@ -192,7 +193,7 @@ async function orchestrateChat(input: {
       executionMode: input.executionMode,
       retrievalPlan,
       context,
-      tools: toolDefinitions,
+      tools: toolsForMode,
       messages: modelMessages,
     });
 

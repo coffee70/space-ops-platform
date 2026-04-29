@@ -47,7 +47,7 @@ test("tool execution client posts through tool-execution-service only", async ()
         request_id: "request-1",
         tool_call_id: "tool-call-1",
       },
-      tool_name: "get_runtime_service",
+      tool_name: "get_platform_service",
       input: { service_slug: "agent-runtime-service" },
       execution_mode: "read_only",
     });

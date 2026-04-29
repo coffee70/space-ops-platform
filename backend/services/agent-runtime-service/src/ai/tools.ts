@@ -15,6 +15,16 @@ function canUseTool(requiredMode: ExecutionMode, executionMode: ExecutionMode): 
   return rank[executionMode] >= rank[requiredMode];
 }
 
+/** Matches `createToolSet` exposure so prompts list the same callable tools as the SDK tool surface. */
+export function filterToolDefinitionsForExecutionMode(
+  definitions: ToolDefinition[],
+  executionMode: ExecutionMode,
+): ToolDefinition[] {
+  return definitions.filter(
+    (definition) => definition.enabled && canUseTool(definition.required_execution_mode, executionMode),
+  );
+}
+
 type JsonSchema = {
   type?: string;
   properties?: Record<string, JsonSchema>;
@@ -98,8 +108,7 @@ export function createToolSet(input: {
   onToolCallRequested?: (definition: ToolDefinition, toolCallId: string, args: Record<string, unknown>) => void | Promise<void>;
   emitRawToolEvents: (events: RawEventFact[] | undefined) => Promise<void>;
 }): ToolSet {
-  const toolEntries = input.toolDefinitions
-    .filter((definition) => definition.enabled && canUseTool(definition.required_execution_mode, input.executionMode))
+  const toolEntries = filterToolDefinitionsForExecutionMode(input.toolDefinitions, input.executionMode)
     .map((definition) => [
       definition.name,
       tool({

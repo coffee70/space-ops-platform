@@ -204,7 +204,7 @@ def test_gateway_routes_proxy_expected_service_paths(monkeypatch) -> None:
     assert client.post("/intelligence/code/search", json={"query": "q", "branch": "main"}).status_code == 200
     assert client.get("/intelligence/tools/definitions").status_code == 200
     assert client.post("/intelligence/tools/definitions/seed").status_code == 200
-    assert client.get("/intelligence/tools/definitions/get_runtime_service").status_code == 200
+    assert client.get("/intelligence/tools/definitions/get_platform_service").status_code == 200
     assert client.post("/intelligence/tools/execute", json={}).status_code == 200
 
     assert calls == [
@@ -220,6 +220,6 @@ def test_gateway_routes_proxy_expected_service_paths(monkeypatch) -> None:
         ("code-intelligence-service", "search"),
         ("tool-registry-service", "definitions"),
         ("tool-registry-service", "definitions/seed"),
-        ("tool-registry-service", "definitions/get_runtime_service"),
+        ("tool-registry-service", "definitions/get_platform_service"),
         ("tool-execution-service", "execute"),
     ]

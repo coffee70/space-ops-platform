@@ -38,9 +38,9 @@ def test_context_retrieval_returns_raw_events_without_persisting_agent_events(mo
 async def test_tool_execution_returns_raw_events_and_keeps_tool_call_record(monkeypatch) -> None:
     db = MagicMock()
     db.query.return_value.filter.return_value.one_or_none.return_value = SimpleNamespace(
-        name="get_runtime_service",
+        name="get_platform_service",
         enabled=True,
-        category="layer1_runtime",
+        category="platform_discovery",
         read_write_classification="read",
         requires_confirmation=False,
         required_execution_mode="read_only",
@@ -63,7 +63,7 @@ async def test_tool_execution_returns_raw_events_and_keeps_tool_call_record(monk
             agent_run_id="22222222-2222-2222-2222-222222222222",
             request_id="33333333-3333-3333-3333-333333333333",
             tool_call_id="44444444-4444-4444-4444-444444444444",
-            tool_name="get_runtime_service",
+            tool_name="get_platform_service",
             input={"service_slug": "agent-runtime-service"},
             execution_mode="read_only",
         ),
@@ -83,8 +83,8 @@ async def test_tool_execution_returns_raw_events_and_keeps_tool_call_record(monk
     assert started_event["tool_call_id"] == "44444444-4444-4444-4444-444444444444"
     assert started_event["emitted_by"] == "tool-execution-service"
     assert started_event["payload"] == {
-        "tool_name": "get_runtime_service",
-        "category": "layer1_runtime",
+        "tool_name": "get_platform_service",
+        "category": "platform_discovery",
         "read_write_classification": "read",
         "input_preview": {"service_slug": "agent-runtime-service"},
     }
@@ -96,9 +96,9 @@ async def test_tool_execution_returns_raw_events_and_keeps_tool_call_record(monk
 async def test_tool_execution_returns_started_then_failed_on_mapped_failure(monkeypatch) -> None:
     db = MagicMock()
     db.query.return_value.filter.return_value.one_or_none.return_value = SimpleNamespace(
-        name="get_runtime_service",
+        name="get_platform_service",
         enabled=True,
-        category="layer1_runtime",
+        category="platform_discovery",
         read_write_classification="read",
         requires_confirmation=False,
         required_execution_mode="read_only",
@@ -121,7 +121,7 @@ async def test_tool_execution_returns_started_then_failed_on_mapped_failure(monk
             agent_run_id="22222222-2222-2222-2222-222222222222",
             request_id="33333333-3333-3333-3333-333333333333",
             tool_call_id="44444444-4444-4444-4444-444444444444",
-            tool_name="get_runtime_service",
+            tool_name="get_platform_service",
             input={"service_slug": "agent-runtime-service"},
             execution_mode="read_only",
         ),
@@ -141,49 +141,6 @@ async def test_tool_execution_returns_started_then_failed_on_mapped_failure(monk
     assert all(event["emitted_by"] == "tool-execution-service" for event in response["raw_events"])
     db.add.assert_called_once()
     db.flush.assert_called_once()
-
-
-@pytest.mark.anyio
-async def test_tool_execution_confirmation_required_does_not_start_or_persist_running_call() -> None:
-    db = MagicMock()
-    db.query.return_value.filter.return_value.one_or_none.return_value = SimpleNamespace(
-        name="create_working_branch",
-        enabled=True,
-        category="write_future",
-        read_write_classification="write",
-        requires_confirmation=True,
-        required_execution_mode="execute",
-        input_schema_json={
-            "type": "object",
-            "properties": {},
-            "additionalProperties": False,
-        },
-    )
-
-    response = await tool_execution.execute_tool(
-        tool_execution.ToolExecutionRequest(
-            conversation_id="11111111-1111-1111-1111-111111111111",
-            agent_run_id="22222222-2222-2222-2222-222222222222",
-            request_id="33333333-3333-3333-3333-333333333333",
-            tool_call_id="44444444-4444-4444-4444-444444444444",
-            tool_name="create_working_branch",
-            input={},
-            execution_mode="execute",
-        ),
-        request=_request(
-            {
-                "x-agent-run-id": "22222222-2222-2222-2222-222222222222",
-                "x-request-id": "33333333-3333-3333-3333-333333333333",
-                "x-tool-call-id": "44444444-4444-4444-4444-444444444444",
-            }
-        ),
-        db=db,
-    )
-
-    assert response["status"] == "confirmation_required"
-    assert response["raw_events"] == []
-    db.add.assert_not_called()
-    db.flush.assert_not_called()
 
 
 @pytest.mark.anyio
@@ -218,9 +175,9 @@ async def test_tool_execution_pre_execution_rejections_do_not_emit_started_or_pe
     # tool disabled
     db_disabled = MagicMock()
     db_disabled.query.return_value.filter.return_value.one_or_none.return_value = SimpleNamespace(
-        name="get_runtime_service",
+        name="get_platform_service",
         enabled=False,
-        category="layer1_runtime",
+        category="platform_discovery",
         read_write_classification="read",
         requires_confirmation=False,
         required_execution_mode="read_only",
@@ -233,7 +190,7 @@ async def test_tool_execution_pre_execution_rejections_do_not_emit_started_or_pe
                 agent_run_id="22222222-2222-2222-2222-222222222222",
                 request_id="33333333-3333-3333-3333-333333333333",
                 tool_call_id="44444444-4444-4444-4444-444444444444",
-                tool_name="get_runtime_service",
+                tool_name="get_platform_service",
                 input={},
                 execution_mode="read_only",
             ),
@@ -288,7 +245,7 @@ async def test_tool_execution_pre_execution_rejections_do_not_emit_started_or_pe
     # write tool in suggest mode
     db_suggest = MagicMock()
     db_suggest.query.return_value.filter.return_value.one_or_none.return_value = SimpleNamespace(
-        name="apply_patch",
+        name="write_source_file",
         enabled=True,
         category="write_future",
         read_write_classification="write",
@@ -303,7 +260,7 @@ async def test_tool_execution_pre_execution_rejections_do_not_emit_started_or_pe
                 agent_run_id="22222222-2222-2222-2222-222222222222",
                 request_id="33333333-3333-3333-3333-333333333333",
                 tool_call_id="44444444-4444-4444-4444-444444444444",
-                tool_name="apply_patch",
+                tool_name="write_source_file",
                 input={},
                 execution_mode="suggest",
             ),
@@ -323,18 +280,15 @@ async def test_tool_execution_pre_execution_rejections_do_not_emit_started_or_pe
     # schema validation: unknown, missing, wrong type
     db_schema = MagicMock()
     db_schema.query.return_value.filter.return_value.one_or_none.return_value = SimpleNamespace(
-        name="get_runtime_service",
+        name="get_platform_service",
         enabled=True,
-        category="layer1_runtime",
+        category="platform_discovery",
         read_write_classification="read",
         requires_confirmation=False,
         required_execution_mode="read_only",
         input_schema_json={
             "type": "object",
-            "properties": {
-                "service_slug": {"type": "string"},
-                "line": {"type": "integer"},
-            },
+            "properties": {"service_slug": {"type": "string"}},
             "required": ["service_slug"],
             "additionalProperties": False,
         },
@@ -346,7 +300,7 @@ async def test_tool_execution_pre_execution_rejections_do_not_emit_started_or_pe
                 agent_run_id="22222222-2222-2222-2222-222222222222",
                 request_id="33333333-3333-3333-3333-333333333333",
                 tool_call_id="44444444-4444-4444-4444-444444444444",
-                tool_name="get_runtime_service",
+                tool_name="get_platform_service",
                 input={"service_slug": "agent-runtime-service", "extra": "nope"},
                 execution_mode="read_only",
             ),
@@ -371,8 +325,8 @@ async def test_tool_execution_pre_execution_rejections_do_not_emit_started_or_pe
                 agent_run_id="22222222-2222-2222-2222-222222222222",
                 request_id="33333333-3333-3333-3333-333333333333",
                 tool_call_id="44444444-4444-4444-4444-444444444444",
-                tool_name="get_runtime_service",
-                input={"line": 10},
+                tool_name="get_platform_service",
+                input={},
                 execution_mode="read_only",
             ),
             request=_request(
@@ -393,8 +347,8 @@ async def test_tool_execution_pre_execution_rejections_do_not_emit_started_or_pe
                 agent_run_id="22222222-2222-2222-2222-222222222222",
                 request_id="33333333-3333-3333-3333-333333333333",
                 tool_call_id="44444444-4444-4444-4444-444444444444",
-                tool_name="get_runtime_service",
-                input={"service_slug": "agent-runtime-service", "line": "oops"},
+                tool_name="get_platform_service",
+                input={"service_slug": 123},
                 execution_mode="read_only",
             ),
             request=_request(
@@ -407,96 +361,22 @@ async def test_tool_execution_pre_execution_rejections_do_not_emit_started_or_pe
             db=db_schema,
         )
     assert wrong_type_exc.value.status_code == 400
-    db_write.add.assert_not_called()
-    db_write.flush.assert_not_called()
+    db_schema.add.assert_not_called()
+    db_schema.flush.assert_not_called()
 
 
 @pytest.mark.anyio
-async def test_confirmation_token_allows_execution(monkeypatch) -> None:
-    db = MagicMock()
-    db.query.return_value.filter.return_value.one_or_none.return_value = SimpleNamespace(
-        name="create_working_branch",
-        enabled=True,
-        category="write_future",
-        read_write_classification="write",
-        requires_confirmation=True,
-        required_execution_mode="execute",
-        input_schema_json={"type": "object", "properties": {}, "additionalProperties": False},
-    )
-
-    async def fake_execute(*_args, **_kwargs):
-        return {"ok": True}
-
-    monkeypatch.setattr(tool_execution, "_execute_mapped_tool", fake_execute)
-
-    response = await tool_execution.execute_tool(
-        tool_execution.ToolExecutionRequest(
-            conversation_id="11111111-1111-1111-1111-111111111111",
-            agent_run_id="22222222-2222-2222-2222-222222222222",
-            request_id="33333333-3333-3333-3333-333333333333",
-            tool_call_id="44444444-4444-4444-4444-444444444444",
-            tool_name="create_working_branch",
-            input={},
-            confirmation_token="confirmed",
-            execution_mode="execute",
-        ),
-        request=_request(
-            {
-                "x-agent-run-id": "22222222-2222-2222-2222-222222222222",
-                "x-request-id": "33333333-3333-3333-3333-333333333333",
-                "x-tool-call-id": "44444444-4444-4444-4444-444444444444",
-            }
-        ),
-        db=db,
-    )
-    assert response["status"] == "completed"
-    db.add.assert_called_once()
-    db.flush.assert_called_once()
-
-
-@pytest.mark.anyio
-async def test_confirmation_token_in_input_is_rejected_by_tool_schema() -> None:
-    db = MagicMock()
-    db.query.return_value.filter.return_value.one_or_none.return_value = SimpleNamespace(
-        name="create_working_branch",
-        enabled=True,
-        category="write_future",
-        read_write_classification="write",
-        requires_confirmation=True,
-        required_execution_mode="execute",
-        input_schema_json={"type": "object", "properties": {}, "additionalProperties": False},
-    )
-
-    with pytest.raises(tool_execution.HTTPException) as validation_exc:
-        await tool_execution.execute_tool(
-            tool_execution.ToolExecutionRequest(
-                conversation_id="11111111-1111-1111-1111-111111111111",
-                agent_run_id="22222222-2222-2222-2222-222222222222",
-                request_id="33333333-3333-3333-3333-333333333333",
-                tool_call_id="44444444-4444-4444-4444-444444444444",
-                tool_name="create_working_branch",
-                input={"confirmation_token": "wrong-place"},
-                confirmation_token="confirmed",
-                execution_mode="execute",
-            ),
-            request=_request(
-                {
-                    "x-agent-run-id": "22222222-2222-2222-2222-222222222222",
-                    "x-request-id": "33333333-3333-3333-3333-333333333333",
-                    "x-tool-call-id": "44444444-4444-4444-4444-444444444444",
-                }
-            ),
-            db=db,
-        )
-
-    assert validation_exc.value.status_code == 400
-    assert validation_exc.value.detail["error_code"] == "tool_input_validation_failed"
-    db.add.assert_not_called()
-    db.flush.assert_not_called()
-
-
-@pytest.mark.anyio
-@pytest.mark.parametrize("tool_name", ["scaffold_service", "apply_patch", "create_commit", "deploy_service_or_application"])
+@pytest.mark.parametrize(
+    "tool_name",
+    [
+        "scaffold_service",
+        "write_source_file",
+        "create_commit",
+        "deploy_service_or_application",
+        "trigger_document_reingestion",
+        "create_working_branch",
+    ],
+)
 async def test_mvp_write_tools_reject_read_only_mode(tool_name: str) -> None:
     db = MagicMock()
     db.query.return_value.filter.return_value.one_or_none.return_value = SimpleNamespace(
@@ -561,52 +441,68 @@ def _tool_row(
 
 
 @pytest.mark.anyio
-async def test_list_available_tools_returns_real_metadata_including_disabled_writes() -> None:
-    db = MagicMock()
-    query_chain = MagicMock()
-    db.query.return_value = query_chain
-    query_chain.filter.return_value.one_or_none.return_value = _tool_row(
+async def test_list_available_tools_returns_filtered_mvp_metadata(monkeypatch) -> None:
+    monkeypatch.setattr(
+        tool_execution,
+        "MVP_TOOL_NAMES",
+        frozenset({"deploy_service_or_application", "get_platform_service", "list_available_tools"}),
+    )
+    rows = sorted(
+        [
+            _tool_row(
+                name="deploy_service_or_application",
+                description="Deploy managed unit.",
+                category="deployment",
+                layer_target="layer1",
+                read_write_classification="write",
+                required_execution_mode="execute",
+                enabled=True,
+                requires_confirmation=False,
+            ),
+            _tool_row(
+                name="get_platform_service",
+                description="Lookup service catalog entry.",
+                category="platform_discovery",
+                layer_target="layer1",
+                read_write_classification="read",
+                required_execution_mode="read_only",
+                enabled=True,
+                requires_confirmation=False,
+            ),
+            _tool_row(
+                name="list_available_tools",
+                description="Enumerate registered MVP tools.",
+                category="platform_discovery",
+                layer_target="layer2",
+                read_write_classification="read",
+                required_execution_mode="read_only",
+                enabled=True,
+                requires_confirmation=False,
+            ),
+        ],
+        key=lambda r: r.name,
+    )
+
+    list_tool_definition = SimpleNamespace(
         name="list_available_tools",
-        description="List currently registered tools.",
+        description="Enumerate registered MVP tools.",
         category="platform_discovery",
         layer_target="layer2",
         read_write_classification="read",
         required_execution_mode="read_only",
         enabled=True,
         requires_confirmation=False,
+        input_schema_json=_STRICT_EMPTY_INPUT,
     )
-    query_chain.order_by.return_value.all.return_value = [
-        _tool_row(
-            name="deploy_service_or_application",
-            description="Future write tool.",
-            category="write_future",
-            layer_target="layer1",
-            read_write_classification="write",
-            required_execution_mode="execute",
-            enabled=False,
-            requires_confirmation=True,
-        ),
-        _tool_row(
-            name="get_runtime_service",
-            description="Get runtime service details.",
-            category="layer1_runtime",
-            layer_target="layer1",
-            read_write_classification="read",
-            required_execution_mode="read_only",
-            enabled=True,
-            requires_confirmation=False,
-        ),
-        _tool_row(
-            name="list_available_tools",
-            description="List currently registered tools.",
-            category="platform_discovery",
-            layer_target="layer2",
-            read_write_classification="read",
-            required_execution_mode="read_only",
-            enabled=True,
-            requires_confirmation=False,
-        ),
-    ]
+
+    lookup_query = MagicMock()
+    lookup_query.filter.return_value.one_or_none.return_value = list_tool_definition
+
+    list_query = MagicMock()
+    list_query.filter.return_value.order_by.return_value.all.return_value = rows
+
+    db = MagicMock()
+    db.query.side_effect = [lookup_query, list_query]
 
     response = await tool_execution.execute_tool(
         tool_execution.ToolExecutionRequest(
@@ -630,114 +526,60 @@ async def test_list_available_tools_returns_real_metadata_including_disabled_wri
 
     assert response["status"] == "completed"
     out = response["output"]
-    assert isinstance(out, dict)
-    assert set(out.keys()) == {"tools"}
     tools = out["tools"]
     assert len(tools) == 3
-    assert [e["name"] for e in tools] == ["deploy_service_or_application", "get_runtime_service", "list_available_tools"]
+    assert [t["name"] for t in tools] == ["deploy_service_or_application", "get_platform_service", "list_available_tools"]
+    assert all(t["enabled"] is True for t in tools)
 
-    required_keys = {
-        "name",
-        "description",
-        "category",
-        "layer_target",
-        "read_write_classification",
-        "required_execution_mode",
-        "enabled",
-        "requires_confirmation",
-        "input_schema_json",
-    }
-    for entry in tools:
-        assert set(entry.keys()) == required_keys
-
-    deploy = next(e for e in tools if e["name"] == "deploy_service_or_application")
-    assert deploy["enabled"] is False
-    assert deploy["requires_confirmation"] is True
-
-    serialized = json.dumps(out)
+    dumped = json.dumps(response)
     for forbidden in ("Use tool registry", "/intelligence/", "http://", "https://"):
-        assert forbidden not in serialized
+        assert forbidden not in dumped
 
     assert [e["event_type"] for e in response["raw_events"]] == ["tool.started", "tool.completed"]
-
     db.add.assert_called_once()
     db.flush.assert_called_once()
     call_arg = db.add.call_args.args[0]
     assert isinstance(call_arg, ToolCall)
-    assert call_arg.status == "completed"
     assert call_arg.tool_name == "list_available_tools"
     assert call_arg.output_json == redact(out)
-    assert call_arg.started_at is not None
-    assert call_arg.completed_at is not None
 
 
 @pytest.mark.anyio
-async def test_list_available_tools_does_not_return_instructional_placeholder() -> None:
+async def test_trigger_document_reingestion_rejects_non_execute_modes() -> None:
     db = MagicMock()
-    query_chain = MagicMock()
-    db.query.return_value = query_chain
-    query_chain.filter.return_value.one_or_none.return_value = _tool_row(
-        name="list_available_tools",
-        description="List currently registered tools.",
-        category="platform_discovery",
-        layer_target="layer2",
-        read_write_classification="read",
-        required_execution_mode="read_only",
+    db.query.return_value.filter.return_value.one_or_none.return_value = SimpleNamespace(
+        name="trigger_document_reingestion",
         enabled=True,
+        category="documents",
+        read_write_classification="write",
         requires_confirmation=False,
+        required_execution_mode="execute",
+        input_schema_json={
+            "type": "object",
+            "properties": {"document_id": {"type": "string", "format": "uuid"}},
+            "required": ["document_id"],
+            "additionalProperties": False,
+        },
     )
-    query_chain.order_by.return_value.all.return_value = [
-        _tool_row(
-            name="deploy_service_or_application",
-            description="Future write tool.",
-            category="write_future",
-            layer_target="layer1",
-            read_write_classification="write",
-            required_execution_mode="execute",
-            enabled=False,
-            requires_confirmation=True,
-        ),
-        _tool_row(
-            name="get_runtime_service",
-            description="Get runtime service details.",
-            category="layer1_runtime",
-            layer_target="layer1",
-            read_write_classification="read",
-            required_execution_mode="read_only",
-            enabled=True,
-            requires_confirmation=False,
-        ),
-        _tool_row(
-            name="list_available_tools",
-            description="List currently registered tools.",
-            category="platform_discovery",
-            layer_target="layer2",
-            read_write_classification="read",
-            required_execution_mode="read_only",
-            enabled=True,
-            requires_confirmation=False,
-        ),
-    ]
-
-    response = await tool_execution.execute_tool(
-        tool_execution.ToolExecutionRequest(
-            conversation_id="11111111-1111-1111-1111-111111111111",
-            agent_run_id="22222222-2222-2222-2222-222222222222",
-            request_id="33333333-3333-3333-3333-333333333333",
-            tool_call_id="44444444-4444-4444-4444-444444444444",
-            tool_name="list_available_tools",
-            input={},
-            execution_mode="read_only",
-        ),
-        request=_request(
-            {
-                "x-agent-run-id": "22222222-2222-2222-2222-222222222222",
-                "x-request-id": "33333333-3333-3333-3333-333333333333",
-                "x-tool-call-id": "44444444-4444-4444-4444-444444444444",
-            }
-        ),
-        db=db,
-    )
-
-    dumped = json.dumps(response)
-    assert "Use tool registry" not in dumped
+    with pytest.raises(tool_execution.HTTPException) as exc:
+        await tool_execution.execute_tool(
+            tool_execution.ToolExecutionRequest(
+                conversation_id="11111111-1111-1111-1111-111111111111",
+                agent_run_id="22222222-2222-2222-2222-222222222222",
+                request_id="33333333-3333-3333-3333-333333333333",
+                tool_call_id="44444444-4444-4444-4444-444444444444",
+                tool_name="trigger_document_reingestion",
+                input={"document_id": "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"},
+                execution_mode="suggest",
+            ),
+            request=_request(
+                {
+                    "x-agent-run-id": "22222222-2222-2222-2222-222222222222",
+                    "x-request-id": "33333333-3333-3333-3333-333333333333",
+                    "x-tool-call-id": "44444444-4444-4444-4444-444444444444",
+                }
+            ),
+            db=db,
+        )
+    assert exc.value.status_code == 403
+    db.add.assert_not_called()

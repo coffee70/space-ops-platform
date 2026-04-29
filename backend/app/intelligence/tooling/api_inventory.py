@@ -15,14 +15,13 @@ API_INVENTORY = {
         },
         "code": {
             "GET /code/roots": "read_only_tool:list_managed_repositories",
-            "GET /code/source-file": "read_only_tool:read_source_file",
+            "GET /code/file": "read_only_tool:read_source_file",
             "POST /code/branches": "write_tool:create_working_branch",
-            "PUT /code/file": "write_tool:apply_patch",
+            "PUT /code/file": "write_tool:write_source_file",
             "POST /code/commits": "write_tool:create_commit",
         },
         "deployments": {
             "POST /deployments": "write_tool:deploy_service_or_application",
-            "POST /code/deployment-submissions": "write_tool:deploy_service_or_application",
         },
     },
     "layer2": {
@@ -46,6 +45,7 @@ API_INVENTORY = {
         "navigation": {
             "platform.openApplication": "higher_level_tool_only:navigate_to_application",
             "workspace.openFile": "higher_level_tool_only:open_workspace_file",
+            "registry.listTools": "higher_level_tool_only:list_available_tools",
         }
     },
 }

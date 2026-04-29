@@ -12,9 +12,9 @@ test("chat orchestration emits backend-owned run, context, tool, and completion 
   });
   const toolRegistry = new FakeToolRegistryClient([
     {
-      name: "get_runtime_service",
+      name: "get_platform_service",
       description: "Get runtime service details.",
-      category: "layer1_runtime",
+      category: "platform_discovery",
       layer_target: "layer1",
       read_write_classification: "read",
       required_execution_mode: "read_only",
@@ -46,8 +46,8 @@ test("chat orchestration emits backend-owned run, context, tool, and completion 
         emitted_by: "tool-execution-service",
         tool_call_id: "tool-call-1",
         payload: {
-          tool_name: "get_runtime_service",
-          category: "layer1_runtime",
+          tool_name: "get_platform_service",
+          category: "platform_discovery",
           read_write_classification: "read",
           input_preview: { service_slug: "agent-runtime-service" },
         },
@@ -57,7 +57,7 @@ test("chat orchestration emits backend-owned run, context, tool, and completion 
         emitted_by: "tool-execution-service",
         tool_call_id: "tool-call-1",
         payload: {
-          tool_name: "get_runtime_service",
+          tool_name: "get_platform_service",
           status: "completed",
           result_preview: { service_slug: "agent-runtime-service" },
           duration_ms: 12,
@@ -83,7 +83,7 @@ test("chat orchestration emits backend-owned run, context, tool, and completion 
     toolExecutionClient: toolExecution,
     modelRunner: {
       async *stream(input) {
-        const runtimeTool = input.tools.get_runtime_service as {
+        const runtimeTool = input.tools.get_platform_service as {
           execute: (args: { service_slug: string }, options: { toolCallId: string; messages: [] }) => Promise<unknown>;
         };
         await runtimeTool.execute({ service_slug: "agent-runtime-service" }, { toolCallId: "tool-call-1", messages: [] });
@@ -131,7 +131,7 @@ test("chat orchestration emits backend-owned run, context, tool, and completion 
   );
   const startedEvents = events.filter((chunk) => chunk.event.event_type === "tool.started");
   assert.equal(startedEvents.length, 1);
-  assert.equal(startedEvents[0]?.event.payload.tool_name, "get_runtime_service");
+  assert.equal(startedEvents[0]?.event.payload.tool_name, "get_platform_service");
 
   const lifecycleEvents = events.filter((chunk) => chunk.event.event_type.startsWith("tool."));
   assert.deepEqual(
@@ -160,7 +160,7 @@ test("chat orchestration emits backend-owned run, context, tool, and completion 
     },
   ]);
   assert.equal(toolExecution.calls.length, 1);
-  assert.equal(toolExecution.calls[0]?.tool_name, "get_runtime_service");
+  assert.equal(toolExecution.calls[0]?.tool_name, "get_platform_service");
 });
 
 test("invalid downstream raw events become canonical error events", async () => {

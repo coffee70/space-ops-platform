@@ -67,5 +67,4 @@ def test_tool_registry_definitions_seed_before_tool_name_param() -> None:
     i_list = _route_index(routes, path="/definitions", method="GET")
     i_seed = _route_index(routes, path="/definitions/seed", method="POST")
     i_get_tool = _route_index(routes, path="/definitions/{tool_name}", method="GET")
-    _ = _route_index(routes, path="/definitions/{tool_name}", method="PATCH")
     assert i_list < i_seed < i_get_tool

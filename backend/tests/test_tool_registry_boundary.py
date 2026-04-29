@@ -1,77 +1,31 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
-
 from app.routes.handlers import tool_registry
-from app.models.intelligence import ToolDefinition
 
 
-@dataclass
-class _FakeCondition:
-    value: str
-
-
-class _FakeColumn:
-    def __eq__(self, other: object) -> _FakeCondition:  # type: ignore[override]
-        return _FakeCondition(str(other))
-
-    def asc(self) -> "_FakeColumn":
-        return self
-
-
-class _FakeQuery:
-    def __init__(self, storage: dict[str, ToolDefinition]):
-        self._storage = storage
-        self._condition: _FakeCondition | None = None
-
-    def filter(self, condition: _FakeCondition) -> "_FakeQuery":
-        self._condition = condition
-        return self
-
-    def one_or_none(self) -> ToolDefinition | None:
-        if not self._condition:
-            return None
-        return self._storage.get(self._condition.value)
-
-    def order_by(self, *_args, **_kwargs) -> "_FakeQuery":
-        return self
-
-    def all(self) -> list[ToolDefinition]:
-        return list(self._storage.values())
-
-    def count(self) -> int:
-        return len(self._storage)
-
-
-class _FakeDB:
-    def __init__(self) -> None:
-        self.storage: dict[str, ToolDefinition] = {}
-
-    def query(self, _model: type[ToolDefinition]) -> _FakeQuery:
-        return _FakeQuery(self.storage)
-
-    def add(self, tool: ToolDefinition) -> None:
-        self.storage[tool.name] = tool
-
-
-def test_tool_registry_handler_exports_metadata_routes_only() -> None:
+def test_tool_registry_handler_exports_definitions_routes_without_execute_patch() -> None:
     assert hasattr(tool_registry, "list_tools")
     assert hasattr(tool_registry, "get_tool")
     assert hasattr(tool_registry, "seed_tools")
     assert not hasattr(tool_registry, "execute_tool")
+    assert not hasattr(tool_registry, "patch_tool")
 
 
-def test_seeded_future_write_tools_keep_domain_only_strict_input_schema(monkeypatch) -> None:
-    db = _FakeDB()
-    original_name = ToolDefinition.name
-    monkeypatch.setattr(ToolDefinition, "name", _FakeColumn())
-    try:
-        payload = tool_registry.seed_tools(db=db)
-    finally:
-        monkeypatch.setattr(ToolDefinition, "name", original_name)
+def test_mvp_tool_inventory_matches_input_schemas() -> None:
+    missing = tool_registry.MVP_TOOL_NAMES.difference(tool_registry.TOOL_INPUT_SCHEMAS.keys())
+    assert not missing
 
-    assert payload["total"] > 0
-    seeded = db.storage["create_working_branch"]
-    assert seeded.requires_confirmation is True
-    assert seeded.input_schema_json == {"type": "object", "properties": {}, "additionalProperties": False}
-    assert "confirmation_token" not in seeded.input_schema_json.get("properties", {})
+
+def test_mvp_registry_has_exactly_twenty_five_tools() -> None:
+    assert len(tool_registry.MVP_TOOL_NAMES) == 25
+
+
+def test_write_classification_tools_are_execute_only() -> None:
+    executes = {"trigger_document_reingestion", "create_working_branch", "scaffold_service", "write_source_file", "create_commit", "deploy_service_or_application"}
+    assert executes.issubset(tool_registry.MVP_TOOL_NAMES)
+
+
+def test_write_tools_have_strict_non_empty_schemas_where_applicable() -> None:
+    assert tool_registry.TOOL_INPUT_SCHEMAS["create_working_branch"]["properties"]
+    assert tool_registry.TOOL_INPUT_SCHEMAS["write_source_file"]["required"] == ["branch", "path", "content"]
+    assert tool_registry.TOOL_INPUT_SCHEMAS["read_source_file"]["required"] == ["branch", "path"]
