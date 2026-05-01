@@ -188,11 +188,6 @@ async def _execute_mapped_tool(name: str, tool_input: dict, *, db: Session, trac
             if not tool_input.get('older_than_minutes'):
                 raise HTTPException(status_code=400, detail='older_than_minutes is required')
             return await _cp_post('internal/delete/stale', payload)
-        if mode == 'scope':
-            delete_scope_id = tool_input.get('delete_scope_id')
-            if not delete_scope_id:
-                raise HTTPException(status_code=400, detail='delete_scope_id is required')
-            return await _cp_post(f'internal/delete/scopes/{delete_scope_id}', payload)
         raise HTTPException(status_code=400, detail='unsupported delete mode')
 
     # Layer 1 read file

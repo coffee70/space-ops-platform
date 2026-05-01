@@ -76,4 +76,16 @@ def test_delete_managed_resources_schema_is_strict_and_destructive() -> None:
     schema = tool_registry.TOOL_INPUT_SCHEMAS["delete_managed_resources"]
     assert schema["required"] == ["mode"]
     assert schema["additionalProperties"] is False
-    assert schema["properties"]["mode"]["enum"] == ["scope", "managed_unit", "code", "stale"]
+    assert schema["properties"]["mode"]["enum"] == ["managed_unit", "code", "stale"]
+    assert set(schema["properties"]) == {
+        "mode",
+        "unit_id",
+        "deployment_id",
+        "branch",
+        "paths",
+        "older_than_minutes",
+        "include_code",
+        "include_runtime",
+        "include_registry",
+        "include_intelligence_records",
+    }

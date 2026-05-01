@@ -52,22 +52,15 @@ async def test_delete_managed_resources_maps_modes_to_control_plane(monkeypatch)
         db=object(),
         trace=trace,
     )
-    await tool_execution._execute_mapped_tool(
-        "delete_managed_resources",
-        {"mode": "scope", "delete_scope_id": "scope-1", "older_than_minutes": 5},
-        db=object(),
-        trace=trace,
-    )
 
     assert [path for path, _payload in calls] == [
         "internal/delete/managed-units",
         "internal/delete/code",
         "internal/delete/stale",
-        "internal/delete/scopes/scope-1",
     ]
     assert calls[0][1]["unit_id"] == "sample-service"
     assert calls[0][1]["tool_call_id"] == trace["tool_call_id"]
-    assert calls[3][1]["older_than_minutes"] == 5
+    assert calls[2][1]["older_than_minutes"] == 120
 
 
 @pytest.mark.anyio

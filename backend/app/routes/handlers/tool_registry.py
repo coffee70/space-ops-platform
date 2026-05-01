@@ -226,8 +226,7 @@ TOOL_INPUT_SCHEMAS: dict[str, dict] = {
     'delete_managed_resources': {
         'type': 'object',
         'properties': {
-            'mode': {'type': 'string', 'enum': ['scope', 'managed_unit', 'code', 'stale']},
-            'delete_scope_id': {'type': 'string', 'minLength': 1, 'maxLength': 255},
+            'mode': {'type': 'string', 'enum': ['managed_unit', 'code', 'stale']},
             'unit_id': {'type': 'string', 'minLength': 1, 'maxLength': 255},
             'deployment_id': {'type': 'string', 'minLength': 1, 'maxLength': 64},
             'branch': {'type': 'string', 'minLength': 1, 'maxLength': 255},
@@ -241,7 +240,6 @@ TOOL_INPUT_SCHEMAS: dict[str, dict] = {
         'required': ['mode'],
         'additionalProperties': False,
         'allOf': [
-            {'if': {'properties': {'mode': {'const': 'scope'}}}, 'then': {'required': ['delete_scope_id']}},
             {'if': {'properties': {'mode': {'const': 'managed_unit'}}}, 'then': {'required': ['unit_id']}},
             {'if': {'properties': {'mode': {'const': 'code'}}}, 'then': {'required': ['branch']}},
             {'if': {'properties': {'mode': {'const': 'stale'}}}, 'then': {'required': ['older_than_minutes']}},
