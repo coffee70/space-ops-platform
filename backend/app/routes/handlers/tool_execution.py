@@ -77,7 +77,8 @@ def _combine_repo_path(repository: str, path: str) -> str:
     return f"{r}/{p}"
 
 
-async def _execute_mapped_tool(name: str, tool_input: dict, *, db: Session):
+async def _execute_mapped_tool(name: str, tool_input: dict, *, db: Session, trace: dict | None = None):
+    trace_payload = trace or {}
     # --- meta ---
     if name == 'list_available_tools':
         tools = (
@@ -149,6 +150,50 @@ async def _execute_mapped_tool(name: str, tool_input: dict, *, db: Session):
             dep['commit_sha'] = tool_input['commit_sha']
         result = await _cp_post('deployments', dep)
         return result if isinstance(result, dict) else {'deployment': result}
+
+    if name == 'delete_managed_resources':
+        mode = tool_input['mode']
+        payload = {
+            key: tool_input[key]
+            for key in (
+                'include_code',
+                'include_runtime',
+                'include_registry',
+                'include_intelligence_records',
+                'older_than_minutes',
+                'unit_id',
+                'deployment_id',
+                'branch',
+                'paths',
+            )
+            if key in tool_input
+        }
+        payload.update(
+            {
+                'conversation_id': trace_payload.get('conversation_id'),
+                'agent_run_id': trace_payload.get('agent_run_id'),
+                'request_id': trace_payload.get('request_id'),
+                'tool_call_id': trace_payload.get('tool_call_id'),
+            }
+        )
+        if mode == 'managed_unit':
+            if not tool_input.get('unit_id'):
+                raise HTTPException(status_code=400, detail='unit_id is required')
+            return await _cp_post('internal/delete/managed-units', payload)
+        if mode == 'code':
+            if not tool_input.get('branch'):
+                raise HTTPException(status_code=400, detail='branch is required')
+            return await _cp_post('internal/delete/code', payload)
+        if mode == 'stale':
+            if not tool_input.get('older_than_minutes'):
+                raise HTTPException(status_code=400, detail='older_than_minutes is required')
+            return await _cp_post('internal/delete/stale', payload)
+        if mode == 'scope':
+            delete_scope_id = tool_input.get('delete_scope_id')
+            if not delete_scope_id:
+                raise HTTPException(status_code=400, detail='delete_scope_id is required')
+            return await _cp_post(f'internal/delete/scopes/{delete_scope_id}', payload)
+        raise HTTPException(status_code=400, detail='unsupported delete mode')
 
     # Layer 1 read file
     if name == 'read_source_file':
@@ -311,7 +356,17 @@ async def execute_tool(body: ToolExecutionRequest, request: Request, db: Session
     )
 
     try:
-        output = await _execute_mapped_tool(body.tool_name, body.input, db=db)
+        output = await _execute_mapped_tool(
+            body.tool_name,
+            body.input,
+            db=db,
+            trace={
+                "conversation_id": conversation_id,
+                "agent_run_id": agent_run_id,
+                "request_id": request_id,
+                "tool_call_id": tool_call_id,
+            },
+        )
         call.status = 'completed'
         call.output_json = redact(output if isinstance(output, dict) else {'result': output})
         call.completed_at = datetime.now(timezone.utc)

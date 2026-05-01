@@ -49,6 +49,7 @@ SUPPORTED_TOOL_NAMES: frozenset[str] = frozenset(
         'write_source_file',
         'create_commit',
         'deploy_service_or_application',
+        'delete_managed_resources',
     }
 )
 
@@ -222,6 +223,30 @@ TOOL_INPUT_SCHEMAS: dict[str, dict] = {
         'required': ['unit_id'],
         'additionalProperties': False,
     },
+    'delete_managed_resources': {
+        'type': 'object',
+        'properties': {
+            'mode': {'type': 'string', 'enum': ['scope', 'managed_unit', 'code', 'stale']},
+            'delete_scope_id': {'type': 'string', 'minLength': 1, 'maxLength': 255},
+            'unit_id': {'type': 'string', 'minLength': 1, 'maxLength': 255},
+            'deployment_id': {'type': 'string', 'minLength': 1, 'maxLength': 64},
+            'branch': {'type': 'string', 'minLength': 1, 'maxLength': 255},
+            'paths': {'type': 'array', 'items': {'type': 'string', 'minLength': 1, 'maxLength': 2000}},
+            'older_than_minutes': {'type': 'integer', 'minimum': 1},
+            'include_code': {'type': 'boolean'},
+            'include_runtime': {'type': 'boolean'},
+            'include_registry': {'type': 'boolean'},
+            'include_intelligence_records': {'type': 'boolean'},
+        },
+        'required': ['mode'],
+        'additionalProperties': False,
+        'allOf': [
+            {'if': {'properties': {'mode': {'const': 'scope'}}}, 'then': {'required': ['delete_scope_id']}},
+            {'if': {'properties': {'mode': {'const': 'managed_unit'}}}, 'then': {'required': ['unit_id']}},
+            {'if': {'properties': {'mode': {'const': 'code'}}}, 'then': {'required': ['branch']}},
+            {'if': {'properties': {'mode': {'const': 'stale'}}}, 'then': {'required': ['older_than_minutes']}},
+        ],
+    },
 }
 
 
@@ -355,9 +380,11 @@ def seed_tools(db: Session = Depends(get_db)):
         ('write_source_file', 'Overwrite a file on a managed fork branch.', 'code_write', 'layer1', ('control-plane', 'PUT /code/file')),
         ('create_commit', 'Create a commit for staged changes on a branch.', 'code_write', 'layer1', ('control-plane', 'POST /code/commits')),
         ('deploy_service_or_application', 'Build and deploy a managed unit from a branch.', 'deployment', 'layer1', ('control-plane', 'POST /deployments')),
+        ('delete_managed_resources', 'Delete delete-eligible managed resources through control-plane delete routes.', 'resource_delete', 'layer1', ('control-plane', 'POST /internal/delete/...')),
     ]
     for name, description, cat, lt, bk in writes:
-        upsert(name=name, description=description, category=cat, layer_target=lt, read_write='write', execution_mode='execute', backing_service=bk[0], backing_api=bk[1])
+        read_write = 'destructive_write' if name == 'delete_managed_resources' else 'write'
+        upsert(name=name, description=description, category=cat, layer_target=lt, read_write=read_write, execution_mode='execute', backing_service=bk[0], backing_api=bk[1])
 
     stale_removed = _delete_stale_tool_definitions(db)
     db.flush()

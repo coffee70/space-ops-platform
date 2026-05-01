@@ -20,12 +20,12 @@ def test_supported_tool_inventory_matches_input_schemas() -> None:
     assert not missing
 
 
-def test_supported_registry_has_exactly_twenty_five_tools() -> None:
-    assert len(tool_registry.SUPPORTED_TOOL_NAMES) == 25
+def test_supported_registry_has_exactly_twenty_six_tools() -> None:
+    assert len(tool_registry.SUPPORTED_TOOL_NAMES) == 26
 
 
 def test_write_classification_tools_are_execute_only() -> None:
-    executes = {"trigger_document_reingestion", "create_working_branch", "scaffold_service", "write_source_file", "create_commit", "deploy_service_or_application"}
+    executes = {"trigger_document_reingestion", "create_working_branch", "scaffold_service", "write_source_file", "create_commit", "deploy_service_or_application", "delete_managed_resources"}
     assert executes.issubset(tool_registry.SUPPORTED_TOOL_NAMES)
 
 
@@ -70,3 +70,10 @@ def test_query_recent_telemetry_backing_documents_recent_endpoint() -> None:
         "telemetry-query-service",
         "GET /telemetry/{name}/recent?source_id={source_id}&limit={limit}",
     )
+
+
+def test_delete_managed_resources_schema_is_strict_and_destructive() -> None:
+    schema = tool_registry.TOOL_INPUT_SCHEMAS["delete_managed_resources"]
+    assert schema["required"] == ["mode"]
+    assert schema["additionalProperties"] is False
+    assert schema["properties"]["mode"]["enum"] == ["scope", "managed_unit", "code", "stale"]
