@@ -1,7 +1,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import json
 from typing import Any
+
+from jsonschema import Draft7Validator
+from jsonschema.exceptions import SchemaError as JsonSchemaCompileError
+from jsonschema.exceptions import ValidationError as JsonSchemaValidationError
+
 
 @dataclass
 class ToolInputValidationError(Exception):
@@ -13,77 +19,58 @@ class ToolSchemaDefinitionError(Exception):
     message: str
 
 
-def _type_matches(expected: str, value: Any) -> bool:
-    if expected == "string":
-        return isinstance(value, str)
-    if expected == "integer":
-        return isinstance(value, int) and not isinstance(value, bool)
-    if expected == "number":
-        return (isinstance(value, int) or isinstance(value, float)) and not isinstance(value, bool)
-    if expected == "boolean":
-        return isinstance(value, bool)
-    if expected == "object":
-        return isinstance(value, dict)
-    if expected == "array":
-        return isinstance(value, list)
-    return True
+def _json_path_from_validator_error(error: JsonSchemaValidationError) -> str:
+    segments = list(error.absolute_path)
+    if not segments:
+        return "$"
+    buf = "$"
+    for seg in segments:
+        if isinstance(seg, int):
+            buf += f"[{seg}]"
+        else:
+            buf += f".{seg}"
+    return buf
 
 
-def _validate_object(schema: dict[str, Any], payload: dict[str, Any], path_prefix: str = "$") -> list[dict[str, Any]]:
-    properties = schema.get("properties") or {}
-    required = set(schema.get("required") or [])
-    additional_properties = schema.get("additionalProperties", True)
-    errors: list[dict[str, Any]] = []
+def _summarize_validator_value(error: JsonSchemaValidationError) -> str | Any | None:
+    val = getattr(error, "validator_value", None)
+    if val is None:
+        return None
+    if isinstance(val, (dict, list)):
+        try:
+            return json.dumps(val, sort_keys=True, default=str)
+        except TypeError:
+            return str(val)
+    return val
 
-    if not isinstance(properties, dict):
-        raise ToolSchemaDefinitionError("tool schema properties must be an object")
 
-    for name in required:
-        if name not in payload:
-            errors.append(
-                {
-                    "code": "invalid_input",
-                    "path": f"{path_prefix}.{name}",
-                    "message": f"'{name}' is a required property",
-                    "expected": "present",
-                    "actual": None,
-                }
-            )
+def _leaf_validation_errors(errors: list[JsonSchemaValidationError]) -> list[JsonSchemaValidationError]:
+    """Prefer leaf diagnostics; parent validators (allOf/if) only add generic wrapper messages."""
 
-    if additional_properties is False:
-        for key in payload:
-            if key not in properties:
-                errors.append(
-                    {
-                        "code": "invalid_input",
-                        "path": f"{path_prefix}.{key}",
-                        "message": f"Additional properties are not allowed ('{key}' was unexpected)",
-                        "expected": "known_property",
-                        "actual": payload[key],
-                    }
-                )
+    sorted_errors = sorted(
+        errors,
+        key=lambda e: (tuple(e.absolute_path), getattr(e, "validator", ""), repr(getattr(e, "validator_value", None))),
+    )
+    out: list[JsonSchemaValidationError] = []
+    for err in sorted_errors:
+        if err.context:
+            out.extend(_leaf_validation_errors(list(err.context)))
+        else:
+            out.append(err)
+    return out
 
-    for key, prop_schema in properties.items():
-        if key not in payload:
-            continue
-        if not isinstance(prop_schema, dict):
-            raise ToolSchemaDefinitionError("tool schema property definitions must be objects")
-        expected_type = prop_schema.get("type")
-        value = payload[key]
-        if isinstance(expected_type, str) and not _type_matches(expected_type, value):
-            errors.append(
-                {
-                    "code": "invalid_input",
-                    "path": f"{path_prefix}.{key}",
-                    "message": f"Expected type '{expected_type}'",
-                    "expected": expected_type,
-                    "actual": value,
-                }
-            )
-            continue
-        if expected_type == "object" and isinstance(value, dict):
-            errors.extend(_validate_object(prop_schema, value, path_prefix=f"{path_prefix}.{key}"))
-    return errors
+
+def _validation_error_dict(error: JsonSchemaValidationError) -> dict[str, Any]:
+    actual: Any | None = error.instance
+    if error.validator == "required":
+        actual = None
+    return {
+        "code": "invalid_input",
+        "path": _json_path_from_validator_error(error),
+        "message": error.message,
+        "expected": _summarize_validator_value(error),
+        "actual": actual,
+    }
 
 
 def validate_tool_input(schema: dict[str, Any], payload: dict[str, Any]) -> None:
@@ -103,6 +90,19 @@ def validate_tool_input(schema: dict[str, Any], payload: dict[str, Any]) -> None
                 }
             ]
         )
-    errors = _validate_object(schema, payload)
-    if errors:
-        raise ToolInputValidationError(errors)
+
+    try:
+        Draft7Validator.check_schema(schema)
+    except JsonSchemaCompileError as exc:
+        raise ToolSchemaDefinitionError(str(exc)) from exc
+
+    validator = Draft7Validator(schema)
+    collected = sorted(
+        _leaf_validation_errors(list(validator.iter_errors(payload))),
+        key=lambda e: (tuple(e.absolute_path), getattr(e, "validator", ""), e.message),
+    )
+    if not collected:
+        return
+
+    flattened: list[dict[str, Any]] = [_validation_error_dict(e) for e in collected]
+    raise ToolInputValidationError(flattened)
