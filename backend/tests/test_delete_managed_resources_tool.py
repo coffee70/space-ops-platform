@@ -4,6 +4,7 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
+from fastapi import HTTPException
 from starlette.requests import Request
 
 from app.models.intelligence import ToolCall
@@ -130,3 +131,51 @@ async def test_delete_managed_resources_execute_tool_records_call_and_events(mon
     assert isinstance(db.add.call_args.args[0], ToolCall)
     assert db.add.call_args.args[0].tool_name == "delete_managed_resources"
     assert db.add.call_args.args[0].status == "completed"
+
+
+@pytest.mark.anyio
+async def test_execute_tool_rejects_schema_invalid_input_before_mapping(monkeypatch) -> None:
+    mapped_called = False
+
+    async def fake_execute_mapped_tool(*args, **kwargs):
+        nonlocal mapped_called
+        mapped_called = True
+        return {}
+
+    monkeypatch.setattr(tool_execution, "_execute_mapped_tool", fake_execute_mapped_tool)
+
+    db = MagicMock()
+    db.query.return_value.filter.return_value.one_or_none.return_value = SimpleNamespace(
+        name="delete_managed_resources",
+        enabled=True,
+        category="resource_delete",
+        read_write_classification="destructive_write",
+        requires_confirmation=False,
+        required_execution_mode="execute",
+        input_schema_json=tool_registry.TOOL_INPUT_SCHEMAS["delete_managed_resources"],
+    )
+
+    with pytest.raises(HTTPException) as exc:
+        await tool_execution.execute_tool(
+            tool_execution.ToolExecutionRequest(
+                conversation_id="11111111-1111-1111-1111-111111111111",
+                agent_run_id="22222222-2222-2222-2222-222222222222",
+                request_id="33333333-3333-3333-3333-333333333333",
+                tool_call_id="44444444-4444-4444-4444-444444444444",
+                tool_name="delete_managed_resources",
+                input={"mode": "managed_unit"},
+                execution_mode="execute",
+            ),
+            request=_request(
+                {
+                    "x-agent-run-id": "22222222-2222-2222-2222-222222222222",
+                    "x-request-id": "33333333-3333-3333-3333-333333333333",
+                    "x-tool-call-id": "44444444-4444-4444-4444-444444444444",
+                }
+            ),
+            db=db,
+        )
+
+    assert exc.value.status_code == 400
+    assert exc.value.detail["error_code"] == "tool_input_validation_failed"
+    assert mapped_called is False
