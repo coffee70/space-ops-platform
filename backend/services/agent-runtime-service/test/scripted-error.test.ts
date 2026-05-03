@@ -4,7 +4,7 @@ import test from "node:test";
 import { createApp } from "../src/server.js";
 import { contextResolvedEvent, FakeContextClient, FakeToolExecutionClient, FakeToolRegistryClient, MemoryConversationStore, parseNdjson } from "./helpers.js";
 
-test("fallback path still emits runtime-owned completion lifecycle", async () => {
+test("scripted_error emits deterministic error and run.failed without invoking the model", async () => {
   const store = new MemoryConversationStore();
   const conversation = await store.createConversation({
     title: "AI Engineer Session",
@@ -21,7 +21,7 @@ test("fallback path still emits runtime-owned completion lifecycle", async () =>
       modelId: "gpt-4o-mini",
       maxSteps: 3,
       requestTimeoutMs: 1000,
-      scriptedMode: null,
+      scriptedMode: "scripted_error",
       allowMissingKeyFallback: true,
     },
     store,
@@ -29,16 +29,16 @@ test("fallback path still emits runtime-owned completion lifecycle", async () =>
     toolRegistryClient: new FakeToolRegistryClient([]),
     toolExecutionClient: new FakeToolExecutionClient({
       conversation_id: conversation.id,
-      agent_run_id: "run",
-      request_id: "req",
-      tool_call_id: "tool",
+      agent_run_id: "ignored",
+      request_id: "ignored",
+      tool_call_id: "ignored",
       status: "completed",
       output: {},
       raw_events: [],
     }),
     modelRunner: {
       async *stream() {
-        throw new Error("model runner should not be invoked in fallback mode");
+        throw new Error("model runner should not be invoked in scripted mode");
       },
     },
   });
@@ -49,19 +49,15 @@ test("fallback path still emits runtime-owned completion lifecycle", async () =>
     body: JSON.stringify({
       conversation_id: conversation.id,
       execution_mode: "read_only",
-      messages: [{ role: "user", content: "Run fallback mode." }],
+      messages: [{ role: "user", content: "Fail deterministically." }],
     }),
   });
 
   assert.equal(response.status, 200);
   const chunks = parseNdjson(await response.text());
-  const delta = chunks.find((chunk) => chunk.kind === "event" && (chunk as { event: { event_type: string } }).event.event_type === "message.delta") as {
-    event: { payload: { text_delta: string } };
-  };
-  assert.match(delta.event.payload.text_delta, /Deterministic no-LLM runtime mode is active/);
-
   const eventTypes = chunks
     .filter((chunk) => chunk.kind === "event")
     .map((chunk) => (chunk as { event: { event_type: string } }).event.event_type);
-  assert.deepEqual(eventTypes, ["run.started", "context.requested", "context.resolved", "message.delta", "message.completed", "run.completed"]);
+  assert.deepEqual(eventTypes, ["run.started", "context.requested", "context.resolved", "error", "run.failed"]);
+  assert.equal(store.events.at(-1)?.event_type, "run.failed");
 });

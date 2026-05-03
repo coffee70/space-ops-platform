@@ -13,6 +13,8 @@ test("tool execution client posts through tool-execution-service only", async ()
     modelId: "gpt-4o-mini",
     maxSteps: 3,
     requestTimeoutMs: 1000,
+    scriptedMode: null,
+    allowMissingKeyFallback: false,
   });
 
   const calls: Array<{ url: string; init?: RequestInit }> = [];
@@ -72,6 +74,8 @@ test("tool execution client forwards top-level confirmation token", async () => 
     modelId: "gpt-4o-mini",
     maxSteps: 3,
     requestTimeoutMs: 1000,
+    scriptedMode: null,
+    allowMissingKeyFallback: false,
   });
 
   const calls: Array<{ url: string; init?: RequestInit }> = [];

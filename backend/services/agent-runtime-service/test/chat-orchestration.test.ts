@@ -76,6 +76,8 @@ test("chat orchestration emits backend-owned run, context, tool, and completion 
       modelId: "gpt-4o-mini",
       maxSteps: 3,
       requestTimeoutMs: 1000,
+      scriptedMode: null,
+      allowMissingKeyFallback: false,
     },
     store,
     contextClient: new FakeContextClient([contextResolvedEvent()]),
@@ -180,6 +182,8 @@ test("invalid downstream raw events become canonical error events", async () => 
       modelId: "gpt-4o-mini",
       maxSteps: 3,
       requestTimeoutMs: 1000,
+      scriptedMode: null,
+      allowMissingKeyFallback: true,
     },
     store,
     contextClient: new FakeContextClient([

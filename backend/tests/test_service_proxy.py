@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import httpx
 import pytest
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.testclient import TestClient
 
 from app.routes import gateway_http
@@ -223,3 +223,19 @@ def test_gateway_routes_proxy_expected_service_paths(monkeypatch) -> None:
         ("tool-registry-service", "definitions/get_platform_service"),
         ("tool-execution-service", "execute"),
     ]
+
+
+def test_gateway_intelligence_routes_do_not_expose_control_plane_mutation_bypasses() -> None:
+    forbidden_paths = [
+        "deployments",
+        "code/branches",
+        "code/file",
+        "code/commits",
+        "code/repositories/index",
+        "documents/123/reingest",
+        "internal/delete/managed-units",
+    ]
+
+    for path in forbidden_paths:
+        with pytest.raises(HTTPException):
+            gateway_http._resolve_intelligence_service(path)

@@ -228,6 +228,8 @@ export interface RuntimeConfig {
   modelId: string;
   maxSteps: number;
   requestTimeoutMs: number;
+  scriptedMode: string | null;
+  allowMissingKeyFallback: boolean;
 }
 
 export interface RunDependencies {

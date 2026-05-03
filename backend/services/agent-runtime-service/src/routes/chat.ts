@@ -6,6 +6,7 @@ import { createToolSet, filterToolDefinitionsForExecutionMode } from "../ai/tool
 import { AgentEventStream } from "../events/stream.js";
 import { RunSequencer } from "../events/sequencer.js";
 import { runFallback } from "../fallback.js";
+import { completeScriptedRun, resolveScriptedMode, runScriptedMode } from "../scripted.js";
 import { createTrace } from "../trace.js";
 import type { ChatInputMessage, ContextPacketResponse, ExecutionMode, RawEventFact, RunDependencies } from "../types.js";
 
@@ -197,7 +198,36 @@ async function orchestrateChat(input: {
       messages: modelMessages,
     });
 
+    const scriptedMode = resolveScriptedMode(dependencies.config.scriptedMode, input.latestUserMessage);
+    if (scriptedMode) {
+      if (!dependencies.config.allowMissingKeyFallback) {
+        throw new Error("Deterministic scripted mode is disabled in this environment.");
+      }
+      const result = await runScriptedMode({
+        mode: scriptedMode,
+        stream,
+        store: dependencies.store,
+        trace: input.trace,
+        executionMode: input.executionMode,
+        toolDefinitions,
+        toolExecutionClient: dependencies.toolExecutionClient,
+        contextPacketId: context.context_packet_id,
+      });
+      await completeScriptedRun({
+        store: dependencies.store,
+        stream,
+        trace: input.trace,
+        result,
+        contextPacketId: context.context_packet_id,
+      });
+      await stream.close();
+      return;
+    }
+
     if (!dependencies.config.openAiApiKey) {
+      if (!dependencies.config.allowMissingKeyFallback) {
+        throw new Error("Model API key is not configured and deterministic no-LLM mode is not enabled.");
+      }
       await runFallback({
         stream,
         userMessage: input.latestUserMessage,

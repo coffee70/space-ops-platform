@@ -65,58 +65,84 @@ async def index_repository(body: dict, db: Session = Depends(get_db)):
         db.add(repository)
         db.flush()
 
-    tree = await _cp_get("code/tree", params={"branch": branch, "path": root})
-    entries = tree.get("data", {}).get("entries", [])
-    files = [entry["path"] for entry in entries if entry.get("type") == "file"]
-    provider = get_embedding_provider()
-    file_count = 0
-    chunk_count = 0
-    for path in files:
-        if any(skip in path for skip in ["node_modules", ".next", "/dist/", "/build/", "/coverage/", "/.git/"]):
-            continue
-        file_data = await _cp_get("code/file", params={"branch": branch, "path": path})
-        content = file_data.get("data", {}).get("content", "")
-        if not content or len(content) > 100_000:
-            continue
-        chunks = chunk_code(content, max_chars=1500)
-        commit_sha = file_data.get("commit_sha") or tree.get("commit_sha") or ""
-        db.query(CodeChunk).filter(CodeChunk.repository_id == repository.id, CodeChunk.branch == branch, CodeChunk.file_path == path).delete()
-        for idx, chunk in enumerate(chunks):
-            db.add(
-                CodeChunk(
-                    repository_id=repository.id,
-                    branch=branch,
-                    commit_sha=commit_sha,
-                    file_path=path,
-                    language=path.split(".")[-1] if "." in path else None,
-                    symbol_name=None,
-                    symbol_type="chunk",
-                    start_line=None,
-                    end_line=None,
-                    content=chunk,
-                    content_hash=sha256_text(chunk),
-                    embedding=provider.embed(chunk),
-                    embedding_model=DEFAULT_EMBEDDING_MODEL,
-                    metadata_json={"chunk_index": idx},
-                    indexed_at=datetime.now(timezone.utc),
-                )
-            )
-            chunk_count += 1
-        file_count += 1
-
-    repository.updated_at = datetime.now(timezone.utc)
     if body.get("conversation_id") and body.get("agent_run_id") and body.get("request_id"):
         emit_event(
             db,
-            event_type="code.index_completed",
-            payload={"repository": repository.name, "branch": branch, "commit_sha": "", "file_count": file_count, "chunk_count": chunk_count, "duration_ms": 0},
+            event_type="code.index_started",
+            payload={"repository": repository.name, "branch": branch, "commit_sha": ""},
             conversation_id=body.get("conversation_id"),
             agent_run_id=body.get("agent_run_id"),
             request_id=body.get("request_id"),
             sequence=1,
             emitted_by="code-intelligence-service",
         )
-    return {"repository_id": str(repository.id), "file_count": file_count, "chunk_count": chunk_count}
+
+    try:
+        tree = await _cp_get("code/tree", params={"branch": branch, "path": root})
+        entries = tree.get("data", {}).get("entries", [])
+        files = [entry["path"] for entry in entries if entry.get("type") == "file"]
+        provider = get_embedding_provider()
+        file_count = 0
+        chunk_count = 0
+        for path in files:
+            if any(skip in path for skip in ["node_modules", ".next", "/dist/", "/build/", "/coverage/", "/.git/"]):
+                continue
+            file_data = await _cp_get("code/file", params={"branch": branch, "path": path})
+            content = file_data.get("data", {}).get("content", "")
+            if not content or len(content) > 100_000:
+                continue
+            chunks = chunk_code(content, max_chars=1500)
+            commit_sha = file_data.get("commit_sha") or tree.get("commit_sha") or ""
+            db.query(CodeChunk).filter(CodeChunk.repository_id == repository.id, CodeChunk.branch == branch, CodeChunk.file_path == path).delete()
+            for idx, chunk in enumerate(chunks):
+                db.add(
+                    CodeChunk(
+                        repository_id=repository.id,
+                        branch=branch,
+                        commit_sha=commit_sha,
+                        file_path=path,
+                        language=path.split(".")[-1] if "." in path else None,
+                        symbol_name=None,
+                        symbol_type="chunk",
+                        start_line=None,
+                        end_line=None,
+                        content=chunk,
+                        content_hash=sha256_text(chunk),
+                        embedding=provider.embed(chunk),
+                        embedding_model=DEFAULT_EMBEDDING_MODEL,
+                        metadata_json={"chunk_index": idx},
+                        indexed_at=datetime.now(timezone.utc),
+                    )
+                )
+                chunk_count += 1
+            file_count += 1
+
+        repository.updated_at = datetime.now(timezone.utc)
+        if body.get("conversation_id") and body.get("agent_run_id") and body.get("request_id"):
+            emit_event(
+                db,
+                event_type="code.index_completed",
+                payload={"repository": repository.name, "branch": branch, "commit_sha": "", "file_count": file_count, "chunk_count": chunk_count, "duration_ms": 0},
+                conversation_id=body.get("conversation_id"),
+                agent_run_id=body.get("agent_run_id"),
+                request_id=body.get("request_id"),
+                sequence=2,
+                emitted_by="code-intelligence-service",
+            )
+        return {"repository_id": str(repository.id), "file_count": file_count, "chunk_count": chunk_count}
+    except Exception as exc:
+        if body.get("conversation_id") and body.get("agent_run_id") and body.get("request_id"):
+            emit_event(
+                db,
+                event_type="code.index_failed",
+                payload={"repository": repository.name, "branch": branch, "error_code": "code_index_failed", "message": str(exc)},
+                conversation_id=body.get("conversation_id"),
+                agent_run_id=body.get("agent_run_id"),
+                request_id=body.get("request_id"),
+                sequence=2,
+                emitted_by="code-intelligence-service",
+            )
+        raise
 
 
 def get_repository_status(repository_id: str, db: Session = Depends(get_db)):

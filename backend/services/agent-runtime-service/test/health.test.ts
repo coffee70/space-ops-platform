@@ -15,6 +15,8 @@ test("health endpoint returns ok", async () => {
       modelId: "gpt-4o-mini",
       maxSteps: 3,
       requestTimeoutMs: 1000,
+      scriptedMode: null,
+      allowMissingKeyFallback: true,
     },
     store: new MemoryConversationStore(),
     contextClient: new FakeContextClient(),

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from unittest.mock import MagicMock
+
 import pytest
 
 from app.intelligence.tool_validation import ToolInputValidationError, validate_tool_input
@@ -89,3 +91,24 @@ def test_delete_managed_resources_schema_is_strict_and_destructive() -> None:
         "include_registry",
         "include_intelligence_records",
     }
+
+
+def test_phase3_write_deploy_delete_tools_remain_metadata_only_and_discoverable() -> None:
+    db = MagicMock()
+    db.query.return_value.filter.return_value.one_or_none.return_value = None
+    db.query.return_value.count.return_value = 0
+
+    tool_registry.seed_tools(db=db)
+    seeded = {tool.name: tool for tool in (call.args[0] for call in db.add.call_args_list)}
+
+    assert seeded["create_working_branch"].backing_service == "control-plane"
+    assert seeded["deploy_service_or_application"].backing_api == "POST /deployments"
+    assert seeded["delete_managed_resources"].read_write_classification == "destructive_write"
+    assert all(seeded[name].enabled is True for name in (
+        "create_working_branch",
+        "scaffold_service",
+        "write_source_file",
+        "create_commit",
+        "deploy_service_or_application",
+        "delete_managed_resources",
+    ))

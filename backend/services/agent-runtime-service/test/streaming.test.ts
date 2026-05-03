@@ -21,6 +21,8 @@ test("chat stream delivers message deltas before completion across multiple chun
       modelId: "gpt-4o-mini",
       maxSteps: 3,
       requestTimeoutMs: 1000,
+      scriptedMode: null,
+      allowMissingKeyFallback: false,
     },
     store,
     contextClient: new FakeContextClient([contextResolvedEvent()]),

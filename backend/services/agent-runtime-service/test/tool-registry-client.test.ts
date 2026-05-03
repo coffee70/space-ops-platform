@@ -13,6 +13,8 @@ test("tool registry client forwards trace headers", async () => {
     modelId: "gpt-4o-mini",
     maxSteps: 3,
     requestTimeoutMs: 1000,
+    scriptedMode: null,
+    allowMissingKeyFallback: false,
   });
 
   const fetchCalls: Array<{ url: string; init?: RequestInit }> = [];

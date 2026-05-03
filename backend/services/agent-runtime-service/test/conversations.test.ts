@@ -15,6 +15,8 @@ function createTestApp(store: MemoryConversationStore) {
       modelId: "gpt-4o-mini",
       maxSteps: 3,
       requestTimeoutMs: 1000,
+      scriptedMode: null,
+      allowMissingKeyFallback: true,
     },
     store,
     contextClient: new FakeContextClient(),

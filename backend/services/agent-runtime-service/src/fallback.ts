@@ -9,10 +9,10 @@ export async function runFallback(input: {
   persistAssistantMessage: (content: string) => Promise<ConversationMessageRecord>;
 }): Promise<ConversationMessageRecord> {
   const text = [
-    "Model API key is not configured in this environment.",
+    "Deterministic no-LLM runtime mode is active in this local/test environment.",
     `Execution mode: ${input.executionMode}.`,
     "",
-    "The request completed through the runtime fallback path.",
+    "The request completed through the runtime-owned deterministic fallback path.",
     `User message preview: ${input.userMessage.slice(0, 300)}`,
   ].join("\n");
 

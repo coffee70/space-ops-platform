@@ -18,6 +18,9 @@ const envSchema = z.object({
   AGENT_RUNTIME_MODEL: z.string().min(1).default("gpt-4o-mini"),
   AGENT_RUNTIME_MAX_STEPS: z.coerce.number().int().positive().default(5),
   AGENT_RUNTIME_REQUEST_TIMEOUT_MS: z.coerce.number().int().positive().default(30000),
+  AGENT_RUNTIME_SCRIPTED_MODE: z.preprocess(emptyStringToUndefined, z.string().min(1).optional()),
+  AGENT_RUNTIME_ALLOW_NO_LLM_FALLBACK: z.coerce.boolean().optional(),
+  NODE_ENV: z.preprocess(emptyStringToUndefined, z.string().optional()),
 });
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): RuntimeConfig {
@@ -32,5 +35,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): RuntimeConfig 
     modelId: parsed.AGENT_RUNTIME_MODEL,
     maxSteps: parsed.AGENT_RUNTIME_MAX_STEPS,
     requestTimeoutMs: parsed.AGENT_RUNTIME_REQUEST_TIMEOUT_MS,
+    scriptedMode: parsed.AGENT_RUNTIME_SCRIPTED_MODE ?? null,
+    allowMissingKeyFallback:
+      parsed.AGENT_RUNTIME_ALLOW_NO_LLM_FALLBACK ?? ((parsed.NODE_ENV ?? "development") !== "production"),
   };
 }

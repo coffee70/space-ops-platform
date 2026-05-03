@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import re
+
 from fastapi import APIRouter, HTTPException, Request
 
 from platform_common.service_proxy import proxy_request
@@ -68,9 +70,13 @@ def _resolve_intelligence_service(path: str) -> tuple[str, str]:
         return "agent-runtime-service", path[len("agent/") :] if path.startswith("agent/") else ""
     if path == "context" or path.startswith("context/"):
         return "context-retrieval-service", path[len("context/") :] if path.startswith("context/") else ""
-    if path == "documents" or path.startswith("documents/"):
+    if path == "documents" or path == "documents/search":
         return "document-knowledge-service", path[len("documents/") :] if path.startswith("documents/") else ""
-    if path == "code" or path.startswith("code/"):
+    if re.fullmatch(r"documents/[^/]+", path) or re.fullmatch(r"documents/[^/]+/chunks", path):
+        return "document-knowledge-service", path[len("documents/") :]
+    if path == "code/repositories" or path == "code/search" or path == "code/source-file" or path == "code/related-context":
+        return "code-intelligence-service", path[len("code/") :]
+    if re.fullmatch(r"code/repositories/[^/]+/status", path):
         return "code-intelligence-service", path[len("code/") :] if path.startswith("code/") else ""
     if path == "tools/execute" or path.startswith("tools/execute/"):
         return "tool-execution-service", path[len("tools/") :]

@@ -142,23 +142,36 @@ export class FakeToolRegistryClient implements ToolRegistryClient {
 }
 
 export class FakeToolExecutionClient implements ToolExecutionClient {
-  calls: Array<{ tool_name: string; input: Record<string, unknown>; trace: TraceEnvelope }> = [];
+  calls: Array<{ tool_name: string; input: Record<string, unknown>; trace: TraceEnvelope; execution_mode: ExecutionMode }> = [];
 
-  constructor(private readonly response: ToolExecutionResponse) {}
+  constructor(
+    private readonly response:
+      | ToolExecutionResponse
+      | ((input: {
+          trace: TraceEnvelope;
+          tool_name: string;
+          input: Record<string, unknown>;
+          execution_mode: ExecutionMode;
+          message_id?: string | null;
+          confirmation_token?: string | null;
+        }) => Promise<ToolExecutionResponse> | ToolExecutionResponse),
+  ) {}
 
   async execute(input: {
     trace: TraceEnvelope;
     tool_name: string;
     input: Record<string, unknown>;
-    execution_mode: string;
+    execution_mode: ExecutionMode;
     message_id?: string | null;
+    confirmation_token?: string | null;
   }): Promise<ToolExecutionResponse> {
     this.calls.push({
       tool_name: input.tool_name,
       input: input.input,
       trace: input.trace,
+      execution_mode: input.execution_mode,
     });
-    return this.response;
+    return typeof this.response === "function" ? await this.response(input) : this.response;
   }
 }
 

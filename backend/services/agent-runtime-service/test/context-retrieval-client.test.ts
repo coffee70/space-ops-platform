@@ -13,6 +13,8 @@ test("context retrieval client posts to /packet with trace headers and retrieval
     modelId: "gpt-4o-mini",
     maxSteps: 3,
     requestTimeoutMs: 1000,
+    scriptedMode: null,
+    allowMissingKeyFallback: false,
   });
 
   const fetchCalls: Array<{ url: string; init?: RequestInit }> = [];
