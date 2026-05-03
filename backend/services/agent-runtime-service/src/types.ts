@@ -131,7 +131,7 @@ export interface ToolExecutionResponse {
   request_id: string;
   tool_call_id: string;
   status: "completed" | "failed" | "confirmation_required";
-  output: Record<string, unknown>;
+  output: unknown;
   raw_events?: RawEventFact[];
 }
 

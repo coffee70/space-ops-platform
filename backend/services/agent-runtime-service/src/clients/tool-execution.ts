@@ -54,7 +54,7 @@ export class HttpToolExecutionClient implements ToolExecutionClient {
         request_id: z.string(),
         tool_call_id: z.string(),
         status: z.enum(["completed", "failed", "confirmation_required"]),
-        output: z.record(z.unknown()).default({}),
+        output: z.unknown().default({}),
         raw_events: z.array(z.record(z.unknown())).optional(),
       })
       .parse(payload);

@@ -83,8 +83,7 @@ def _validate_object(schema: dict[str, Any], payload: dict[str, Any], path_prefi
             continue
         if expected_type == "object" and isinstance(value, dict):
             errors.extend(_validate_object(prop_schema, value, path_prefix=f"{path_prefix}.{key}"))
-    if errors:
-        raise ToolInputValidationError(errors)
+    return errors
 
 
 def validate_tool_input(schema: dict[str, Any], payload: dict[str, Any]) -> None:
@@ -104,4 +103,6 @@ def validate_tool_input(schema: dict[str, Any], payload: dict[str, Any]) -> None
                 }
             ]
         )
-    _validate_object(schema, payload)
+    errors = _validate_object(schema, payload)
+    if errors:
+        raise ToolInputValidationError(errors)

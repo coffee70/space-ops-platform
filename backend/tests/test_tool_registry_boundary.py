@@ -37,6 +37,20 @@ def test_write_tools_have_strict_non_empty_schemas_where_applicable() -> None:
     assert tool_registry.TOOL_INPUT_SCHEMAS["read_source_file"]["required"] == ["branch", "path"]
 
 
+def test_tool_input_validation_accepts_valid_nested_objects() -> None:
+    schema = tool_registry.TOOL_INPUT_SCHEMAS["scaffold_service"]
+
+    validate_tool_input(
+        schema,
+        {
+            "template_id": "python-fastapi-service",
+            "unit_id": "phase3-test-fixture-service",
+            "display_name": "Phase 3 Test Fixture Service",
+            "discovery": {"health_path": "/health"},
+        },
+    )
+
+
 def test_get_telemetry_schema_requires_source_id_and_rejects_additional_properties() -> None:
     schema = tool_registry.TOOL_INPUT_SCHEMAS["get_telemetry_schema"]
     assert schema["required"] == ["source_id"]
