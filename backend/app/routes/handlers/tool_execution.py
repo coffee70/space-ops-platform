@@ -262,11 +262,6 @@ async def _execute_mapped_tool(name: str, tool_input: dict, *, db: Session, trac
         if not app_id:
             raise HTTPException(status_code=400, detail='application_id is required')
         return {'action': 'navigate_to_application', 'application_id': app_id, 'route_path': tool_input.get('route_path') or f'/apps/{app_id}'}
-    if name == 'open_workspace_file':
-        path = tool_input.get('path')
-        if not path:
-            raise HTTPException(status_code=400, detail='path is required')
-        return {'action': 'open_workspace_file', 'application_id': 'workspace', 'route_path': '/apps/workspace', 'path': path}
 
     raise HTTPException(status_code=501, detail=f'tool handler not implemented: {name}')
 
