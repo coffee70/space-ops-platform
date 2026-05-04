@@ -42,6 +42,16 @@ pip install -r backend/requirements.txt --extra-index-url https://download.pytor
 
 ### Backend tests (`pytest`)
 
+**Canonical (venv at `.venv/`, sibling `space-ops-apps`, default `DATABASE_URL` + `VEHICLE_CONFIG_ROOT`):**
+
+```bash
+./scripts/run-backend-tests.sh
+```
+
+Pass-through flags: `./scripts/run-backend-tests.sh -q` or `./scripts/run-backend-tests.sh backend/tests/test_foo.py -vv`.
+
+Ad-hoc (after you activated a venv and installed deps yourself):
+
 ```bash
 PYTHONPATH=backend:. pytest backend/tests
 ```
@@ -49,7 +59,7 @@ PYTHONPATH=backend:. pytest backend/tests
 Focused example:
 
 ```bash
-PYTHONPATH=backend:. pytest backend/tests/test_vehicle_config_service.py::test_specific_case -vv
+./scripts/run-backend-tests.sh backend/tests/test_vehicle_config_service.py::test_specific_case -vv
 ```
 
 `conftest`/fixtures configure paths such as vehicle config fixtures; Postgres-backed cases require a running database when applicable (see suite / env docs).

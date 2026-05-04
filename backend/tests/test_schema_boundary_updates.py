@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import sys
 from datetime import datetime, timezone
 from types import SimpleNamespace
@@ -636,34 +637,30 @@ def test_ops_routes_use_source_id_contract(monkeypatch) -> None:
 
 
 def test_feed_status_route_returns_source_id(monkeypatch) -> None:
-    class _Response:
-        status_code = 200
+    captured: dict[str, object] = {}
 
-        @staticmethod
-        def json():
-            return {
-                "source_id": "source-a",
-                "connected": True,
-                "state": "connected",
-                "last_reception_time": None,
-                "approx_rate_hz": 2.5,
-                "drop_count": 0,
-            }
+    async def fake_fetch(service_slug: str, path: str, *, params: dict[str, object] | None = None):
+        captured["service_slug"] = service_slug
+        captured["path"] = path
+        captured["params"] = params
+        return {
+            "source_id": "source-a",
+            "connected": True,
+            "state": "connected",
+            "last_reception_time": None,
+            "approx_rate_hz": 2.5,
+            "drop_count": 0,
+        }
 
-    class _Client:
-        def __enter__(self):
-            return self
+    monkeypatch.setattr(ops_routes, "fetch_service_json", fake_fetch)
 
-        def __exit__(self, *_args):
-            return False
+    payload = asyncio.run(ops_routes.get_feed_status(source_id="source-a"))
 
-        def get(self, *_args, **_kwargs):
-            return _Response()
-
-    monkeypatch.setattr(ops_routes.httpx, "Client", lambda *args, **kwargs: _Client())
-
-    payload = ops_routes.get_feed_status(source_id="source-a")
-
+    assert captured == {
+        "service_slug": "telemetry-ingest-service",
+        "path": "telemetry/feed-health",
+        "params": {"source_id": "source-a"},
+    }
     assert payload == {
         "source_id": "source-a",
         "connected": True,

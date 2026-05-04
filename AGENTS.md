@@ -18,13 +18,19 @@ Do not import Mission Control UI, simulator runtime, SatNOGS adapter runtime, or
 
 ### Backend (Python)
 
-From this repository root, with deps installed (`README.md`):
+**Canonical** — creates or reuses **`./.venv`** (gitignored), sets `PYTHONPATH`, default `DATABASE_URL`, and **`VEHICLE_CONFIG_ROOT`** to the sibling `../space-ops-apps/vehicle-configurations`:
+
+```bash
+./scripts/run-backend-tests.sh
+```
+
+Focused runs pass pytest args: `./scripts/run-backend-tests.sh backend/tests/path_to_test.py::test_name`.
+
+Ad‑hoc after manual `venv`/`pip`:
 
 ```bash
 PYTHONPATH=backend:. pytest backend/tests
 ```
-
-Focused runs: append `backend/tests/path_to_test.py::test_name`.
 
 Layer 2 does **not** own the control-plane test suite (`space-ops-kernel/control-plane/tests`).
 
