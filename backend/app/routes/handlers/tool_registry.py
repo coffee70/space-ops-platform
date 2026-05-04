@@ -43,7 +43,6 @@ SUPPORTED_TOOL_NAMES: frozenset[str] = frozenset(
         'read_source_file',
         'get_related_code_context',
         'navigate_to_application',
-        'open_workspace_file',
         'create_working_branch',
         'scaffold_service',
         'write_source_file',
@@ -163,12 +162,6 @@ TOOL_INPUT_SCHEMAS: dict[str, dict] = {
             'route_path': {'type': 'string', 'pattern': '^/apps/.*', 'maxLength': 2000},
         },
         'required': ['application_id'],
-        'additionalProperties': False,
-    },
-    'open_workspace_file': {
-        'type': 'object',
-        'properties': {'path': {'type': 'string', 'minLength': 1, 'maxLength': 2000}},
-        'required': ['path'],
         'additionalProperties': False,
     },
     'create_working_branch': {
@@ -339,7 +332,6 @@ def seed_tools(db: Session = Depends(get_db)):
         ('read_source_file', 'Read file contents from the managed fork (Layer 1).', 'code_intelligence', 'layer1', 'read_only'),
         ('get_related_code_context', 'Related code chunks for a repository path.', 'code_intelligence', 'layer2', 'read_only'),
         ('navigate_to_application', 'Navigate Mission Control UI to a platform application.', 'navigation', 'layer3', 'read_only'),
-        ('open_workspace_file', 'Open a file in the Mission Control workspace shell.', 'navigation', 'layer3', 'read_only'),
     ]
 
     backing_read = {

@@ -44,7 +44,6 @@ API_INVENTORY = {
     "layer3": {
         "navigation": {
             "platform.openApplication": "higher_level_tool_only:navigate_to_application",
-            "workspace.openFile": "higher_level_tool_only:open_workspace_file",
             "registry.listTools": "higher_level_tool_only:list_available_tools",
         }
     },

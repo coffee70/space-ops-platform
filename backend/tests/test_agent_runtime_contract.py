@@ -442,6 +442,7 @@ def _tool_row(
 
 @pytest.mark.anyio
 async def test_list_available_tools_returns_filtered_supported_metadata(monkeypatch) -> None:
+    assert "open_workspace_file" not in tool_execution.SUPPORTED_TOOL_NAMES
     monkeypatch.setattr(
         tool_execution,
         "SUPPORTED_TOOL_NAMES",
@@ -529,6 +530,7 @@ async def test_list_available_tools_returns_filtered_supported_metadata(monkeypa
     tools = out["tools"]
     assert len(tools) == 3
     assert [t["name"] for t in tools] == ["deploy_service_or_application", "get_platform_service", "list_available_tools"]
+    assert "open_workspace_file" not in {t["name"] for t in tools}
     assert all(t["enabled"] is True for t in tools)
 
     dumped = json.dumps(response)
@@ -542,6 +544,37 @@ async def test_list_available_tools_returns_filtered_supported_metadata(monkeypa
     assert isinstance(call_arg, ToolCall)
     assert call_arg.tool_name == "list_available_tools"
     assert call_arg.output_json == redact(out)
+
+
+@pytest.mark.anyio
+async def test_open_workspace_file_execution_is_rejected_as_unknown_tool() -> None:
+    db = MagicMock()
+    db.query.return_value.filter.return_value.one_or_none.return_value = None
+
+    with pytest.raises(tool_execution.HTTPException) as exc:
+        await tool_execution.execute_tool(
+            tool_execution.ToolExecutionRequest(
+                conversation_id="11111111-1111-1111-1111-111111111111",
+                agent_run_id="22222222-2222-2222-2222-222222222222",
+                request_id="33333333-3333-3333-3333-333333333333",
+                tool_call_id="44444444-4444-4444-4444-444444444444",
+                tool_name="open_workspace_file",
+                input={"path": "README.md"},
+                execution_mode="read_only",
+            ),
+            request=_request(
+                {
+                    "x-agent-run-id": "22222222-2222-2222-2222-222222222222",
+                    "x-request-id": "33333333-3333-3333-3333-333333333333",
+                    "x-tool-call-id": "44444444-4444-4444-4444-444444444444",
+                }
+            ),
+            db=db,
+        )
+
+    assert exc.value.status_code == 404
+    db.add.assert_not_called()
+    db.flush.assert_not_called()
 
 
 @pytest.mark.anyio

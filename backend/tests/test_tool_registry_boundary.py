@@ -22,8 +22,13 @@ def test_supported_tool_inventory_matches_input_schemas() -> None:
     assert not missing
 
 
-def test_supported_registry_has_exactly_twenty_six_tools() -> None:
-    assert len(tool_registry.SUPPORTED_TOOL_NAMES) == 26
+def test_supported_registry_has_exactly_twenty_five_tools() -> None:
+    assert len(tool_registry.SUPPORTED_TOOL_NAMES) == 25
+
+
+def test_workspace_file_navigation_tool_is_not_supported() -> None:
+    assert "open_workspace_file" not in tool_registry.SUPPORTED_TOOL_NAMES
+    assert "open_workspace_file" not in tool_registry.TOOL_INPUT_SCHEMAS
 
 
 def test_write_classification_tools_are_execute_only() -> None:

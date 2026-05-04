@@ -18,3 +18,10 @@ def test_query_recent_telemetry_maps_to_source_scoped_recent_get() -> None:
     scoped = "GET /telemetry/{name}/recent?source_id={source_id}&limit={limit}"
     assert scoped in telemetry
     assert telemetry[scoped] == "read_only_tool:query_recent_telemetry"
+
+
+def test_workspace_file_navigation_inventory_is_removed() -> None:
+    navigation = API_INVENTORY["layer3"]["navigation"]
+
+    assert navigation["platform.openApplication"] == "higher_level_tool_only:navigate_to_application"
+    assert "workspace.openFile" not in navigation
