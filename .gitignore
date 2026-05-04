@@ -1,7 +1,15 @@
 .DS_Store
 .env
+# Python virtual environments (.venv, .venv-test-run, etc.) and uv project cache (.uv/).
+# If venv files still appear in git status, they may already be in the index (e.g. after "git add ."
+# before ignore rules existed). Remove from index only: git rm -r --cached .venv
 .venv/
+.venv*/
+.uv/
 venv/
+env/
+ENV/
+.virtualenv/
 __pycache__/
 *.py[cod]
 .pytest_cache/
