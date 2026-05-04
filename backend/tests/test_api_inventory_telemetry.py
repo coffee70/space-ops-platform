@@ -20,8 +20,10 @@ def test_query_recent_telemetry_maps_to_source_scoped_recent_get() -> None:
     assert telemetry[scoped] == "read_only_tool:query_recent_telemetry"
 
 
-def test_workspace_file_navigation_inventory_is_removed() -> None:
+def test_navigation_inventory_contains_supported_higher_level_tools() -> None:
     navigation = API_INVENTORY["layer3"]["navigation"]
 
-    assert navigation["platform.openApplication"] == "higher_level_tool_only:navigate_to_application"
-    assert "workspace.openFile" not in navigation
+    assert navigation == {
+        "platform.openApplication": "higher_level_tool_only:navigate_to_application",
+        "registry.listTools": "higher_level_tool_only:list_available_tools",
+    }

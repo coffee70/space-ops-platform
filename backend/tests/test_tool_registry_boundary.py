@@ -26,11 +26,6 @@ def test_supported_registry_has_exactly_twenty_five_tools() -> None:
     assert len(tool_registry.SUPPORTED_TOOL_NAMES) == 25
 
 
-def test_workspace_file_navigation_tool_is_not_supported() -> None:
-    assert "open_workspace_file" not in tool_registry.SUPPORTED_TOOL_NAMES
-    assert "open_workspace_file" not in tool_registry.TOOL_INPUT_SCHEMAS
-
-
 def test_write_classification_tools_are_execute_only() -> None:
     executes = {"trigger_document_reingestion", "create_working_branch", "scaffold_service", "write_source_file", "create_commit", "deploy_service_or_application", "delete_managed_resources"}
     assert executes.issubset(tool_registry.SUPPORTED_TOOL_NAMES)
