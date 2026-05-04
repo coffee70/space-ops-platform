@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import httpx
 from fastapi import HTTPException, Request, Response
+from fastapi.responses import StreamingResponse
 
 from app.config import get_settings
 
@@ -58,18 +59,27 @@ async def proxy_request(service_slug: str, request: Request, *, path: str = "") 
     upstream = _kernel_service_proxy_url(service_slug, path, request.url.query)
 
     try:
-        async with httpx.AsyncClient(follow_redirects=False, timeout=30.0) as client:
-            upstream_response = await client.request(
-                request.method,
-                upstream,
-                headers=headers,
-                content=body if body else None,
-            )
+        client = httpx.AsyncClient(follow_redirects=False, timeout=30.0)
+        upstream_request = client.build_request(
+            request.method,
+            upstream,
+            headers=headers,
+            content=body if body else None,
+        )
+        upstream_response = await client.send(upstream_request, stream=True)
     except httpx.RequestError as exc:
         raise HTTPException(status_code=502, detail="service proxy unavailable") from exc
 
-    return Response(
-        content=upstream_response.content,
+    async def stream_upstream():
+        try:
+            async for chunk in upstream_response.aiter_bytes():
+                yield chunk
+        finally:
+            await upstream_response.aclose()
+            await client.aclose()
+
+    return StreamingResponse(
+        stream_upstream(),
         status_code=upstream_response.status_code,
         headers={
             key: value

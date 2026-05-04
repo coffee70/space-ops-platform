@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import httpx
 import pytest
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.testclient import TestClient
 
 from app.routes import gateway_http
@@ -41,7 +41,7 @@ class _AsyncClient:
             raise result
         return result
 
-    async def request(self, method: str, url: str, headers: dict | None = None, content: bytes | None = None):
+    def build_request(self, method: str, url: str, headers: dict | None = None, content: bytes | None = None):
         self.request_calls.append(
             {
                 "method": method,
@@ -52,11 +52,27 @@ class _AsyncClient:
                 "follow_redirects": self.follow_redirects,
             }
         )
+        return {
+            "method": method,
+            "url": url,
+            "headers": headers or {},
+            "content": content,
+        }
+
+    async def send(self, request: dict, *, stream: bool = False):
         assert self.request_results
         result = self.request_results.pop(0)
         if isinstance(result, Exception):
             raise result
         return result
+
+    async def aclose(self):
+        return None
+
+
+class _StreamingResponse(httpx.Response):
+    async def aiter_bytes(self):
+        yield self.content
 
 
 def test_build_service_proxy_url_uses_kernel_internal_service_proxy() -> None:
@@ -68,7 +84,7 @@ def test_build_service_proxy_url_uses_kernel_internal_service_proxy() -> None:
 def test_proxy_request_does_not_call_registry_services(monkeypatch) -> None:
     _AsyncClient.request_calls = []
     _AsyncClient.get_calls = []
-    _AsyncClient.request_results = [httpx.Response(200, json={"ok": True})]
+    _AsyncClient.request_results = [_StreamingResponse(200, json={"ok": True})]
     monkeypatch.setattr(service_proxy.httpx, "AsyncClient", _AsyncClient)
 
     app = FastAPI()
@@ -141,6 +157,24 @@ def test_proxy_request_returns_502_when_control_plane_unavailable(monkeypatch) -
     assert response.json()["detail"] == "service proxy unavailable"
 
 
+def test_proxy_request_streams_upstream_body(monkeypatch) -> None:
+    _AsyncClient.request_calls = []
+    _AsyncClient.request_results = [_StreamingResponse(200, content=b'{"part":1}\n{"part":2}\n', headers={"content-type": "application/x-ndjson"})]
+    monkeypatch.setattr(service_proxy.httpx, "AsyncClient", _AsyncClient)
+
+    app = FastAPI()
+
+    @app.get("/proxy")
+    async def run_proxy(request: Request):
+        return await service_proxy.proxy_request("agent-runtime-service", request, path="chat")
+
+    response = TestClient(app).get("/proxy")
+
+    assert response.status_code == 200
+    assert response.text == '{"part":1}\n{"part":2}\n'
+    assert response.headers["content-type"].startswith("application/x-ndjson")
+
+
 def test_gateway_routes_proxy_expected_service_paths(monkeypatch) -> None:
     calls: list[tuple[str, str]] = []
 
@@ -153,15 +187,55 @@ def test_gateway_routes_proxy_expected_service_paths(monkeypatch) -> None:
     app.include_router(gateway_http.router)
     client = TestClient(app)
 
-    telemetry = client.get("/telemetry/sources")
-    vehicle_configs = client.get("/vehicle-configs")
-    feed_status = client.get("/ops/feed-status")
+    chat_body = {
+        "conversation_id": "00000000-0000-0000-0000-000000000001",
+        "messages": [{"role": "user", "content": "hi"}],
+    }
 
-    assert telemetry.status_code == 200
-    assert vehicle_configs.status_code == 200
-    assert feed_status.status_code == 200
+    assert client.get("/telemetry/sources").status_code == 200
+    assert client.get("/vehicle-configs").status_code == 200
+    assert client.get("/ops/feed-status").status_code == 200
+    assert client.post("/intelligence/agent/chat", json=chat_body).status_code == 200
+    assert client.get("/intelligence/agent/conversations").status_code == 200
+    assert client.get("/intelligence/agent/health").status_code == 200
+    assert client.post("/intelligence/context/packet", json={"agent_run_id": "a", "request_id": "r", "message": "m"}).status_code == 200
+    assert client.get("/intelligence/documents").status_code == 200
+    assert client.post("/intelligence/documents/search", json={"query": "q"}).status_code == 200
+    assert client.post("/intelligence/code/search", json={"query": "q", "branch": "main"}).status_code == 200
+    assert client.get("/intelligence/tools/definitions").status_code == 200
+    assert client.post("/intelligence/tools/definitions/seed").status_code == 200
+    assert client.get("/intelligence/tools/definitions/get_platform_service").status_code == 200
+    assert client.post("/intelligence/tools/execute", json={}).status_code == 200
+
     assert calls == [
         ("source-registry-service", "telemetry/sources"),
         ("vehicle-config-service", "vehicle-configs/"),
         ("telemetry-ingest-service", "telemetry/feed-health"),
+        ("agent-runtime-service", "chat"),
+        ("agent-runtime-service", "conversations"),
+        ("agent-runtime-service", "health"),
+        ("context-retrieval-service", "packet"),
+        ("document-knowledge-service", ""),
+        ("document-knowledge-service", "search"),
+        ("code-intelligence-service", "search"),
+        ("tool-registry-service", "definitions"),
+        ("tool-registry-service", "definitions/seed"),
+        ("tool-registry-service", "definitions/get_platform_service"),
+        ("tool-execution-service", "execute"),
     ]
+
+
+def test_gateway_intelligence_routes_do_not_expose_control_plane_mutation_bypasses() -> None:
+    forbidden_paths = [
+        "deployments",
+        "code/branches",
+        "code/file",
+        "code/commits",
+        "code/repositories/index",
+        "documents/123/reingest",
+        "internal/delete/managed-units",
+    ]
+
+    for path in forbidden_paths:
+        with pytest.raises(HTTPException):
+            gateway_http._resolve_intelligence_service(path)

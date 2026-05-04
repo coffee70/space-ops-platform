@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import re
+
 from fastapi import APIRouter, HTTPException, Request
 
 from platform_common.service_proxy import proxy_request
@@ -61,3 +63,29 @@ async def proxy_ops_events(request: Request):
 @router.api_route("/ops/feed-status", methods=["GET"])
 async def proxy_feed_status(request: Request):
     return await proxy_request("telemetry-ingest-service", request, path="telemetry/feed-health")
+
+
+def _resolve_intelligence_service(path: str) -> tuple[str, str]:
+    if path == "agent" or path.startswith("agent/"):
+        return "agent-runtime-service", path[len("agent/") :] if path.startswith("agent/") else ""
+    if path == "context" or path.startswith("context/"):
+        return "context-retrieval-service", path[len("context/") :] if path.startswith("context/") else ""
+    if path == "documents" or path == "documents/search":
+        return "document-knowledge-service", path[len("documents/") :] if path.startswith("documents/") else ""
+    if re.fullmatch(r"documents/[^/]+", path) or re.fullmatch(r"documents/[^/]+/chunks", path):
+        return "document-knowledge-service", path[len("documents/") :]
+    if path == "code/repositories" or path == "code/search" or path == "code/source-file" or path == "code/related-context":
+        return "code-intelligence-service", path[len("code/") :]
+    if re.fullmatch(r"code/repositories/[^/]+/status", path):
+        return "code-intelligence-service", path[len("code/") :] if path.startswith("code/") else ""
+    if path == "tools/execute" or path.startswith("tools/execute/"):
+        return "tool-execution-service", path[len("tools/") :]
+    if path == "tools/definitions" or path.startswith("tools/definitions/"):
+        return "tool-registry-service", path[len("tools/") :]
+    raise HTTPException(status_code=404, detail="Unknown intelligence route")
+
+
+@router.api_route("/intelligence/{path:path}", methods=["GET", "POST", "PATCH", "PUT", "DELETE", "HEAD"])
+async def proxy_intelligence(request: Request, path: str):
+    service_slug, target_path = _resolve_intelligence_service(path)
+    return await proxy_request(service_slug, request, path=target_path)
