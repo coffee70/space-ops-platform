@@ -67,3 +67,5 @@ def test_run_once_uses_runner_and_updates_status(monkeypatch) -> None:
     assert calls["run_once"] == 1
     assert status["source_resolved"] is True
     assert status["source_id"] == "resolved-source"
+    assert status["last_live_poll_at"] is not None
+    assert status["last_successful_publish_at"] is None

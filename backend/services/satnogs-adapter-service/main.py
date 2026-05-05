@@ -132,7 +132,7 @@ async def run_once() -> dict:
         await asyncio.to_thread(runner.run_live_once)
         state.last_live_poll_at = _utc_now()
         state.last_observation_sync_at = state.last_live_poll_at
-        state.last_successful_publish_at = state.last_live_poll_at
+        state.last_successful_publish_at = None
         state.last_error = None
         return {"status": "completed", "source_id": state.source_id}
     except Exception as exc:
