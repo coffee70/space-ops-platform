@@ -1,0 +1,12 @@
+version: 1
+name: LASARSAT
+vehicle_profile:
+  bus_class: LEO CubeSat
+  payloads:
+    - SatNOGS AX.25 telemetry
+  notes:
+    - SatNOGS observation-backed ingest source for NORAD 62391.
+    - Transmitter UUID C3RnLSSuaKzWhHrtJCqUgu uses AX.25 source callsign OK0LSR.
+
+channels: []
+

@@ -1,0 +1,248 @@
+version: 1
+name: DrogonSat
+base_url: http://simulator:8001
+vehicle_profile:
+  bus_class: "Rapid-response tactical bus"
+  propulsion_layout: "Single biprop tank with one main feed"
+  tank_count: 1
+  computer_count: 1
+  payloads:
+    - "Infrared seeker"
+    - "Burst transmitter"
+  notes:
+    - "Lean spacecraft with minimal redundancy"
+channels:
+  - name: PWR_MAIN_BUS_VOLT
+    aliases: [BAT_V, BATTERY_VOLT, VBAT]
+    units: V
+    description: Main bus voltage
+    subsystem: power
+    mean: 28.2
+    std_dev: 0.28
+    red_low: 27.0
+    red_high: 29.5
+    sample_rate_hz: 1.0
+  - name: PWR_MAIN_BUS_CURR
+    units: A
+    description: Main bus current
+    subsystem: power
+    mean: 4.8
+    std_dev: 0.4
+    red_low: 3.0
+    red_high: 6.5
+  - name: EPS_BATTERY_SOC
+    units: "%"
+    description: Battery state of charge
+    subsystem: power
+    mean: 76.0
+    std_dev: 4.5
+    red_low: 28.0
+    red_high: 99.0
+  - name: THERM_BUS_PANEL_TEMP
+    units: C
+    description: Core avionics panel temperature
+    subsystem: thermal
+    mean: 24.0
+    std_dev: 3.0
+    red_low: 0.0
+    red_high: 48.0
+  - name: THERM_PAYLOAD_IR_TEMP
+    units: C
+    description: Infrared seeker focal plane temperature
+    subsystem: thermal
+    mean: 6.0
+    std_dev: 2.0
+    red_low: -20.0
+    red_high: 22.0
+  - name: OBC_FLIGHT_CPU_LOAD
+    units: "%"
+    description: Primary flight computer load
+    subsystem: obc
+    mean: 51.0
+    std_dev: 9.0
+    red_low: 5.0
+    red_high: 95.0
+  - name: OBC_FLIGHT_CPU_TEMP
+    units: C
+    description: Primary flight computer temperature
+    subsystem: obc
+    mean: 41.0
+    std_dev: 3.6
+    red_low: 0.0
+    red_high: 67.0
+  - name: ADCS_BODY_RATE_X
+    units: deg/s
+    description: Body rate X
+    subsystem: adcs
+    mean: 0.0
+    std_dev: 0.04
+    red_low: -0.25
+    red_high: 0.25
+    sample_rate_hz: 5.0
+  - name: ADCS_BODY_RATE_Y
+    units: deg/s
+    description: Body rate Y
+    subsystem: adcs
+    mean: 0.0
+    std_dev: 0.04
+    red_low: -0.25
+    red_high: 0.25
+    sample_rate_hz: 5.0
+  - name: ADCS_BODY_RATE_Z
+    units: deg/s
+    description: Body rate Z
+    subsystem: adcs
+    mean: 0.0
+    std_dev: 0.04
+    red_low: -0.25
+    red_high: 0.25
+    sample_rate_hz: 5.0
+  - name: COMM_BURST_TX_PWR
+    units: dBm
+    description: Burst transmitter output power
+    subsystem: comms
+    mean: 31.0
+    std_dev: 1.0
+    red_low: 26.0
+    red_high: 35.0
+  - name: COMM_LINK_MARGIN
+    units: dB
+    description: Downlink margin
+    subsystem: comms
+    mean: 4.8
+    std_dev: 1.2
+    red_low: 0.5
+    red_high: 10.0
+  - name: PAY_IR_TRACK_QUALITY
+    units: "0-1"
+    description: Infrared target track quality
+    subsystem: payload
+    mean: 0.92
+    std_dev: 0.04
+    red_low: 0.65
+    red_high: 1.0
+  - name: PAY_IR_FRAME_RATE
+    units: fps
+    description: Infrared seeker frame rate
+    subsystem: payload
+    mean: 24.0
+    std_dev: 0.8
+    red_low: 20.0
+    red_high: 26.0
+  - name: PROP_MAIN_TANK_PRESS
+    units: kPa
+    description: Main propulsion tank pressure
+    subsystem: propulsion
+    mean: 248.0
+    std_dev: 7.0
+    red_low: 190.0
+    red_high: 275.0
+  - name: PROP_FEEDLINE_TEMP
+    units: C
+    description: Propellant feedline temperature
+    subsystem: propulsion
+    mean: 10.0
+    std_dev: 2.2
+    red_low: -8.0
+    red_high: 35.0
+  - name: GPS_LAT
+    units: deg
+    description: Geodetic latitude
+    subsystem: gps
+    mean: 0.0
+    std_dev: 5.0
+    sample_rate_hz: 1.0
+  - name: GPS_LON
+    units: deg
+    description: Geodetic longitude
+    subsystem: gps
+    mean: 0.0
+    std_dev: 5.0
+    sample_rate_hz: 1.0
+  - name: GPS_ALT
+    units: m
+    description: Geodetic altitude above ellipsoid
+    subsystem: gps
+    mean: 405000.0
+    std_dev: 8000.0
+    sample_rate_hz: 1.0
+  - name: NAV_GPS_SATS
+    units: count
+    description: GPS satellites tracked
+    subsystem: gps
+    mean: 9.0
+    std_dev: 1.0
+    sample_rate_hz: 1.0
+  - name: HEALTH_STATUS
+    units: "0/1"
+    description: Overall health indicator
+    subsystem: safety
+    mean: 1.0
+    std_dev: 0.01
+    red_low: 1.0
+    red_high: 1.0
+position_mapping:
+  frame_type: gps_lla
+  lat_channel_name: GPS_LAT
+  lon_channel_name: GPS_LON
+  alt_channel_name: GPS_ALT
+scenarios:
+  nominal:
+    description: Normal tactical patrol with mild noise
+    anomaly_fraction: 0.01
+    orbit_profile: orbit_nominal
+  power_sag:
+    description: Bus voltage sag after aggressive transmit burst
+    anomaly_fraction: 0.0
+    orbit_profile: nominal
+    events:
+      - t0: 30.0
+        duration: 45.0
+        type: offset
+        channels:
+          - PWR_MAIN_BUS_VOLT
+          - EPS_BATTERY_SOC
+        magnitude: -2.2
+  seeker_overheat:
+    description: IR seeker and bus panel heat rise during long target hold
+    anomaly_fraction: 0.0
+    orbit_profile: nominal
+    events:
+      - t0: 20.0
+        duration: 55.0
+        type: ramp
+        channels:
+          - THERM_PAYLOAD_IR_TEMP
+          - THERM_BUS_PANEL_TEMP
+        magnitude: 13.0
+  safe_mode:
+    description: Tactical bus enters safe mode after transient fault
+    anomaly_fraction: 0.0
+    orbit_profile: nominal
+    events:
+      - t0: 25.0
+        duration: 999.0
+        type: set
+        channels:
+          - HEALTH_STATUS
+        magnitude: 0.0
+  orbit_nominal:
+    description: Smooth physically plausible orbit without random position spikes
+    anomaly_fraction: 0.0
+    orbit_profile: orbit_nominal
+  orbit_decay:
+    description: Low-perigee orbit for decay testing
+    anomaly_fraction: 0.0
+    orbit_profile: orbit_decay
+  orbit_highly_elliptical:
+    description: High-eccentricity orbit for anomaly testing
+    anomaly_fraction: 0.0
+    orbit_profile: orbit_highly_elliptical
+  orbit_suborbital:
+    description: Insufficient orbital velocity
+    anomaly_fraction: 0.0
+    orbit_profile: orbit_suborbital
+  orbit_escape:
+    description: Escape trajectory test case
+    anomaly_fraction: 0.0
+    orbit_profile: orbit_escape

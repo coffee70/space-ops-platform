@@ -1,6 +1,6 @@
 # Space Ops Platform
 
-Layer 2 platform APIs, data models, services, schemas, and reusable operational primitives.
+Layer 2 platform APIs, data models, services, schemas, telemetry adapters, and reusable operational primitives.
 
 Extraction baseline: `c2-infra` commit `7b4f15ace9895c440ad89a9a460566c78135c57b` (`phase1-layer-split-baseline-2026-04-20`).
 
@@ -8,27 +8,29 @@ Extraction baseline: `c2-infra` commit `7b4f15ace9895c440ad89a9a460566c78135c57b
 
 | Area | Humans | Agents / automation |
 |------|--------|---------------------|
-| **This repo — backend pytest, telemetry catalog** | this file | [AGENTS.md](./AGENTS.md) |
+| **This repo — backend pytest, telemetry catalog, SatNOGS adapter service** | this file | [AGENTS.md](./AGENTS.md) |
 | **Layer 1 — Compose, Node/Playwright validation scripts** | [../space-ops-kernel/README.md](../space-ops-kernel/README.md) | [../space-ops-kernel/AGENTS.md](../space-ops-kernel/AGENTS.md) |
-| **Layer 3 — Mission Control, Playwright workspace, simulator, adapter** | [../space-ops-apps/README.md](../space-ops-apps/README.md) | [../space-ops-apps/AGENTS.md](../space-ops-apps/AGENTS.md) |
+| **Layer 3 — Mission Control, Playwright workspace, simulator** | [../space-ops-apps/README.md](../space-ops-apps/README.md) | [../space-ops-apps/AGENTS.md](../space-ops-apps/AGENTS.md) |
 
 Compose and canonical **containerized Node**/`npm ci` workflows live in **`space-ops-kernel`**; read that README whenever tests span services.
 
 ## Role
 
-This repository owns the FastAPI backend, SQLAlchemy models, Alembic migrations, telemetry ingestion/query/source/stream APIs, realtime bus and WebSocket behavior, watchlist framework, vehicle config validation and registry APIs, orbit framework, position APIs, provider interfaces, and the `telemetry_catalog/` schema package source.
+This repository owns the FastAPI backend, SQLAlchemy models, Alembic migrations, telemetry ingestion/query/source/stream APIs, realtime bus and WebSocket behavior, watchlist framework, vehicle config validation and registry APIs, orbit framework, position APIs, provider interfaces, telemetry adapters such as `satnogs-adapter-service`, and the `telemetry_catalog/` schema package source.
 
-It does not own Mission Control UI code, simulator runtime behavior, SatNOGS adapter runtime behavior, concrete vehicle configuration assets, or Docker Compose orchestration.
+It does not own Mission Control UI code, simulator runtime behavior, or Docker Compose orchestration.
 
 ## Contents
 
 ```text
 backend/                       FastAPI app, migrations, platform tests
+backend/app/adapters/satnogs   SatNOGS Layer 2 telemetry adapter
+backend/resources/             Layer 2 operational resources packaged with services
 telemetry_catalog/             Shared telemetry schema/config package source
 docs/API_TELEMETRY_CONTRACTS.md
 ```
 
-The platform runtime expects concrete vehicle configs to be mounted by Layer 1 and supplied through `VEHICLE_CONFIG_ROOT`.
+The platform runtime reads concrete vehicle configs from `VEHICLE_CONFIG_ROOT`. Managed Layer 2 services default this to `backend/resources/vehicle-configurations`.
 
 ## Backend development
 
@@ -42,7 +44,7 @@ pip install -r backend/requirements.txt --extra-index-url https://download.pytor
 
 ### Backend tests (`pytest`)
 
-**Canonical (venv at `.venv/`, sibling `space-ops-apps`, default `DATABASE_URL` + `VEHICLE_CONFIG_ROOT`):**
+**Canonical (venv at `.venv/`, default `DATABASE_URL` + Layer 2 `VEHICLE_CONFIG_ROOT`):**
 
 ```bash
 ./scripts/run-backend-tests.sh
@@ -91,7 +93,7 @@ Orchestrated via Layer 1 + Layer 3: [`../space-ops-kernel/scripts/validate-playw
 
 ```bash
 export DATABASE_URL=postgresql://telemetry:telemetry@localhost:5432/telemetry_db
-export VEHICLE_CONFIG_ROOT=../space-ops-apps/vehicle-configurations
+export VEHICLE_CONFIG_ROOT=resources/vehicle-configurations
 cd backend
 alembic -c alembic.ini upgrade head
 PYTHONPATH=.:.. uvicorn app.main:app --host 0.0.0.0 --port 8000

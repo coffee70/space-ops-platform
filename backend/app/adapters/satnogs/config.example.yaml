@@ -1,0 +1,56 @@
+platform:
+  ingest_url: "http://platform-api:8000/telemetry/realtime/ingest"
+  source_resolve_url: "http://platform-api:8000/telemetry/sources/resolve"
+  observations_batch_upsert_url: "http://platform-api:8000/telemetry/sources/{source_id}/observations:batch-upsert"
+  backfill_progress_url: "http://platform-api:8000/telemetry/sources/{source_id}/backfill-progress"
+  live_state_url: "http://platform-api:8000/telemetry/sources/{source_id}/live-state"
+
+vehicle:
+  slug: "lasarsat"
+  name: "LASARSAT"
+  norad_id: 62391
+  monitoring_start_time: "2026-04-10T00:00:00Z"
+  allowed_source_callsigns:
+    - "OK0LSR"
+  vehicle_config_path: "vehicles/lasarsat.yaml"
+  decoder:
+    strategy: "kaitai"
+    decoder_id: "lasarsat"
+
+# APRS example:
+# vehicle:
+#   slug: "iss"
+#   name: "International Space Station"
+#   norad_id: 25544
+#   allowed_source_callsigns:
+#     - "NA1SS"
+#     - "RS0ISS"
+#   vehicle_config_path: "vehicles/iss.yaml"
+#   decoder:
+#     strategy: "aprs"
+
+satnogs:
+  base_url: "https://network.satnogs.org"
+  api_token: ""
+  transmitter_uuid: "C3RnLSSuaKzWhHrtJCqUgu"
+  status: "good"
+  upcoming_status: "future"
+  upcoming_lookahead_hours: 24
+  observation_sync_interval_seconds: 600
+  poll_interval_seconds: 60
+  download:
+    max_concurrent_observation_fetches: 2
+    max_concurrent_artifact_downloads: 2
+
+publisher:
+  batch_size_events: 50
+  timeout_seconds: 10
+  retry:
+    max_attempts: 3
+    backoff_seconds: 1
+    backoff_multiplier: 2
+    retryable_status_codes: [408, 425, 429, 500, 502, 503, 504]
+
+dlq:
+  root_dir: "/app/runtime/satnogs-adapter/dlq"
+  write_observation_dlq: true

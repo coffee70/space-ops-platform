@@ -1,0 +1,52 @@
+{
+  "version": 1,
+  "name": "Balerion Surveyor",
+  "vehicle_profile": {
+    "bus_class": "Remote sensing survey vehicle",
+    "propulsion_layout": "Twin-wheel attitude bus with cold gas trimming",
+    "tank_count": 1,
+    "computer_count": 2,
+    "payloads": ["Multispectral camera", "Wide-area mapper"],
+    "notes": ["Used by scripts/mock_vehicle_streamer.py for CLI-driven source tests"]
+  },
+  "channels": [
+    {"name": "PWR_MAIN_BUS_VOLT", "aliases": ["BAT_V", "BATTERY_VOLT", "VBAT"], "units": "V", "description": "Main bus voltage", "subsystem": "power", "mean": 27.8, "std_dev": 0.3, "red_low": 26.8, "red_high": 29.2, "sample_rate_hz": 1.0},
+    {"name": "PWR_SOLAR_ARRAY_CURR", "units": "A", "description": "Solar array current", "subsystem": "power", "mean": 6.4, "std_dev": 0.6, "red_low": 2.0, "red_high": 9.5},
+    {"name": "EPS_BATTERY_SOC", "units": "%", "description": "Battery state of charge", "subsystem": "power", "mean": 78.0, "std_dev": 5.5, "red_low": 30.0, "red_high": 99.0},
+    {"name": "THERM_PAYLOAD_BAY_TEMP", "units": "C", "description": "Payload bay temperature", "subsystem": "thermal", "mean": 14.0, "std_dev": 2.8, "red_low": -5.0, "red_high": 30.0},
+    {"name": "THERM_OBC_A_TEMP", "units": "C", "description": "OBC A board temperature", "subsystem": "thermal", "mean": 36.0, "std_dev": 3.0, "red_low": 0.0, "red_high": 60.0},
+    {"name": "THERM_OBC_B_TEMP", "units": "C", "description": "OBC B board temperature", "subsystem": "thermal", "mean": 34.0, "std_dev": 3.2, "red_low": 0.0, "red_high": 60.0},
+    {"name": "OBC_A_CPU_LOAD", "units": "%", "description": "Primary computer load", "subsystem": "obc", "mean": 48.0, "std_dev": 10.0, "red_low": 5.0, "red_high": 92.0},
+    {"name": "OBC_B_CPU_LOAD", "units": "%", "description": "Redundant computer load", "subsystem": "obc", "mean": 27.0, "std_dev": 6.0, "red_low": 0.0, "red_high": 80.0},
+    {"name": "ADCS_BODY_RATE_X", "units": "deg/s", "description": "Body rate X", "subsystem": "adcs", "mean": 0.0, "std_dev": 0.05, "red_low": -0.25, "red_high": 0.25, "sample_rate_hz": 4.0},
+    {"name": "ADCS_BODY_RATE_Y", "units": "deg/s", "description": "Body rate Y", "subsystem": "adcs", "mean": 0.0, "std_dev": 0.05, "red_low": -0.25, "red_high": 0.25, "sample_rate_hz": 4.0},
+    {"name": "ADCS_BODY_RATE_Z", "units": "deg/s", "description": "Body rate Z", "subsystem": "adcs", "mean": 0.0, "std_dev": 0.05, "red_low": -0.25, "red_high": 0.25, "sample_rate_hz": 4.0},
+    {"name": "COMM_X_BAND_EIRP", "units": "dBW", "description": "X-band effective isotropic radiated power", "subsystem": "comms", "mean": 18.5, "std_dev": 0.8, "red_low": 15.0, "red_high": 21.5},
+    {"name": "COMM_LINK_MARGIN", "units": "dB", "description": "Downlink margin", "subsystem": "comms", "mean": 6.0, "std_dev": 1.0, "red_low": 1.0, "red_high": 12.0},
+    {"name": "PAYLOAD_MSI_TEMP", "units": "C", "description": "Multispectral imager temperature", "subsystem": "payload", "mean": 8.0, "std_dev": 2.5, "red_low": -12.0, "red_high": 25.0},
+    {"name": "PAYLOAD_SWATH_RATE", "units": "km/s", "description": "Ground swath rate", "subsystem": "payload", "mean": 7.2, "std_dev": 0.2, "red_low": 6.0, "red_high": 7.8},
+    {"name": "GPS_LAT", "units": "deg", "description": "Geodetic latitude", "subsystem": "gps", "mean": 0.0, "std_dev": 5.0},
+    {"name": "GPS_LON", "units": "deg", "description": "Geodetic longitude", "subsystem": "gps", "mean": 0.0, "std_dev": 5.0},
+    {"name": "GPS_ALT", "units": "m", "description": "Geodetic altitude", "subsystem": "gps", "mean": 510000.0, "std_dev": 8000.0},
+    {"name": "HEALTH_STATUS", "units": "0/1", "description": "Overall health indicator", "subsystem": "safety", "mean": 1.0, "std_dev": 0.01, "red_low": 1.0, "red_high": 1.0}
+  ],
+  "position_mapping": {
+    "frame_type": "gps_lla",
+    "lat_channel_name": "GPS_LAT",
+    "lon_channel_name": "GPS_LON",
+    "alt_channel_name": "GPS_ALT"
+  },
+  "scenarios": {
+    "nominal": {
+      "description": "Normal survey pass with mild noise",
+      "anomaly_fraction": 0.01
+    },
+    "payload_thermal_spike": {
+      "description": "Imager thermal spike during long dwell",
+      "anomaly_fraction": 0.0,
+      "events": [
+        {"t0": 25.0, "duration": 45.0, "type": "ramp", "channels": ["PAYLOAD_MSI_TEMP", "THERM_PAYLOAD_BAY_TEMP"], "magnitude": 8.0}
+      ]
+    }
+  }
+}
