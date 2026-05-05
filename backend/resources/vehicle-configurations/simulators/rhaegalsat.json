@@ -1,7 +1,7 @@
 {
   "version": 1,
   "name": "RhaegalSat",
-  "base_url": "http://simulator2:8001",
+  "base_url": "http://control-plane:8100/internal/runtime-services/simulator-2-service",
   "vehicle_profile": {
     "bus_class": "Deep survey heavy bus",
     "propulsion_layout": "Dual tank propulsion with split oxidizer/fuel conditioning",

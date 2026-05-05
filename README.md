@@ -8,23 +8,24 @@ Extraction baseline: `c2-infra` commit `7b4f15ace9895c440ad89a9a460566c78135c57b
 
 | Area | Humans | Agents / automation |
 |------|--------|---------------------|
-| **This repo — backend pytest, telemetry catalog, SatNOGS adapter service** | this file | [AGENTS.md](./AGENTS.md) |
+| **This repo — backend pytest, telemetry catalog, SatNOGS adapter and simulator services** | this file | [AGENTS.md](./AGENTS.md) |
 | **Layer 1 — Compose, Node/Playwright validation scripts** | [../space-ops-kernel/README.md](../space-ops-kernel/README.md) | [../space-ops-kernel/AGENTS.md](../space-ops-kernel/AGENTS.md) |
-| **Layer 3 — Mission Control, Playwright workspace, simulator** | [../space-ops-apps/README.md](../space-ops-apps/README.md) | [../space-ops-apps/AGENTS.md](../space-ops-apps/AGENTS.md) |
+| **Layer 3 — Mission Control and Playwright workspace** | [../space-ops-apps/README.md](../space-ops-apps/README.md) | [../space-ops-apps/AGENTS.md](../space-ops-apps/AGENTS.md) |
 
 Compose and canonical **containerized Node**/`npm ci` workflows live in **`space-ops-kernel`**; read that README whenever tests span services.
 
 ## Role
 
-This repository owns the FastAPI backend, SQLAlchemy models, Alembic migrations, telemetry ingestion/query/source/stream APIs, realtime bus and WebSocket behavior, watchlist framework, vehicle config validation and registry APIs, orbit framework, position APIs, provider interfaces, telemetry adapters such as `satnogs-adapter-service`, and the `telemetry_catalog/` schema package source.
+This repository owns the FastAPI backend, SQLAlchemy models, Alembic migrations, telemetry ingestion/query/source/stream APIs, realtime bus and WebSocket behavior, watchlist framework, vehicle config validation and registry APIs, orbit framework, position APIs, provider interfaces, Layer 2 telemetry services such as `satnogs-adapter-service` and `simulator-service`, and the `telemetry_catalog/` schema package source.
 
-It does not own Mission Control UI code, simulator runtime behavior, or Docker Compose orchestration.
+It does not own Mission Control UI code or Docker Compose orchestration.
 
 ## Contents
 
 ```text
 backend/                       FastAPI app, migrations, platform tests
 backend/app/adapters/satnogs   SatNOGS Layer 2 telemetry adapter
+backend/app/simulator          Layer 2 telemetry simulator runtime
 backend/resources/             Layer 2 operational resources packaged with services
 telemetry_catalog/             Shared telemetry schema/config package source
 docs/API_TELEMETRY_CONTRACTS.md

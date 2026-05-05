@@ -1,6 +1,6 @@
 version: 1
 name: DrogonSat
-base_url: http://simulator:8001
+base_url: http://control-plane:8100/internal/runtime-services/simulator-service
 vehicle_profile:
   bus_class: "Rapid-response tactical bus"
   propulsion_layout: "Single biprop tank with one main feed"

@@ -45,6 +45,10 @@ CHANNEL_ORIGIN_DISCOVERED = "discovered"
 HISTORY_MODES = {"live_only", "time_window_replay", "cursor_replay"}
 LIVE_STATES = {"idle", "active", "error"}
 BACKFILL_STATES = {"idle", "running", "complete", "error"}
+LEGACY_COMPOSE_SIMULATOR_BASE_URLS = {
+    "http://simulator:8001",
+    "http://simulator2:8001",
+}
 
 
 def _resolve_stream_source_id(db: Session, source_id: str) -> str:
@@ -1313,6 +1317,8 @@ def repair_registered_sources_on_startup(
 
     for src in all_sources:
         try:
+            if src.source_type == "simulator":
+                _repair_simulator_base_url(src)
             needs_embedding_backfill = _seed_metadata_for_source(
                 db,
                 source_id=src.id,
@@ -1361,3 +1367,21 @@ def repair_registered_sources_on_startup(
                     )
     db.commit()
     return sorted(repaired_source_ids)
+
+
+def _repair_simulator_base_url(src: TelemetrySource) -> None:
+    """Refresh missing or legacy local-stack simulator URLs from Layer 2 config."""
+    try:
+        configured_base_url = load_vehicle_config_file(src.vehicle_config_path).base_url
+    except Exception:
+        logger.exception(
+            "Skipping simulator base_url repair for source %s due to invalid vehicle configuration path %s",
+            src.id,
+            src.vehicle_config_path,
+        )
+        return
+    if not configured_base_url:
+        return
+    current = (src.base_url or "").rstrip("/")
+    if not current or current in LEGACY_COMPOSE_SIMULATOR_BASE_URLS:
+        src.base_url = configured_base_url

@@ -10,9 +10,9 @@
 
 ## Repo role (Layer 2)
 
-Keep changes scoped to platform APIs, schemas, data models, migrations, realtime processing, source/stream registry behavior, watchlist primitives, vehicle config validation/registry behavior, orbit framework code, position APIs, provider interfaces, and Layer 2 telemetry adapters.
+Keep changes scoped to platform APIs, schemas, data models, migrations, realtime processing, source/stream registry behavior, watchlist primitives, vehicle config validation/registry behavior, orbit framework code, position APIs, provider interfaces, Layer 2 telemetry adapters, and the Layer 2 telemetry simulator runtime.
 
-Do not import Mission Control UI, simulator runtime, or app-owned vehicle configuration files as source modules. Concrete config bundles are supplied through `VEHICLE_CONFIG_ROOT`; managed services default to Layer 2 resources under `backend/resources/vehicle-configurations`.
+Do not import Mission Control UI or app-owned vehicle configuration files as source modules. Concrete config bundles are supplied through `VEHICLE_CONFIG_ROOT`; managed services default to Layer 2 resources under `backend/resources/vehicle-configurations`.
 
 ## How to run tests
 
