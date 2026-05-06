@@ -1,0 +1,54 @@
+version: 1
+name: International Space Station
+vehicle_profile:
+  bus_class: Crewed orbital platform
+  payloads:
+    - Amateur packet radio telemetry
+  notes:
+    - SatNOGS observation-backed AX.25/APRS ingest source
+
+channels:
+  - name: ISS_POS_LAT_DEG
+    units: deg
+    description: ISS APRS geodetic latitude
+    subsystem: nav
+    mean: 0.0
+    std_dev: 45.0
+  - name: ISS_POS_LON_DEG
+    units: deg
+    description: ISS APRS geodetic longitude
+    subsystem: nav
+    mean: 0.0
+    std_dev: 90.0
+  - name: ISS_ALT_M
+    units: m
+    description: ISS APRS reported altitude
+    subsystem: nav
+    mean: 408000.0
+    std_dev: 25000.0
+  - name: ISS_SPEED_KMH
+    units: km/h
+    description: ISS APRS reported ground speed
+    subsystem: nav
+    mean: 27600.0
+    std_dev: 2500.0
+  - name: ISS_COURSE_DEG
+    units: deg
+    description: ISS APRS reported course
+    subsystem: nav
+    mean: 180.0
+    std_dev: 120.0
+
+position_mapping:
+  frame_type: gps_lla
+  lat_channel_name: ISS_POS_LAT_DEG
+  lon_channel_name: ISS_POS_LON_DEG
+  alt_channel_name: ISS_ALT_M
+
+ingestion:
+  stable_field_mappings:
+    latitude: ISS_POS_LAT_DEG
+    longitude: ISS_POS_LON_DEG
+    altitude_m: ISS_ALT_M
+    speed_kmh: ISS_SPEED_KMH
+    course_deg: ISS_COURSE_DEG

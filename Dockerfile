@@ -25,11 +25,11 @@ COPY --from=builder /usr/local/lib/python3.11/site-packages /usr/local/lib/pytho
 COPY --from=builder /usr/local/bin /usr/local/bin
 COPY space-ops-platform/backend /app/platform/backend
 COPY space-ops-platform/telemetry_catalog /app/platform/telemetry_catalog
-COPY space-ops-apps/vehicle-configurations /app/vehicle-configurations
+COPY space-ops-platform/backend/resources/vehicle-configurations /app/platform/backend/resources/vehicle-configurations
 
 ENV PYTHONPATH=/app/platform/backend:/app/platform
 ENV PYTHONUNBUFFERED=1
-ENV VEHICLE_CONFIG_ROOT=/app/vehicle-configurations
+ENV VEHICLE_CONFIG_ROOT=/app/platform/backend/resources/vehicle-configurations
 
 EXPOSE 8000
 

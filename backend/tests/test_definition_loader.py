@@ -16,7 +16,7 @@ def test_load_simulator_yaml_definition() -> None:
     definition = load_vehicle_config_file("simulators/drogonsat.yaml")
 
     assert definition.name == "DrogonSat"
-    assert definition.base_url == "http://simulator:8001"
+    assert definition.base_url == "http://control-plane:8100/internal/runtime-services/simulator-service"
     assert definition.position_mapping is not None
     assert definition.position_mapping.frame_type == "gps_lla"
     assert any(channel.name == "PROP_MAIN_TANK_PRESS" for channel in definition.channels)
@@ -26,7 +26,7 @@ def test_load_simulator_json_definition() -> None:
     definition = load_vehicle_config_file("simulators/rhaegalsat.json")
 
     assert definition.name == "RhaegalSat"
-    assert definition.base_url == "http://simulator2:8001"
+    assert definition.base_url == "http://control-plane:8100/internal/runtime-services/simulator-2-service"
     assert definition.position_mapping is not None
     assert definition.position_mapping.frame_type == "ecef"
     assert any(channel.name == "PROP_TANK_B_PRESS" for channel in definition.channels)
@@ -122,4 +122,3 @@ def test_canonical_vehicle_config_path_rejects_traversal(tmp_path: Path) -> None
 
     with pytest.raises(ValueError):
         canonical_vehicle_config_path("../outside.yaml", root=root)
-

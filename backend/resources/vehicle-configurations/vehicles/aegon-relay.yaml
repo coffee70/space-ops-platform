@@ -1,0 +1,160 @@
+version: 1
+name: Aegon Relay
+vehicle_profile:
+  bus_class: "Communications relay"
+  propulsion_layout: "Single monoprop tank"
+  tank_count: 1
+  computer_count: 1
+  payloads:
+    - "Crosslink repeater"
+  notes:
+    - "Training baseline vehicle for the local stack"
+channels:
+  - name: PWR_MAIN_BUS_VOLT
+    aliases: [BAT_V, BATTERY_VOLT, VBAT]
+    units: V
+    description: Main regulated bus voltage
+    subsystem: power
+    mean: 28.1
+    std_dev: 0.25
+    red_low: 27.0
+    red_high: 29.3
+    sample_rate_hz: 1.0
+  - name: PWR_MAIN_BUS_CURR
+    units: A
+    description: Main bus current draw
+    subsystem: power
+    mean: 4.2
+    std_dev: 0.35
+    red_low: 2.8
+    red_high: 5.6
+  - name: EPS_BATTERY_SOC
+    units: "%"
+    description: Battery state of charge
+    subsystem: power
+    mean: 82.0
+    std_dev: 4.0
+    red_low: 35.0
+    red_high: 99.0
+  - name: THERM_BUS_PANEL_TEMP
+    units: C
+    description: Equipment panel temperature
+    subsystem: thermal
+    mean: 21.0
+    std_dev: 2.4
+    red_low: 5.0
+    red_high: 45.0
+  - name: THERM_BATTERY_TEMP
+    units: C
+    description: Battery pack temperature
+    subsystem: thermal
+    mean: 18.5
+    std_dev: 1.8
+    red_low: 0.0
+    red_high: 35.0
+  - name: OBC_CORE_TEMP
+    units: C
+    description: Main flight computer board temperature
+    subsystem: obc
+    mean: 39.0
+    std_dev: 3.5
+    red_low: 5.0
+    red_high: 65.0
+  - name: OBC_CPU_LOAD
+    units: "%"
+    description: Main flight computer load
+    subsystem: obc
+    mean: 42.0
+    std_dev: 8.0
+    red_low: 5.0
+    red_high: 92.0
+  - name: COMM_S_BAND_RSSI
+    units: dBm
+    description: S-band downlink received signal strength
+    subsystem: comms
+    mean: -71.0
+    std_dev: 2.5
+    red_low: -88.0
+    red_high: -55.0
+  - name: COMM_CROSSLINK_LOCK
+    units: "0/1"
+    description: Crosslink modem lock indicator
+    subsystem: comms
+    mean: 1.0
+    std_dev: 0.02
+    red_low: 1.0
+    red_high: 1.0
+  - name: ADCS_BODY_RATE_X
+    units: deg/s
+    description: Spacecraft body rate X
+    subsystem: adcs
+    mean: 0.0
+    std_dev: 0.03
+    red_low: -0.2
+    red_high: 0.2
+    sample_rate_hz: 4.0
+  - name: ADCS_BODY_RATE_Y
+    units: deg/s
+    description: Spacecraft body rate Y
+    subsystem: adcs
+    mean: 0.0
+    std_dev: 0.03
+    red_low: -0.2
+    red_high: 0.2
+    sample_rate_hz: 4.0
+  - name: ADCS_BODY_RATE_Z
+    units: deg/s
+    description: Spacecraft body rate Z
+    subsystem: adcs
+    mean: 0.0
+    std_dev: 0.03
+    red_low: -0.2
+    red_high: 0.2
+    sample_rate_hz: 4.0
+  - name: PROP_TANK_PRESS
+    units: kPa
+    description: Propellant tank pressure
+    subsystem: propulsion
+    mean: 235.0
+    std_dev: 5.0
+    red_low: 180.0
+    red_high: 260.0
+  - name: PROP_LINE_TEMP
+    units: C
+    description: Propellant line temperature
+    subsystem: propulsion
+    mean: 12.0
+    std_dev: 2.0
+    red_low: -5.0
+    red_high: 35.0
+  - name: GPS_LAT
+    units: deg
+    description: Geodetic latitude
+    subsystem: gps
+    mean: 0.0
+    std_dev: 5.0
+  - name: GPS_LON
+    units: deg
+    description: Geodetic longitude
+    subsystem: gps
+    mean: 0.0
+    std_dev: 5.0
+  - name: GPS_ALT
+    units: m
+    description: Geodetic altitude above ellipsoid
+    subsystem: gps
+    mean: 405000.0
+    std_dev: 6000.0
+  - name: HEALTH_STATUS
+    units: "0/1"
+    description: Overall health indicator
+    subsystem: safety
+    mean: 1.0
+    std_dev: 0.01
+    red_low: 1.0
+    red_high: 1.0
+position_mapping:
+  frame_type: gps_lla
+  lat_channel_name: GPS_LAT
+  lon_channel_name: GPS_LON
+  alt_channel_name: GPS_ALT

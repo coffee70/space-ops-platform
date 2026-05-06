@@ -353,14 +353,17 @@ def test_infer_auto_registration_fields_prefers_parsed_name_and_configured_simul
     config_item = SimpleNamespace(category="simulators")
     loaded = SimpleNamespace(
         path="simulators/drogonsat.yaml",
-        parsed=SimpleNamespace(name="DrogonSat", base_url="http://simulator:8001"),
+        parsed=SimpleNamespace(
+            name="DrogonSat",
+            base_url="http://control-plane:8100/internal/runtime-services/simulator-service",
+        ),
     )
 
     result = infer_auto_registration_fields("simulators/drogonsat.yaml", config_item, loaded)
 
     assert result["source_type"] == "simulator"
     assert result["name"] == "DrogonSat"
-    assert result["base_url"] == "http://simulator:8001"
+    assert result["base_url"] == "http://control-plane:8100/internal/runtime-services/simulator-service"
     assert result["vehicle_config_path"] == "simulators/drogonsat.yaml"
 
 
@@ -438,6 +441,41 @@ def test_repair_registered_sources_on_startup_preserves_existing_operator_edits(
     )
     assert all("prune_missing" not in call for call in seeded_calls)
     assert all(call.get("refresh_embeddings") is False for call in seeded_calls)
+
+
+def test_repair_registered_sources_on_startup_refreshes_legacy_simulator_base_url(monkeypatch) -> None:
+    db = MagicMock()
+    existing = MagicMock()
+    existing.id = DROGONSAT_SOURCE_ID
+    existing.source_type = "simulator"
+    existing.base_url = "http://simulator:8001"
+    existing.vehicle_config_path = "simulators/drogonsat.yaml"
+
+    class ScalarResult:
+        def __init__(self, rows):
+            self._rows = rows
+
+        def scalars(self):
+            return self
+
+        def all(self):
+            return self._rows
+
+    monkeypatch.setattr(
+        "app.services.realtime_service._seed_metadata_for_source",
+        lambda *args, **kwargs: None,
+    )
+    monkeypatch.setattr(
+        "app.services.realtime_service.load_vehicle_config_file",
+        lambda _path: SimpleNamespace(
+            base_url="http://control-plane:8100/internal/runtime-services/simulator-service"
+        ),
+    )
+    db.execute.return_value = ScalarResult([existing])
+
+    repair_registered_sources_on_startup(db)
+
+    assert existing.base_url == "http://control-plane:8100/internal/runtime-services/simulator-service"
 
 
 def test_auto_register_sources_from_configs_skips_invalid_files(monkeypatch) -> None:
@@ -1754,7 +1792,7 @@ def test_infer_auto_registration_fields_reads_simulator_base_url_from_full_confi
     fields = infer_auto_registration_fields("simulators/drogonsat.yaml", item, loaded)
 
     assert fields["source_type"] == "simulator"
-    assert fields["base_url"] == "http://simulator:8001"
+    assert fields["base_url"] == "http://control-plane:8100/internal/runtime-services/simulator-service"
 
 
 def test_update_source_live_only_history_mode_marks_backfill_complete() -> None:

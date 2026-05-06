@@ -47,7 +47,7 @@ BUILT_IN_SOURCES = (
         name="DrogonSat",
         description="Agile tactical simulator with GPS LLA telemetry",
         source_type="simulator",
-        base_url="http://simulator:8001",
+        base_url="http://control-plane:8100/internal/runtime-services/simulator-service",
         vehicle_config_path="simulators/drogonsat.yaml",
     ),
     BuiltInSourceSpec(
@@ -55,7 +55,7 @@ BUILT_IN_SOURCES = (
         name="RhaegalSat",
         description="Heavy survey simulator with ECEF position telemetry",
         source_type="simulator",
-        base_url="http://simulator2:8001",
+        base_url="http://control-plane:8100/internal/runtime-services/simulator-2-service",
         vehicle_config_path="simulators/rhaegalsat.json",
     ),
 )

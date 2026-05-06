@@ -85,7 +85,7 @@ def test_resolve_active_stream_id_uses_simulator_status(monkeypatch) -> None:
         id=DROGONSAT_SOURCE_ID,
         name="DrogonSat",
         source_type="simulator",
-        base_url="http://simulator:8001",
+        base_url="http://control-plane:8100/internal/runtime-services/simulator-service",
         vehicle_config_path="defs/drogonsat.yaml",
     )
     stream = SimpleNamespace(
@@ -128,7 +128,7 @@ def test_resolve_active_stream_id_returns_logical_source_when_simulator_is_idle(
         id=DROGONSAT_SOURCE_ID,
         name="DrogonSat",
         source_type="simulator",
-        base_url="http://simulator:8001",
+        base_url="http://control-plane:8100/internal/runtime-services/simulator-service",
         vehicle_config_path="defs/drogonsat.yaml",
     )
     db = MagicMock()

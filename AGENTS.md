@@ -10,15 +10,15 @@
 
 ## Repo role (Layer 2)
 
-Keep changes scoped to platform APIs, schemas, data models, migrations, realtime processing, source/stream registry behavior, watchlist primitives, vehicle config validation/registry behavior, orbit framework code, position APIs, and provider interfaces.
+Keep changes scoped to platform APIs, schemas, data models, migrations, realtime processing, source/stream registry behavior, watchlist primitives, vehicle config validation/registry behavior, orbit framework code, position APIs, provider interfaces, Layer 2 telemetry adapters, and the Layer 2 telemetry simulator runtime.
 
-Do not import Mission Control UI, simulator runtime, SatNOGS adapter runtime, or app-owned vehicle configuration files as source modules. Concrete config bundles are mounted at runtime through `VEHICLE_CONFIG_ROOT`.
+Do not import Mission Control UI or app-owned vehicle configuration files as source modules. Concrete config bundles are supplied through `VEHICLE_CONFIG_ROOT`; managed services default to Layer 2 resources under `backend/resources/vehicle-configurations`.
 
 ## How to run tests
 
 ### Backend (Python)
 
-**Canonical** — creates or reuses **`./.venv`** (gitignored), sets `PYTHONPATH`, default `DATABASE_URL`, and **`VEHICLE_CONFIG_ROOT`** to the sibling `../space-ops-apps/vehicle-configurations`:
+**Canonical** — creates or reuses **`./.venv`** (gitignored), sets `PYTHONPATH`, default `DATABASE_URL`, and **`VEHICLE_CONFIG_ROOT`** to `backend/resources/vehicle-configurations`:
 
 ```bash
 ./scripts/run-backend-tests.sh
