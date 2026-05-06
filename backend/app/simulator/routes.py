@@ -19,6 +19,7 @@ _streamer: TelemetryStreamer | None = None
 # Optional vehicle_id for standalone simulator starts. Backend-managed starts pass
 # the persisted source id explicitly.
 DEFAULT_VEHICLE_ID = os.environ.get("SIMULATOR_SOURCE_ID") or ""
+DEFAULT_VEHICLE_CONFIG_PATH = os.environ.get("VEHICLE_CONFIG_PATH") or None
 
 
 def _supported_scenarios_payload() -> list[dict[str, str]]:
@@ -50,7 +51,10 @@ class StartConfig(BaseModel):
     jitter: float = Field(default=0.1, ge=0, le=1, description="Inter-sample jitter")
     vehicle_id: str = Field(default=DEFAULT_VEHICLE_ID, description="Logical vehicle ID for ingest")
     base_url: str | None = Field(default=None, description="Backend ingest URL (default: BACKEND_URL env)")
-    vehicle_config_path: str | None = Field(default=None, description="Vehicle configuration file to load for this run")
+    vehicle_config_path: str | None = Field(
+        default=DEFAULT_VEHICLE_CONFIG_PATH,
+        description="Vehicle configuration file to load for this run",
+    )
     packet_source: str | None = Field(default="simulator-link", description="Packet origin identifier")
     receiver_id: str | None = Field(default=None, description="Receiving endpoint identifier")
 
