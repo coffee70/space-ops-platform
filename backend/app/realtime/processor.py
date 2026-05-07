@@ -328,11 +328,18 @@ class RealtimeProcessor:
             status=tracker.get_status(source_id),
             now=recv_time,
         )
-        get_messaging().publish_nowait(
-            Subjects.FEED_HEALTH,
-            event_type="telemetry.feed_health.updated",
-            payload=serialize_feed_health(feed_health),
-        )
+        try:
+            get_messaging().publish_nowait(
+                Subjects.FEED_HEALTH,
+                event_type="telemetry.feed_health.updated",
+                payload=serialize_feed_health(feed_health),
+            )
+        except Exception:
+            logger.warning(
+                "ingest.feed_health_messaging_publish_failed source_id=%s",
+                source_id,
+                exc_info=True,
+            )
 
         # Persist to Timescale. Use a savepoint so duplicate sample retries do not
         # roll back a newly discovered metadata row created earlier in this transaction.
@@ -569,13 +576,27 @@ class RealtimeProcessor:
                     subsystem,
                 )
 
-        # Broadcast telemetry update
-        self._broadcast_telemetry_update(update)
-        get_messaging().publish_nowait(
-            Subjects.TELEMETRY_UPDATE,
-            event_type="telemetry.update.published",
-            payload=update.model_dump(),
-        )
+        try:
+            self._broadcast_telemetry_update(update)
+        except Exception:
+            logger.warning(
+                "ingest.realtime_broadcast_failed channel=%s source_id=%s",
+                meta.name,
+                source_id,
+                exc_info=True,
+            )
+        try:
+            get_messaging().publish_nowait(
+                Subjects.TELEMETRY_UPDATE,
+                event_type="telemetry.update.published",
+                payload=update.model_dump(),
+            )
+        except Exception:
+            logger.warning(
+                "ingest.telemetry_update_messaging_failed channel=%s",
+                meta.name,
+                exc_info=True,
+            )
 
         # Orbit: if this source has a position mapping and channel is lat/lon/alt, buffer and maybe push
         self._maybe_submit_orbit_sample(db, source_id, stream_id, channel_name, event.value, gen_time)
