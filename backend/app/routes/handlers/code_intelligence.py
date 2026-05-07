@@ -191,6 +191,73 @@ def _should_skip_index_path(path: str) -> bool:
     return any(skip in normalized for skip in ["node_modules", ".next", "/dist/", "/build/", "/coverage/", "/.git/"])
 
 
+# Control-plane /code/file uses UTF-8 text reads; skip common non-text assets so full-tree indexing does not fail.
+_BINARY_CODE_INDEX_EXTENSIONS = frozenset(
+    {
+        "png",
+        "jpg",
+        "jpeg",
+        "gif",
+        "webp",
+        "bmp",
+        "ico",
+        "tif",
+        "tiff",
+        "pdf",
+        "zip",
+        "gz",
+        "tgz",
+        "bz2",
+        "xz",
+        "7z",
+        "rar",
+        "mp3",
+        "mp4",
+        "m4a",
+        "wav",
+        "ogg",
+        "webm",
+        "mov",
+        "avi",
+        "mkv",
+        "woff",
+        "woff2",
+        "ttf",
+        "otf",
+        "eot",
+        "wasm",
+        "so",
+        "dylib",
+        "dll",
+        "exe",
+        "bin",
+        "sqlite",
+        "jar",
+        "apk",
+        "dmg",
+        "iso",
+        "ppt",
+        "pptx",
+        "xls",
+        "xlsx",
+        "doc",
+        "docx",
+        "npz",
+        "npy",
+        "parquet",
+        "pickle",
+        "pkl",
+    }
+)
+
+
+def _should_skip_binary_index_path(path: str) -> bool:
+    if "." not in path:
+        return False
+    ext = path.rsplit(".", 1)[-1].lower()
+    return ext in _BINARY_CODE_INDEX_EXTENSIONS
+
+
 def _tree_entry_is_dir(entry: dict) -> bool:
     if "is_dir" in entry and entry["is_dir"] is not None:
         return bool(entry["is_dir"])
@@ -219,6 +286,8 @@ async def _collect_code_file_paths(branch: str, root: str) -> tuple[list[str], s
             if _tree_entry_is_dir(entry):
                 await walk(entry_path)
             else:
+                if _should_skip_binary_index_path(entry_path):
+                    continue
                 paths.append(entry_path)
 
     await walk(root)
