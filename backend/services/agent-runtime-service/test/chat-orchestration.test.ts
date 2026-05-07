@@ -229,7 +229,7 @@ test("invalid downstream raw events become canonical error events", async () => 
   assert.equal(errorEvent.event.payload.source, "context-retrieval-service");
 });
 
-test("missing execution mode defaults to read_only for prompt construction", async () => {
+test("missing execution mode preserves persisted conversation mode for prompt construction", async () => {
   const store = new MemoryConversationStore();
   const conversation = await store.createConversation({
     title: "AI Engineer Session",
@@ -282,7 +282,64 @@ test("missing execution mode defaults to read_only for prompt construction", asy
 
   assert.equal(response.status, 200);
   await response.text();
-  assert.match(observedSystemPrompt, /Current execution mode: read_only/);
+  assert.match(observedSystemPrompt, /Current execution mode: execute/);
+});
+
+test("explicit request execution mode overrides persisted conversation mode", async () => {
+  const store = new MemoryConversationStore();
+  const conversation = await store.createConversation({
+    title: "AI Engineer Session",
+    execution_mode: "execute",
+  });
+  let observedSystemPrompt = "";
+
+  const app = createApp({
+    config: {
+      port: 8080,
+      databaseUrl: "postgres://example",
+      controlPlaneUrl: "http://localhost:8100",
+      openAiApiKey: "test-key",
+      openAiBaseUrl: null,
+      modelId: "gpt-4o-mini",
+      maxSteps: 3,
+      requestTimeoutMs: 1000,
+      scriptedMode: null,
+      allowMissingKeyFallback: false,
+    },
+    store,
+    contextClient: new FakeContextClient([contextResolvedEvent()]),
+    toolRegistryClient: new FakeToolRegistryClient([]),
+    toolExecutionClient: new FakeToolExecutionClient({
+      conversation_id: conversation.id,
+      agent_run_id: "ignored",
+      request_id: "ignored",
+      tool_call_id: "ignored",
+      status: "completed",
+      output: {},
+      raw_events: [],
+    }),
+    modelRunner: {
+      async *stream(input) {
+        observedSystemPrompt = input.system;
+        yield { type: "text-delta", textDelta: "suggest mode applied" };
+        yield { type: "finish", finishReason: "stop" };
+      },
+    },
+  });
+
+  const response = await app.request("/chat", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      conversation_id: conversation.id,
+      execution_mode: "suggest",
+      messages: [{ role: "user", content: "Inspect current mode behavior." }],
+    }),
+  });
+
+  assert.equal(response.status, 200);
+  await response.text();
+  assert.match(observedSystemPrompt, /Current execution mode: suggest/);
   assert.doesNotMatch(observedSystemPrompt, /Current execution mode: execute/);
 });
 

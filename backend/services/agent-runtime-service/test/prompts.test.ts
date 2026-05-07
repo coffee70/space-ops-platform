@@ -17,6 +17,12 @@ test("AI Engineer system prompt includes required durable constraints", () => {
   assert.match(prompt, /kernel controls runtime registry/);
   assert.match(prompt, /Platform services provide operational APIs/);
   assert.match(prompt, /Apps provide user-facing workflows/);
+  assert.match(prompt, /operational intelligence substrate/);
+  assert.match(prompt, /operational events/);
+  assert.match(prompt, /investigations/);
+  assert.match(prompt, /recommendations/);
+  assert.match(prompt, /knowledge graph|world model/);
+  assert.match(prompt, /Do not invent events, investigations, recommendations, graph relationships, or operational history/);
   assert.match(prompt, /managed source as a Git-backed platform source of truth/);
   assert.match(prompt, /registered platform tools as the source of truth/);
   assert.match(prompt, /mission and vehicle documents as the source of truth/);

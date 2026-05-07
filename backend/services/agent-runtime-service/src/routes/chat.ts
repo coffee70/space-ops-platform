@@ -109,7 +109,7 @@ export function registerChatRoutes(app: Hono, dependencies: RunDependencies): vo
       return c.json({ detail: "latest user message is required" }, 400);
     }
 
-    const executionMode = payload.execution_mode ?? "read_only";
+    const executionMode = payload.execution_mode ?? conversation.execution_mode ?? "read_only";
     const trace = createTrace({
       conversationId: payload.conversation_id,
       createId: dependencies.createId,
