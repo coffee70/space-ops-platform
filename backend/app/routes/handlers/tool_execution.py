@@ -254,6 +254,10 @@ async def _execute_mapped_tool(name: str, tool_input: dict, *, db: Session, trac
     if name == 'get_related_code_context':
         fp = _combine_repo_path(tool_input['repository'], tool_input['path'])
         payload = {'file_path': fp, 'branch': tool_input.get('branch') or 'main'}
+        if tool_input.get('line'):
+            payload['line'] = tool_input['line']
+        if tool_input.get('limit'):
+            payload['limit'] = tool_input['limit']
         return await _runtime_post('code-intelligence-service', 'related-context', payload)
 
     # --- Navigation ---

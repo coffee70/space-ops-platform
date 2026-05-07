@@ -330,7 +330,7 @@ def seed_tools(db: Session = Depends(get_db)):
         ('search_documents', 'Search uploaded documents.', 'documents', 'layer2', 'read_only'),
         ('search_codebase', 'Search indexed code chunks.', 'code_intelligence', 'layer2', 'read_only'),
         ('read_source_file', 'Read file contents from the managed fork (Layer 1).', 'code_intelligence', 'layer1', 'read_only'),
-        ('get_related_code_context', 'Related code chunks for a repository path.', 'code_intelligence', 'layer2', 'read_only'),
+        ('get_related_code_context', 'Return additional indexed chunks for a repository file path.', 'code_intelligence', 'layer2', 'read_only'),
         ('navigate_to_application', 'Navigate Mission Control UI to a platform application.', 'navigation', 'layer3', 'read_only'),
     ]
 
