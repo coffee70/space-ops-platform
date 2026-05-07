@@ -87,7 +87,18 @@ function contentPreview(content: string): string {
 
 export function registerChatRoutes(app: Hono, dependencies: RunDependencies): void {
   app.post("/chat", async (c) => {
-    const payload = chatRequestSchema.parse(await c.req.json());
+    const parsedBody = await c.req.json();
+    const payloadResult = chatRequestSchema.safeParse(parsedBody);
+    if (!payloadResult.success) {
+      return c.json(
+        {
+          detail: "invalid chat request payload",
+          issues: payloadResult.error.issues,
+        },
+        400,
+      );
+    }
+    const payload = payloadResult.data;
     const conversation = await dependencies.store.getConversation(payload.conversation_id);
     if (!conversation) {
       return c.json({ detail: "conversation not found" }, 404);
@@ -98,7 +109,7 @@ export function registerChatRoutes(app: Hono, dependencies: RunDependencies): vo
       return c.json({ detail: "latest user message is required" }, 400);
     }
 
-    const executionMode = payload.execution_mode ?? conversation.execution_mode;
+    const executionMode = payload.execution_mode ?? conversation.execution_mode ?? "read_only";
     const trace = createTrace({
       conversationId: payload.conversation_id,
       createId: dependencies.createId,
