@@ -22,6 +22,9 @@ HOP_BY_HOP_HEADERS = {
 
 REQUEST_HEADERS_NOT_FORWARDED = HOP_BY_HOP_HEADERS | {"host"}
 
+# Keep bounded below control-plane upstream runtime-proxy read timeout + margin so /ops/feed-status fails fast when ingest is wedged.
+KERNEL_SERVICE_PROXY_TIMEOUT = httpx.Timeout(connect=3.0, read=12.0, write=12.0, pool=5.0)
+
 
 def _join_url_path(base_path: str, path: str = "") -> str:
     segments = [segment.strip("/") for segment in (base_path, path) if segment and segment.strip("/")]
@@ -59,7 +62,7 @@ async def proxy_request(service_slug: str, request: Request, *, path: str = "") 
     upstream = _kernel_service_proxy_url(service_slug, path, request.url.query)
 
     try:
-        client = httpx.AsyncClient(follow_redirects=False, timeout=30.0)
+        client = httpx.AsyncClient(follow_redirects=False, timeout=KERNEL_SERVICE_PROXY_TIMEOUT)
         upstream_request = client.build_request(
             request.method,
             upstream,
@@ -92,7 +95,7 @@ async def proxy_request(service_slug: str, request: Request, *, path: str = "") 
 
 async def fetch_service_json(service_slug: str, path: str, *, params: dict[str, object] | None = None) -> dict:
     try:
-        async with httpx.AsyncClient(timeout=15.0, follow_redirects=False) as client:
+        async with httpx.AsyncClient(timeout=KERNEL_SERVICE_PROXY_TIMEOUT, follow_redirects=False) as client:
             response = await client.get(_kernel_service_proxy_url(service_slug, path), params=params)
     except httpx.RequestError as exc:
         raise HTTPException(status_code=502, detail="service proxy unavailable") from exc

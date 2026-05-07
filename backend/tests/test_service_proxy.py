@@ -7,6 +7,7 @@ from fastapi.testclient import TestClient
 
 from app.routes import gateway_http
 from platform_common import service_proxy
+from platform_common.service_proxy import KERNEL_SERVICE_PROXY_TIMEOUT
 from platform_common.web import create_service_app
 
 
@@ -16,7 +17,7 @@ class _AsyncClient:
     request_calls: list[dict] = []
     get_calls: list[dict] = []
 
-    def __init__(self, *, timeout: float, follow_redirects: bool):
+    def __init__(self, *, timeout: float | httpx.Timeout, follow_redirects: bool):
         self.timeout = timeout
         self.follow_redirects = follow_redirects
 
@@ -109,7 +110,7 @@ def test_proxy_request_does_not_call_registry_services(monkeypatch) -> None:
     assert "host" not in forwarded_headers
     assert "connection" not in forwarded_headers
     assert call["content"] is None
-    assert call["timeout"] == 30.0
+    assert call["timeout"] == KERNEL_SERVICE_PROXY_TIMEOUT
     assert call["follow_redirects"] is False
 
 
@@ -135,7 +136,7 @@ async def test_fetch_service_json_uses_kernel_internal_service_proxy(monkeypatch
                 "telemetry-ingest-service/telemetry/feed-health"
             ),
             "params": {"source_id": "alpha"},
-            "timeout": 15.0,
+            "timeout": KERNEL_SERVICE_PROXY_TIMEOUT,
             "follow_redirects": False,
         }
     ]

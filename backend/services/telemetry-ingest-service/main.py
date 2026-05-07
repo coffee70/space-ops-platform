@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 
@@ -40,35 +41,49 @@ async def lifespan(app):
 
     async def refresh_feed_health_periodically() -> None:
         session_factory = get_session_factory()
-        while True:
-            await asyncio.sleep(5)
+
+        def _tick() -> None:
             session = session_factory()
             try:
+                t0 = time.perf_counter()
                 changed = refresh_feed_health_states(session)
                 for row in changed:
                     payload = serialize_feed_health(row)
-                    messaging.publish_nowait(
-                        Subjects.FEED_HEALTH,
-                        event_type="telemetry.feed_health.updated",
-                        payload=payload,
-                    )
-                    write_ops_event(
-                        session,
-                        source_id=row.source_id,
-                        event_time=datetime.now(timezone.utc),
-                        event_type="system.feed_status",
-                        severity="info" if row.state == "connected" else "warning",
-                        summary=f"Feed {row.source_id}: {row.state}",
-                        entity_type="system",
-                        entity_id=row.source_id,
-                        payload=payload,
-                    )
+                    try:
+                        messaging.publish_nowait(
+                            Subjects.FEED_HEALTH,
+                            event_type="telemetry.feed_health.updated",
+                            payload=payload,
+                        )
+                    except Exception:
+                        logger.warning("feed-health NATS publish failed", exc_info=True)
+                    try:
+                        write_ops_event(
+                            session,
+                            source_id=row.source_id,
+                            event_time=datetime.now(timezone.utc),
+                            event_type="system.feed_status",
+                            severity="info" if row.state == "connected" else "warning",
+                            summary=f"Feed {row.source_id}: {row.state}",
+                            entity_type="system",
+                            entity_id=row.source_id,
+                            payload=payload,
+                        )
+                    except Exception:
+                        logger.warning("feed-health ops-event write failed", exc_info=True)
                 session.commit()
+                elapsed_ms = (time.perf_counter() - t0) * 1000
+                if elapsed_ms > 750:
+                    logger.warning("slow feed-health refresh_tick elapsed_ms=%.1f rows=%s", elapsed_ms, len(changed))
             except Exception as exc:
                 logger.exception("Feed health refresh failed: %s", exc)
                 session.rollback()
             finally:
                 session.close()
+
+        while True:
+            await asyncio.sleep(5)
+            await asyncio.to_thread(_tick)
 
     register_on_status_change(publish_orbit_status)
     await messaging.subscribe(Subjects.ORBIT_RESET, on_orbit_reset)
