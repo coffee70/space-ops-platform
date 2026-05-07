@@ -48,11 +48,16 @@ class _ModelQuery:
     def __init__(self, session: "_SessionDouble", model):
         self._session = session
         self._model = model
+        self._filter_criteria: tuple = ()
+        self._order_start_line = False
 
-    def filter(self, *_args, **_kwargs):
+    def filter(self, *args, **_kwargs):
+        self._filter_criteria = self._filter_criteria + args
         return self
 
-    def order_by(self, *_args, **_kwargs):
+    def order_by(self, *args, **_kwargs):
+        if any("start_line" in str(a) for a in args):
+            self._order_start_line = True
         return self
 
     def one_or_none(self):
@@ -63,11 +68,40 @@ class _ModelQuery:
         if self._model is CodeRepository:
             return list(self._session.code_repositories)
         if self._model is CodeChunk:
-            return list(self._session.code_chunks)
+            rows = list(self._session.code_chunks)
+            if self._filter_criteria:
+                rows = [c for c in rows if self._chunk_matches_filters(c)]
+            if self._order_start_line:
+                rows = sorted(rows, key=lambda c: (c.start_line or 0, c.end_line or 0))
+            return rows
         return []
 
+    @staticmethod
+    def _clause_field_value(clause) -> tuple[str | None, object | None]:
+        left = getattr(clause, "left", None)
+        right = getattr(clause, "right", None)
+        if left is None or right is None:
+            return None, None
+        key = getattr(left, "key", None)
+        if key is None and hasattr(left, "property"):
+            key = getattr(left.property, "key", None)
+        val = getattr(right, "value", None)
+        return key, val
+
+    def _chunk_matches_filters(self, chunk: CodeChunk) -> bool:
+        for clause in self._filter_criteria:
+            key, val = self._clause_field_value(clause)
+            if not key:
+                continue
+            if getattr(chunk, key, object()) != val:
+                return False
+        return True
+
     def delete(self):
-        if self._model is CodeChunk:
+        if self._model is CodeChunk and self._filter_criteria:
+            self._session.code_chunks = [c for c in self._session.code_chunks if not self._chunk_matches_filters(c)]
+            self._filter_criteria = ()
+        elif self._model is CodeChunk:
             self._session.code_chunks.clear()
         return 0
 
@@ -156,6 +190,13 @@ def test_chunk_code_with_metadata_fallback_windows_and_no_empty_chunks() -> None
     assert all(chunk.content.strip() for chunk in chunks)
 
 
+def test_chunk_code_with_metadata_includes_preamble_before_first_symbol() -> None:
+    chunks = chunk_code_with_metadata("# Module doc\n\nclass Foo:\n    pass\n", language="py")
+    assert chunks[0].metadata.get("chunk_strategy") == "preamble"
+    assert "Module doc" in chunks[0].content
+    assert any(c.symbol_name == "Foo" for c in chunks)
+
+
 def test_search_scoring_prefers_phrase_path_and_symbol_matches() -> None:
     session = _SessionDouble()
     repo = CodeRepository(name="space-ops-apps", source_uri="/tmp/space-ops-apps", layer="layer2", default_branch="main")
@@ -194,40 +235,125 @@ def test_search_smoke_queries_return_plausible_files() -> None:
 
 
 @pytest.mark.anyio
-async def test_index_repository_persists_line_ranges_and_tool_path_reads_file(monkeypatch) -> None:
+async def test_index_repository_walks_nested_tree_control_plane_shape(monkeypatch) -> None:
     session = _SessionDouble()
     monkeypatch.setattr(code_intelligence, "get_embedding_provider", lambda: _Provider())
 
-    source = (
-        "class SourceRegistry:\n"
-        "    pass\n\n"
-        "def telemetry_detail(channel):\n"
-        "    return channel\n"
-    )
+    root = "project/space-ops-platform"
+    nested_py = "class Nested:\n    pass\n"
+    shallow_py = "x = 1\n"
+
+    trees: dict[str, dict] = {
+        root: {
+            "commit_sha": "abc1234",
+            "data": {
+                "entries": [
+                    {"path": f"{root}/backend", "name": "backend", "is_dir": True},
+                    {"path": f"{root}/shallow.py", "name": "shallow.py", "is_dir": False},
+                ]
+            },
+        },
+        f"{root}/backend": {
+            "commit_sha": "abc1234",
+            "data": {
+                "entries": [
+                    {"path": f"{root}/backend/services", "name": "services", "is_dir": True},
+                ]
+            },
+        },
+        f"{root}/backend/services": {
+            "commit_sha": "abc1234",
+            "data": {
+                "entries": [
+                    {
+                        "path": f"{root}/backend/services/source_registry.py",
+                        "name": "source_registry.py",
+                        "is_dir": False,
+                    },
+                ]
+            },
+        },
+    }
+    files: dict[str, str] = {
+        f"{root}/shallow.py": shallow_py,
+        f"{root}/backend/services/source_registry.py": nested_py,
+    }
 
     async def fake_cp_get(path: str, params: dict | None = None):
         if path == "code/tree":
-            return {"commit_sha": "abc1234", "data": {"entries": [{"type": "file", "path": "backend/services/source_registry.py"}]}}
+            req_path = params.get("path") if params else None
+            assert req_path in trees, req_path
+            return trees[req_path]
         if path == "code/file":
-            return {"commit_sha": "abc1234", "data": {"content": source}}
-        raise AssertionError(path)
+            fp = params.get("path")
+            return {"commit_sha": "abc1234", "data": {"content": files[fp]}}
+        raise AssertionError((path, params))
 
     monkeypatch.setattr(code_intelligence, "_cp_get", fake_cp_get)
 
-    await code_intelligence.index_repository({"root": "/tmp/space-ops-platform", "branch": "main"}, db=session)
-    assert session.code_chunks
-    assert all(chunk.start_line is not None and chunk.end_line is not None for chunk in session.code_chunks)
-    assert all(chunk.start_line <= chunk.end_line for chunk in session.code_chunks)
+    result = await code_intelligence.index_repository({"root": root, "branch": "main"}, db=session)
+    assert result["file_count"] == 2
+    assert result["chunk_count"] >= 2
+    indexed_paths = {c.file_path for c in session.code_chunks}
+    assert f"{root}/backend/services/source_registry.py" in indexed_paths
+    assert f"{root}/shallow.py" in indexed_paths
+    assert all(c.start_line is not None and c.end_line is not None for c in session.code_chunks)
+    assert all(c.start_line <= c.end_line for c in session.code_chunks)
 
-    async def fake_cp_get_tool(path: str, params: dict | None = None):
-        assert path == "code/file"
-        assert params and params["path"] == "backend/services/source_registry.py"
-        return {"commit_sha": "abc1234", "data": {"content": source}}
+    async def fake_cp_get_tool(p: str, params: dict | None = None):
+        assert p == "code/file"
+        assert params and params["path"] == f"{root}/backend/services/source_registry.py"
+        return {"commit_sha": "abc1234", "data": {"content": nested_py}}
 
     monkeypatch.setattr(tool_execution, "_cp_get", fake_cp_get_tool)
     tool_result = await tool_execution._execute_mapped_tool(
         "read_source_file",
-        {"branch": "main", "path": "backend/services/source_registry.py"},
+        {"branch": "main", "path": f"{root}/backend/services/source_registry.py"},
         db=session,
     )
-    assert tool_result["data"]["content"].startswith("class SourceRegistry")
+    assert tool_result["data"]["content"].startswith("class Nested")
+
+
+def test_related_context_returns_same_file_chunks_for_canonical_path() -> None:
+    session = _SessionDouble()
+    repo = CodeRepository(name="space-ops-platform", source_uri="project/space-ops-platform", layer="layer2", default_branch="main")
+    session.add(repo)
+    fp = "project/space-ops-platform/backend/z.py"
+    session.add(_chunk(repo.id, fp, "a = 1\n", start_line=1, end_line=1, symbol_name=None, symbol_type=None))
+    session.add(_chunk(repo.id, fp, "class Z:\n    pass\n", start_line=3, end_line=4, symbol_name="Z", symbol_type="class"))
+
+    out = code_intelligence.related_context({"file_path": fp, "branch": "main"}, db=session)
+    assert len(out) == 2
+    assert {row["file_path"] for row in out} == {fp}
+    assert all(row["start_line"] is not None for row in out)
+
+
+@pytest.mark.anyio
+async def test_get_related_code_context_tool_keeps_canonical_path(monkeypatch) -> None:
+    posted: dict = {}
+
+    async def fake_runtime_post(slug: str, path: str, json_body: dict | None = None):
+        posted["slug"] = slug
+        posted["path"] = path
+        posted["json"] = json_body or {}
+        return []
+
+    monkeypatch.setattr(tool_execution, "_runtime_post", fake_runtime_post)
+    session = _SessionDouble()
+
+    canonical = "project/space-ops-platform/backend/services/x.py"
+    await tool_execution._execute_mapped_tool(
+        "get_related_code_context",
+        {"repository": "space-ops-platform", "path": canonical, "branch": "main"},
+        db=session,
+    )
+    assert posted["slug"] == "code-intelligence-service"
+    assert posted["path"] == "related-context"
+    assert posted["json"]["file_path"] == canonical
+
+
+def test_combine_repo_path_joins_short_repo_names_but_not_canonical_paths() -> None:
+    canonical = "project/space-ops-apps/mission-control-ui/src/a.tsx"
+    assert tool_execution._combine_repo_path("space-ops-apps", canonical) == canonical
+    assert tool_execution._combine_repo_path("space-ops-platform", "project/space-ops-platform/foo.py") == "project/space-ops-platform/foo.py"
+    assert tool_execution._combine_repo_path("my-unit", "src/handler.py") == "my-unit/src/handler.py"

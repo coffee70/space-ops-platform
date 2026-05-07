@@ -12,6 +12,7 @@ from app.database import get_db
 from app.intelligence.events import raw_event
 from app.intelligence.redaction import redact
 from app.intelligence.tool_metadata import tool_summary
+from app.intelligence.managed_code_paths import is_canonical_managed_code_path
 from app.routes.handlers.tool_registry import SUPPORTED_TOOL_NAMES
 from app.intelligence.schemas import ToolExecutionRequest
 from app.intelligence.tool_validation import ToolInputValidationError, ToolSchemaDefinitionError, validate_tool_input
@@ -70,10 +71,14 @@ async def _runtime_post(slug: str, path: str, json_body: dict | None = None) -> 
 
 
 def _combine_repo_path(repository: str, path: str) -> str:
+    raw = path.strip()
+    normalized = raw.lstrip('/')
+    if is_canonical_managed_code_path(normalized):
+        return normalized
     r = repository.strip('/')
-    p = path.strip('/')
-    if path.startswith('/') or '/' in repository:
-        return path
+    p = raw.strip('/')
+    if raw.startswith('/') or '/' in repository:
+        return normalized
     return f"{r}/{p}"
 
 

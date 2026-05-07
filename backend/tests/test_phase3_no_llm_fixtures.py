@@ -170,21 +170,36 @@ async def test_phase3_fixture_code_indexing_emits_started_and_completed_events(m
     session = _SessionDouble()
     fixture_root = FIXTURES_ROOT / "phase3_code" / "phase3-test-fixture-service"
     fixture_file = fixture_root / "app" / "main.py"
+    service_root = "project/space-ops-platform/backend/services/phase3-test-fixture-service"
 
     async def fake_cp_get(path: str, params: dict | None = None):
         if path == "code/tree":
-            return {
-                "commit_sha": "abc1234",
-                "data": {
-                    "entries": [
-                        {
-                            "type": "file",
-                            "path": "project/space-ops-platform/backend/services/phase3-test-fixture-service/app/main.py",
-                        }
-                    ]
-                },
-            }
+            req = params.get("path") if params else None
+            if req == service_root:
+                return {
+                    "commit_sha": "abc1234",
+                    "data": {
+                        "entries": [
+                            {"path": f"{service_root}/app", "name": "app", "is_dir": True},
+                        ]
+                    },
+                }
+            if req == f"{service_root}/app":
+                return {
+                    "commit_sha": "abc1234",
+                    "data": {
+                        "entries": [
+                            {
+                                "path": f"{service_root}/app/main.py",
+                                "name": "main.py",
+                                "is_dir": False,
+                            },
+                        ]
+                    },
+                }
+            raise AssertionError(f"unexpected tree path: {req!r}")
         if path == "code/file":
+            assert params.get("path") == f"{service_root}/app/main.py"
             return {
                 "commit_sha": "abc1234",
                 "data": {"content": fixture_file.read_text(encoding="utf-8")},
@@ -195,7 +210,7 @@ async def test_phase3_fixture_code_indexing_emits_started_and_completed_events(m
 
     result = await code_intelligence.index_repository(
         {
-            "root": str(fixture_root),
+            "root": service_root,
             "branch": "main",
             "conversation_id": "11111111-1111-1111-1111-111111111111",
             "agent_run_id": "22222222-2222-2222-2222-222222222222",

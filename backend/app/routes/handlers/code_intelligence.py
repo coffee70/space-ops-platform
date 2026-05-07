@@ -107,17 +107,35 @@ def _score_code_chunk(query: str, chunk: CodeChunk) -> tuple[float, dict]:
     return score, debug
 
 
-def _is_safe_repo_root(root: str) -> bool:
-    try:
-        resolved = Path(root).resolve()
-    except OSError:
+def _is_logical_managed_source_uri(uri: str) -> bool:
+    """Layer 1 stores repo roots like project/space-ops-platform — not a filesystem path for ripgrep."""
+    u = uri.strip().lstrip("/")
+    if not u:
         return False
-    allowed = {Path("/workspace").resolve(), Path("/repos").resolve(), Path("/tmp").resolve()}
-    return any(str(resolved).startswith(str(prefix)) for prefix in allowed)
+    return u.startswith("project/") or u.startswith("manifests/")
+
+
+def _ripgrep_search_root_path(uri: str) -> Path | None:
+    if _is_logical_managed_source_uri(uri):
+        return None
+    try:
+        candidate = Path(uri).expanduser().resolve()
+    except OSError:
+        return None
+    if not candidate.exists():
+        return None
+    for base in (Path("/workspace"), Path("/repos"), Path("/tmp")):
+        try:
+            candidate.relative_to(base.resolve())
+            return candidate if candidate.is_dir() else None
+        except ValueError:
+            continue
+    return None
 
 
 def _run_ripgrep_search(repository_root: str, query: str, limit: int) -> list[dict]:
-    if not query.strip() or not _is_safe_repo_root(repository_root):
+    search_root = _ripgrep_search_root_path(repository_root)
+    if not query.strip() or search_root is None:
         return []
     try:
         completed = subprocess.run(
@@ -136,7 +154,7 @@ def _run_ripgrep_search(repository_root: str, query: str, limit: int) -> list[di
                 "--glob",
                 "!build",
                 query,
-                repository_root,
+                str(search_root),
             ],
             check=False,
             capture_output=True,
@@ -166,6 +184,45 @@ def _run_ripgrep_search(repository_root: str, query: str, limit: int) -> list[di
 def list_repositories(db: Session = Depends(get_db)):
     repos = db.query(CodeRepository).order_by(CodeRepository.created_at.desc()).all()
     return [_repo_summary(repo) for repo in repos]
+
+
+def _should_skip_index_path(path: str) -> bool:
+    normalized = path.replace("\\", "/")
+    return any(skip in normalized for skip in ["node_modules", ".next", "/dist/", "/build/", "/coverage/", "/.git/"])
+
+
+def _tree_entry_is_dir(entry: dict) -> bool:
+    if "is_dir" in entry and entry["is_dir"] is not None:
+        return bool(entry["is_dir"])
+    etype = entry.get("type")
+    if etype == "file":
+        return False
+    if etype in {"dir", "directory", "folder"}:
+        return True
+    return False
+
+
+async def _collect_code_file_paths(branch: str, root: str) -> tuple[list[str], str]:
+    """Walk control-plane code/tree recursively (entries use is_dir like ManagedGitRepository.get_tree)."""
+    paths: list[str] = []
+    head_sha = ""
+
+    async def walk(current_path: str) -> None:
+        nonlocal head_sha
+        tree = await _cp_get("code/tree", params={"branch": branch, "path": current_path})
+        head_sha = tree.get("commit_sha") or head_sha
+        entries = tree.get("data", {}).get("entries", [])
+        for entry in entries:
+            entry_path = entry.get("path")
+            if not entry_path or _should_skip_index_path(entry_path):
+                continue
+            if _tree_entry_is_dir(entry):
+                await walk(entry_path)
+            else:
+                paths.append(entry_path)
+
+    await walk(root)
+    return paths, head_sha
 
 
 async def index_repository(body: dict, db: Session = Depends(get_db)):
@@ -200,22 +257,18 @@ async def index_repository(body: dict, db: Session = Depends(get_db)):
         )
 
     try:
-        tree = await _cp_get("code/tree", params={"branch": branch, "path": root})
-        entries = tree.get("data", {}).get("entries", [])
-        files = [entry["path"] for entry in entries if entry.get("type") == "file"]
+        file_paths, tree_head_sha = await _collect_code_file_paths(branch, root)
         provider = get_embedding_provider()
         file_count = 0
         chunk_count = 0
-        for path in files:
-            if any(skip in path for skip in ["node_modules", ".next", "/dist/", "/build/", "/coverage/", "/.git/"]):
-                continue
+        for path in file_paths:
             file_data = await _cp_get("code/file", params={"branch": branch, "path": path})
             content = file_data.get("data", {}).get("content", "")
             if not content or len(content) > 100_000:
                 continue
             language = path.split(".")[-1] if "." in path else None
             chunks = chunk_code_with_metadata(content, language=language)
-            commit_sha = file_data.get("commit_sha") or tree.get("commit_sha") or ""
+            commit_sha = file_data.get("commit_sha") or tree_head_sha or ""
             db.query(CodeChunk).filter(CodeChunk.repository_id == repository.id, CodeChunk.branch == branch, CodeChunk.file_path == path).delete()
             for chunk in chunks:
                 db.add(
@@ -286,7 +339,7 @@ def search_code(body: dict, db: Session = Depends(get_db)):
     rg_boosts: dict[tuple[str, int], float] = {}
     if body.get("repository"):
         repo = db.query(CodeRepository).filter(CodeRepository.name == body["repository"]).one_or_none()
-        if repo and _is_safe_repo_root(repo.source_uri):
+        if repo:
             for match in _run_ripgrep_search(repo.source_uri, query, limit=max(limit * 4, 24)):
                 rg_boosts[(match["file_path"], match["line"])] = 1.5
 

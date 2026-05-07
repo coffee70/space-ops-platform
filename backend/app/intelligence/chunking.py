@@ -61,6 +61,24 @@ def chunk_code_with_metadata(
     chunk_index = 0
 
     if boundaries:
+        first_boundary = boundaries[0]["start"]
+        if first_boundary > 0:
+            preamble_lines = lines[:first_boundary]
+            if "".join(preamble_lines).strip():
+                chunk_index = _append_bounded_chunks(
+                    chunks,
+                    section_lines=preamble_lines,
+                    base_start_line=1,
+                    max_lines_per_chunk=max_lines_per_chunk,
+                    max_chars_per_chunk=max_chars_per_chunk,
+                    fallback_window_lines=fallback_window_lines,
+                    overlap_lines=overlap_lines,
+                    symbol_name=None,
+                    symbol_type=None,
+                    language=language,
+                    chunk_index=chunk_index,
+                    chunk_strategy="preamble",
+                )
         for idx, boundary in enumerate(boundaries):
             next_start = boundaries[idx + 1]["start"] if idx + 1 < len(boundaries) else len(lines)
             section_lines = lines[boundary["start"] : next_start]
