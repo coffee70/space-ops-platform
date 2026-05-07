@@ -12,7 +12,7 @@ from app.database import get_db
 from app.intelligence.events import raw_event
 from app.intelligence.redaction import redact
 from app.intelligence.tool_metadata import tool_summary
-from app.intelligence.managed_code_paths import is_canonical_managed_code_path
+from app.intelligence.managed_code_paths import canonicalize_managed_code_path
 from app.routes.handlers.tool_registry import SUPPORTED_TOOL_NAMES
 from app.intelligence.schemas import ToolExecutionRequest
 from app.intelligence.tool_validation import ToolInputValidationError, ToolSchemaDefinitionError, validate_tool_input
@@ -68,18 +68,6 @@ async def _runtime_post(slug: str, path: str, json_body: dict | None = None) -> 
     if resp.status_code >= 400:
         raise HTTPException(status_code=resp.status_code, detail=resp.text)
     return resp.json()
-
-
-def _combine_repo_path(repository: str, path: str) -> str:
-    raw = path.strip()
-    normalized = raw.lstrip('/')
-    if is_canonical_managed_code_path(normalized):
-        return normalized
-    r = repository.strip('/')
-    p = raw.strip('/')
-    if raw.startswith('/') or '/' in repository:
-        return normalized
-    return f"{r}/{p}"
 
 
 async def _execute_mapped_tool(name: str, tool_input: dict, *, db: Session, trace: dict | None = None):
@@ -257,7 +245,13 @@ async def _execute_mapped_tool(name: str, tool_input: dict, *, db: Session, trac
             },
         )
     if name == 'get_related_code_context':
-        fp = _combine_repo_path(tool_input['repository'], tool_input['path'])
+        try:
+            fp = canonicalize_managed_code_path(tool_input['repository'], tool_input['path'])
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=400,
+                detail={'error_code': 'invalid_managed_code_path', 'message': str(exc)},
+            ) from exc
         payload = {'file_path': fp, 'branch': tool_input.get('branch') or 'main'}
         if tool_input.get('line'):
             payload['line'] = tool_input['line']
@@ -366,28 +360,8 @@ async def execute_tool(body: ToolExecutionRequest, request: Request, db: Session
                 "tool_call_id": tool_call_id,
             },
         )
-        call.status = 'completed'
-        call.output_json = redact(output if isinstance(output, dict) else {'result': output})
-        call.completed_at = datetime.now(timezone.utc)
-        raw_events = [
-            started_event,
-            raw_event(
-                event_type='tool.completed',
-                payload={'tool_name': body.tool_name, 'status': 'completed', 'result_preview': redact(call.output_json), 'duration_ms': int((call.completed_at - call.started_at).total_seconds() * 1000)},
-                emitted_by='tool-execution-service',
-                tool_call_id=tool_call_id,
-            )
-        ]
-        if body.tool_name == 'navigate_to_application':
-            raw_events.append(
-                raw_event(
-                    event_type='navigation.requested',
-                    payload=output,
-                    emitted_by='tool-execution-service',
-                    tool_call_id=tool_call_id,
-                )
-            )
-        return {'conversation_id': conversation_id,'agent_run_id': agent_run_id,'request_id': request_id,'tool_call_id': tool_call_id,'status': 'completed','output': output,'raw_events': raw_events}
+    except HTTPException:
+        raise
     except Exception as exc:
         call.status = 'failed'
         call.error_message = str(exc)
@@ -409,3 +383,26 @@ async def execute_tool(body: ToolExecutionRequest, request: Request, db: Session
                 )
             ],
         }
+
+    call.status = 'completed'
+    call.output_json = redact(output if isinstance(output, dict) else {'result': output})
+    call.completed_at = datetime.now(timezone.utc)
+    raw_events = [
+        started_event,
+        raw_event(
+            event_type='tool.completed',
+            payload={'tool_name': body.tool_name, 'status': 'completed', 'result_preview': redact(call.output_json), 'duration_ms': int((call.completed_at - call.started_at).total_seconds() * 1000)},
+            emitted_by='tool-execution-service',
+            tool_call_id=tool_call_id,
+        )
+    ]
+    if body.tool_name == 'navigate_to_application':
+        raw_events.append(
+            raw_event(
+                event_type='navigation.requested',
+                payload=output,
+                emitted_by='tool-execution-service',
+                tool_call_id=tool_call_id,
+            )
+        )
+    return {'conversation_id': conversation_id,'agent_run_id': agent_run_id,'request_id': request_id,'tool_call_id': tool_call_id,'status': 'completed','output': output,'raw_events': raw_events}

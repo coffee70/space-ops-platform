@@ -6,6 +6,7 @@ import types
 import uuid
 
 import pytest
+from fastapi import HTTPException
 
 if "sentence_transformers" not in sys.modules:
     _st = types.ModuleType("sentence_transformers")
@@ -21,6 +22,7 @@ if "sentence_transformers" not in sys.modules:
     sys.modules["sentence_transformers"] = _st
 
 from app.intelligence.chunking import chunk_code_with_metadata
+from app.intelligence.managed_code_paths import canonicalize_managed_code_path
 from app.models.intelligence import CodeChunk, CodeRepository
 from app.routes.handlers import code_intelligence, tool_execution
 
@@ -352,8 +354,83 @@ async def test_get_related_code_context_tool_keeps_canonical_path(monkeypatch) -
     assert posted["json"]["file_path"] == canonical
 
 
-def test_combine_repo_path_joins_short_repo_names_but_not_canonical_paths() -> None:
-    canonical = "project/space-ops-apps/mission-control-ui/src/a.tsx"
-    assert tool_execution._combine_repo_path("space-ops-apps", canonical) == canonical
-    assert tool_execution._combine_repo_path("space-ops-platform", "project/space-ops-platform/foo.py") == "project/space-ops-platform/foo.py"
-    assert tool_execution._combine_repo_path("my-unit", "src/handler.py") == "my-unit/src/handler.py"
+@pytest.mark.anyio
+async def test_get_related_code_context_tool_canonicalizes_relative_path(monkeypatch) -> None:
+    posted: dict = {}
+
+    async def fake_runtime_post(slug: str, path: str, json_body: dict | None = None):
+        posted["json"] = json_body or {}
+        return []
+
+    monkeypatch.setattr(tool_execution, "_runtime_post", fake_runtime_post)
+    session = _SessionDouble()
+    await tool_execution._execute_mapped_tool(
+        "get_related_code_context",
+        {"repository": "space-ops-platform", "path": "backend/app/foo.py", "branch": "main"},
+        db=session,
+    )
+    assert posted["json"]["file_path"] == "project/space-ops-platform/backend/app/foo.py"
+
+
+def test_canonicalize_managed_code_path_passes_through_when_already_canonical() -> None:
+    p = "project/space-ops-platform/backend/app/foo.py"
+    assert canonicalize_managed_code_path("space-ops-platform", p) == p
+
+
+def test_canonicalize_managed_code_path_relative_platform() -> None:
+    assert (
+        canonicalize_managed_code_path("space-ops-platform", "backend/app/routes/handlers/code_intelligence.py")
+        == "project/space-ops-platform/backend/app/routes/handlers/code_intelligence.py"
+    )
+
+
+def test_canonicalize_managed_code_path_relative_apps() -> None:
+    assert (
+        canonicalize_managed_code_path("space-ops-apps", "mission-control-ui/src/foo.tsx")
+        == "project/space-ops-apps/mission-control-ui/src/foo.tsx"
+    )
+
+
+def test_canonicalize_managed_code_path_manifests() -> None:
+    assert (
+        canonicalize_managed_code_path("manifests/units", "code-intelligence-service.yaml")
+        == "manifests/units/code-intelligence-service.yaml"
+    )
+
+
+def test_canonicalize_managed_code_path_no_duplicate_prefix() -> None:
+    p = "project/space-ops-platform/backend/app/foo.py"
+    assert canonicalize_managed_code_path("project/space-ops-platform", p) == p
+
+
+def test_canonicalize_unknown_repository_still_allows_canonical_path() -> None:
+    p = "project/space-ops-platform/lib/x.py"
+    assert canonicalize_managed_code_path("unknown-repo", p) == p
+
+
+def test_canonicalize_unknown_repository_non_canonical_raises() -> None:
+    with pytest.raises(ValueError, match="unknown repository"):
+        canonicalize_managed_code_path("my-unit", "src/handler.py")
+
+
+def test_canonicalize_path_traversal_raises() -> None:
+    with pytest.raises(ValueError, match="path traversal"):
+        canonicalize_managed_code_path("space-ops-platform", "../secret.txt")
+
+
+def test_canonicalize_absolute_path_raises() -> None:
+    with pytest.raises(ValueError, match="absolute"):
+        canonicalize_managed_code_path("space-ops-platform", "/etc/passwd")
+
+
+@pytest.mark.anyio
+async def test_get_related_code_context_rejects_traversal_with_http_exception() -> None:
+    with pytest.raises(HTTPException) as exc_info:
+        await tool_execution._execute_mapped_tool(
+            "get_related_code_context",
+            {"repository": "space-ops-platform", "path": "../secret.txt", "branch": "main"},
+            db=_SessionDouble(),
+        )
+    assert exc_info.value.status_code == 400
+    assert isinstance(exc_info.value.detail, dict)
+    assert exc_info.value.detail.get("error_code") == "invalid_managed_code_path"
