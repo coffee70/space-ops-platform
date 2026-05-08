@@ -14,6 +14,7 @@ openai
 nats-py>=2.9
 python-dotenv
 pytest>=7.0
+pytest-xdist>=3.6
 jsonschema>=4.0
 pyyaml>=6.0
 python-multipart>=0.0.9
