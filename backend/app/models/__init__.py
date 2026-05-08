@@ -15,6 +15,7 @@ from app.models.telemetry import (
 from app.models.intelligence import (
     AgentEvent,
     CodeChunk,
+    CodeIndexJob,
     CodeRepository,
     Conversation,
     ConversationMessageRecord,
@@ -43,5 +44,6 @@ __all__ = [
     "Document",
     "DocumentChunk",
     "CodeRepository",
+    "CodeIndexJob",
     "CodeChunk",
 ]

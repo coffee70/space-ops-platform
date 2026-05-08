@@ -26,10 +26,18 @@ class Settings(BaseSettings):
     # Example: ^http://[\w\.-]+:3000$
     cors_origin_regex: str = ""
     source_reconciliation_chunk_size_hours: int = 6
+    code_indexer_poll_interval_seconds: int = 5
+    code_indexer_startup_roots: str = "project/space-ops-platform,project/space-ops-apps"
+    code_indexer_default_branch: str = "main"
+    code_indexer_max_failed_file_preview: int = 10
 
     def get_cors_origins_list(self) -> list[str]:
         """Return CORS origins as a list, stripping whitespace."""
         return [o.strip() for o in self.cors_origins.split(",") if o.strip()]
+
+    def get_code_indexer_startup_roots(self) -> list[str]:
+        """Comma-separated managed code roots the indexer worker checks on startup."""
+        return [r.strip() for r in self.code_indexer_startup_roots.split(",") if r.strip()]
 
 
 @lru_cache

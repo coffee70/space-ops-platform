@@ -202,7 +202,11 @@ def test_gateway_routes_proxy_expected_service_paths(monkeypatch) -> None:
     assert client.post("/intelligence/context/packet", json={"agent_run_id": "a", "request_id": "r", "message": "m"}).status_code == 200
     assert client.get("/intelligence/documents").status_code == 200
     assert client.post("/intelligence/documents/search", json={"query": "q"}).status_code == 200
+    assert client.get("/intelligence/code/repositories").status_code == 200
+    assert client.post("/intelligence/code/repositories/index", json={"root": "/tmp/repo", "branch": "main"}).status_code == 200
     assert client.post("/intelligence/code/search", json={"query": "q", "branch": "main"}).status_code == 200
+    assert client.get("/intelligence/code/source-file", params={"branch": "main", "path": "foo.py"}).status_code == 200
+    assert client.post("/intelligence/code/related-context", json={"file_path": "foo.py", "branch": "main"}).status_code == 200
     assert client.get("/intelligence/tools/definitions").status_code == 200
     assert client.post("/intelligence/tools/definitions/seed").status_code == 200
     assert client.get("/intelligence/tools/definitions/get_platform_service").status_code == 200
@@ -218,7 +222,11 @@ def test_gateway_routes_proxy_expected_service_paths(monkeypatch) -> None:
         ("context-retrieval-service", "packet"),
         ("document-knowledge-service", ""),
         ("document-knowledge-service", "search"),
+        ("code-intelligence-service", "repositories"),
+        ("code-intelligence-service", "repositories/index"),
         ("code-intelligence-service", "search"),
+        ("code-intelligence-service", "source-file"),
+        ("code-intelligence-service", "related-context"),
         ("tool-registry-service", "definitions"),
         ("tool-registry-service", "definitions/seed"),
         ("tool-registry-service", "definitions/get_platform_service"),
@@ -232,7 +240,6 @@ def test_gateway_intelligence_routes_do_not_expose_control_plane_mutation_bypass
         "code/branches",
         "code/file",
         "code/commits",
-        "code/repositories/index",
         "documents/123/reingest",
         "internal/delete/managed-units",
     ]

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+
 import httpx
 from fastapi import HTTPException, Request, Response
 from fastapi.responses import StreamingResponse
@@ -23,7 +25,11 @@ HOP_BY_HOP_HEADERS = {
 REQUEST_HEADERS_NOT_FORWARDED = HOP_BY_HOP_HEADERS | {"host"}
 
 # Keep bounded below control-plane upstream runtime-proxy read timeout + margin so /ops/feed-status fails fast when ingest is wedged.
-KERNEL_SERVICE_PROXY_TIMEOUT = httpx.Timeout(connect=3.0, read=12.0, write=12.0, pool=5.0)
+# Long-running managed calls (e.g. code repository indexing) need a higher read timeout via KERNEL_SERVICE_PROXY_READ_TIMEOUT.
+_KERNEL_PROXY_READ = float(os.environ.get("KERNEL_SERVICE_PROXY_READ_TIMEOUT", "12"))
+KERNEL_SERVICE_PROXY_TIMEOUT = httpx.Timeout(
+    connect=3.0, read=_KERNEL_PROXY_READ, write=_KERNEL_PROXY_READ, pool=5.0
+)
 
 
 def _join_url_path(base_path: str, path: str = "") -> str:
