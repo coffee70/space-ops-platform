@@ -13,7 +13,7 @@ def test_only_single_baseline_migration_exists() -> None:
         if path.name != "__init__.py"
     )
 
-    assert migration_names == ["001_initial_schema.py", "002_code_repository_index_state.py"]
+    assert migration_names == ["001_initial_schema.py"]
 
 
 def test_legacy_stream_identity_split_migration_is_removed() -> None:

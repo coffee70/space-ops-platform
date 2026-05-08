@@ -559,6 +559,17 @@ def upgrade() -> None:
         sa.Column("default_branch", sa.Text(), nullable=False, server_default="main"),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
+        sa.Column("index_status", sa.Text(), nullable=False, server_default="not_indexed"),
+        sa.Column("index_requested_at", sa.DateTime(timezone=True), nullable=True),
+        sa.Column("index_started_at", sa.DateTime(timezone=True), nullable=True),
+        sa.Column("index_completed_at", sa.DateTime(timezone=True), nullable=True),
+        sa.Column("indexed_commit_sha", sa.Text(), nullable=True),
+        sa.Column("current_commit_sha", sa.Text(), nullable=True),
+        sa.Column("file_count", sa.Integer(), nullable=False, server_default="0"),
+        sa.Column("chunk_count", sa.Integer(), nullable=False, server_default="0"),
+        sa.Column("skipped_file_count", sa.Integer(), nullable=False, server_default="0"),
+        sa.Column("failed_file_count", sa.Integer(), nullable=False, server_default="0"),
+        sa.Column("last_error", sa.Text(), nullable=True),
     )
 
     op.create_table(
@@ -587,8 +598,39 @@ def upgrade() -> None:
     )
     op.create_index("ix_ai_code_chunks_repo_branch_commit_path", "ai_code_chunks", ["repository_id", "branch", "commit_sha", "file_path"])
 
+    op.create_table(
+        "ai_code_index_jobs",
+        sa.Column("id", UUID(as_uuid=True), primary_key=True, nullable=False),
+        sa.Column(
+            "repository_id",
+            UUID(as_uuid=True),
+            sa.ForeignKey("ai_code_repositories.id", ondelete="CASCADE"),
+            nullable=False,
+        ),
+        sa.Column("root", sa.Text(), nullable=False),
+        sa.Column("branch", sa.Text(), nullable=False),
+        sa.Column("target_commit_sha", sa.Text(), nullable=False),
+        sa.Column("status", sa.Text(), nullable=False),
+        sa.Column("requested_by", sa.Text(), nullable=True),
+        sa.Column("requested_at", sa.DateTime(timezone=True), nullable=False),
+        sa.Column("started_at", sa.DateTime(timezone=True), nullable=True),
+        sa.Column("completed_at", sa.DateTime(timezone=True), nullable=True),
+        sa.Column("file_count", sa.Integer(), nullable=False, server_default="0"),
+        sa.Column("chunk_count", sa.Integer(), nullable=False, server_default="0"),
+        sa.Column("skipped_file_count", sa.Integer(), nullable=False, server_default="0"),
+        sa.Column("failed_file_count", sa.Integer(), nullable=False, server_default="0"),
+        sa.Column("failed_files_preview_json", JSONB(), nullable=False, server_default=sa.text("'[]'::jsonb")),
+        sa.Column("error", sa.Text(), nullable=True),
+    )
+    op.create_index("ix_ai_code_index_jobs_status_requested", "ai_code_index_jobs", ["status", "requested_at"])
+    op.create_index("ix_ai_code_index_jobs_repository", "ai_code_index_jobs", ["repository_id"])
+
 
 def downgrade() -> None:
+    op.drop_index("ix_ai_code_index_jobs_repository", table_name="ai_code_index_jobs")
+    op.drop_index("ix_ai_code_index_jobs_status_requested", table_name="ai_code_index_jobs")
+    op.drop_table("ai_code_index_jobs")
+
     op.drop_index("ix_ai_code_chunks_repo_branch_commit_path", table_name="ai_code_chunks")
     op.drop_table("ai_code_chunks")
 
