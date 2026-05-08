@@ -305,6 +305,8 @@ def search_documents(body: dict, db: Session = Depends(get_db)):
         if not chunk.embedding:
             continue
         score, ranking_signals = _score_document_chunk(query, chunk, document)
+        if score <= 0:
+            continue
         scored.append(
             {
                 "document_id": str(document.id),

@@ -270,6 +270,12 @@ The spacecraft has general operations procedures and scheduling notes.
     assert all(item["metadata"].get("subsystem_id") == "eps" for item in subsystem_filtered)
     assert all("mission-notes.md" != item["metadata"].get("filename") for item in subsystem_filtered)
 
+    no_match = document_knowledge.search_documents(
+        {"query": "reaction wheel thermal bearing lubricant"},
+        db=session,
+    )
+    assert no_match == []
+
     clamped = document_knowledge.search_documents({"query": query, "limit": 999}, db=session)
     assert len(clamped) <= 8
 
