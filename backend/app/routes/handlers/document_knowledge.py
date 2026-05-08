@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import re
 import uuid
 
 from fastapi import Depends, File, Form, HTTPException, UploadFile
@@ -12,6 +13,113 @@ from app.intelligence.embedding import DEFAULT_EMBEDDING_MODEL, get_embedding_pr
 from app.intelligence.events import emit_event
 from app.intelligence.hashing import sha256_text
 from app.models.intelligence import Document, DocumentChunk
+
+_TOKEN_SPLIT_PATTERN = re.compile(r"[^a-z0-9]+")
+_CAMEL_SPLIT_PATTERN = re.compile(r"(?<=[a-z0-9])(?=[A-Z])")
+_STOP_WORDS = {
+    "the",
+    "and",
+    "for",
+    "with",
+    "from",
+    "this",
+    "that",
+    "into",
+    "code",
+    "document",
+    "documents",
+    "mission",
+    "vehicle",
+}
+_DOCUMENT_DOMAIN_HINTS = {
+    "telemetry",
+    "channel",
+    "channels",
+    "battery",
+    "voltage",
+    "subsystem",
+    "unit",
+    "units",
+    "display",
+    "name",
+    "dictionary",
+    "metadata",
+    "spacecraft",
+    "sensor",
+    "current",
+    "power",
+}
+
+
+def _tokenize(value: str) -> list[str]:
+    if not value:
+        return []
+    normalized = _CAMEL_SPLIT_PATTERN.sub(" ", value).lower()
+    bits = _TOKEN_SPLIT_PATTERN.split(normalized)
+    return [bit for bit in bits if len(bit) >= 2 and bit not in _STOP_WORDS]
+
+
+def _document_metadata_text(document: Document, chunk: DocumentChunk) -> str:
+    metadata = chunk.metadata_json or {}
+    tags = metadata.get("tags") or document.tags_json or []
+    if not isinstance(tags, list):
+        tags = []
+    metadata_values = [
+        str(document.mission_id or ""),
+        str(document.vehicle_id or ""),
+        str(document.subsystem_id or ""),
+        str(document.document_type or ""),
+        str(metadata.get("filename") or ""),
+        " ".join(str(tag) for tag in tags if tag is not None),
+    ]
+    return " ".join(metadata_values)
+
+
+def _score_document_chunk(query: str, chunk: DocumentChunk, document: Document) -> tuple[float, dict]:
+    query_lower = query.lower()
+    title = document.title or ""
+    content = chunk.content or ""
+    metadata_text = _document_metadata_text(document, chunk)
+
+    query_tokens = _tokenize(query)
+    title_tokens = set(_tokenize(title))
+    content_tokens = set(_tokenize(content))
+    metadata_tokens = set(_tokenize(metadata_text))
+    combined_tokens = title_tokens | content_tokens | metadata_tokens
+
+    title_hits = len([token for token in query_tokens if token in title_tokens])
+    content_hits = len([token for token in query_tokens if token in content_tokens])
+    metadata_hits = len([token for token in query_tokens if token in metadata_tokens])
+    all_query_tokens_present = bool(query_tokens) and all(token in combined_tokens for token in query_tokens)
+
+    exact_phrase_in_content = query_lower in content.lower()
+    exact_phrase_in_title = query_lower in title.lower()
+
+    query_domain_hints = {token for token in query_tokens if token in _DOCUMENT_DOMAIN_HINTS}
+    domain_hint_hits = len([token for token in query_domain_hints if token in combined_tokens])
+
+    score = 0.0
+    if exact_phrase_in_content:
+        score += 10.0
+    if exact_phrase_in_title:
+        score += 6.0
+    score += title_hits * 2.0
+    score += content_hits * 1.0
+    score += metadata_hits * 1.5
+    if all_query_tokens_present:
+        score += 2.0
+    score += domain_hint_hits * 0.75
+
+    ranking_signals = {
+        "title_token_hits": title_hits,
+        "content_token_hits": content_hits,
+        "metadata_token_hits": metadata_hits,
+        "domain_hint_hits": domain_hint_hits,
+        "exact_phrase_in_title": exact_phrase_in_title,
+        "exact_phrase_in_content": exact_phrase_in_content,
+        "all_query_tokens_present": all_query_tokens_present,
+    }
+    return score, ranking_signals
 
 
 def _serialize_document(doc: Document) -> dict:
@@ -183,7 +291,7 @@ def search_documents(body: dict, db: Session = Depends(get_db)):
         raise HTTPException(status_code=400, detail="query is required")
     limit = min(max(int(body.get("limit", 6)), 1), 8)
     provider = get_embedding_provider()
-    embedding = provider.embed(query)
+    _ = provider.embed(query)
 
     docs = db.query(DocumentChunk, Document).join(Document, Document.id == DocumentChunk.document_id).filter(Document.ingestion_status == "ready").all()
     scored: list[dict] = []
@@ -192,10 +300,13 @@ def search_documents(body: dict, db: Session = Depends(get_db)):
             continue
         if body.get("vehicle_id") and document.vehicle_id != body["vehicle_id"]:
             continue
+        if body.get("subsystem_id") and document.subsystem_id != body["subsystem_id"]:
+            continue
         if not chunk.embedding:
             continue
-        # naive relevance score baseline
-        score = 1.0 / (1.0 + abs(len(chunk.content) - len(query)))
+        score, ranking_signals = _score_document_chunk(query, chunk, document)
+        if score <= 0:
+            continue
         scored.append(
             {
                 "document_id": str(document.id),
@@ -203,7 +314,10 @@ def search_documents(body: dict, db: Session = Depends(get_db)):
                 "chunk_index": chunk.chunk_index,
                 "content": chunk.content[:1500],
                 "score": float(score),
-                "metadata": chunk.metadata_json or {},
+                "metadata": {
+                    **(chunk.metadata_json or {}),
+                    "ranking_signals": ranking_signals,
+                },
             }
         )
     scored.sort(key=lambda item: item["score"], reverse=True)

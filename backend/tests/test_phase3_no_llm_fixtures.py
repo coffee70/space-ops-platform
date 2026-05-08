@@ -129,7 +129,12 @@ class _SessionDouble:
 
     def query(self, *models):
         if len(models) == 2 and models == (DocumentChunk, Document):
-            return _TupleQuery([(chunk, self.documents[0]) for chunk in self.document_chunks if self.documents])
+            rows = []
+            for chunk in self.document_chunks:
+                document = next((doc for doc in self.documents if doc.id == chunk.document_id), None)
+                if document is not None:
+                    rows.append((chunk, document))
+            return _TupleQuery(rows)
         if len(models) == 2 and models == (CodeChunk, CodeRepository):
             rows = []
             for chunk in self.code_chunks:
@@ -138,6 +143,32 @@ class _SessionDouble:
                     rows.append((chunk, repository))
             return _TupleQuery(rows)
         return _ModelQuery(self, models[0])
+
+
+async def _upload_document(
+    session: _SessionDouble,
+    *,
+    filename: str,
+    content: str,
+    mission_id: str | None = None,
+    vehicle_id: str | None = None,
+    subsystem_id: str | None = None,
+    tags: str | None = None,
+) -> dict:
+    return await document_knowledge.create_document(
+        file=UploadFile(filename=filename, file=BytesIO(content.encode("utf-8"))),
+        title=None,
+        document_type=None,
+        mission_id=mission_id,
+        vehicle_id=vehicle_id,
+        subsystem_id=subsystem_id,
+        tags=tags,
+        description=None,
+        conversation_id=None,
+        agent_run_id=None,
+        request_id=None,
+        db=session,
+    )
 
 
 @pytest.mark.anyio
@@ -174,6 +205,84 @@ async def test_phase3_fixture_document_upload_emits_lifecycle_events_and_searcha
     search_results = document_knowledge.search_documents({"query": "battery efficiency", "limit": 2}, db=session)
     assert search_results
     assert any("battery efficiency" in item["content"].lower() for item in search_results)
+    assert "ranking_signals" in search_results[0]["metadata"]
+
+
+@pytest.mark.anyio
+async def test_document_search_hardening_ranking_filters_and_limits(monkeypatch) -> None:
+    monkeypatch.setattr(document_knowledge, "get_embedding_provider", lambda: _Provider())
+    session = _SessionDouble()
+
+    telemetry_dictionary = """# DemoSat Telemetry Dictionary
+
+Battery voltage channels belong to the Electrical Power Subsystem.
+
+Channel: EPS_BATT_VOLTAGE
+Display Name: Battery Voltage
+Unit: volts
+Subsystem: EPS
+Description: Main spacecraft battery bus voltage.
+"""
+    mission_notes = """# Mission Notes
+
+The spacecraft has general operations procedures and scheduling notes.
+"""
+
+    await _upload_document(
+        session,
+        filename="demo-telemetry.md",
+        content=telemetry_dictionary,
+        mission_id="demo-1",
+        vehicle_id="demosat-1",
+        subsystem_id="eps",
+        tags="telemetry,battery,voltage",
+    )
+    await _upload_document(
+        session,
+        filename="mission-notes.md",
+        content=mission_notes,
+        mission_id="demo-2",
+        vehicle_id="demosat-2",
+        subsystem_id="adcs",
+        tags="ops,notes",
+    )
+
+    query = "battery voltage subsystem display name units"
+    results = document_knowledge.search_documents({"query": query, "limit": 4}, db=session)
+    assert results
+    assert "demo-telemetry.md" == results[0]["metadata"]["filename"]
+    assert "battery voltage" in results[0]["content"].lower()
+    assert "ranking_signals" in results[0]["metadata"]
+
+    top_titles = [item["title"] for item in results[:2]]
+    assert top_titles[0].lower().startswith("demo-telemetry")
+
+    mission_filtered = document_knowledge.search_documents({"query": query, "mission_id": "demo-1"}, db=session)
+    assert mission_filtered
+    assert all(item["metadata"].get("mission_id") == "demo-1" for item in mission_filtered)
+
+    vehicle_filtered = document_knowledge.search_documents({"query": query, "vehicle_id": "demosat-1"}, db=session)
+    assert vehicle_filtered
+    assert all(item["metadata"].get("vehicle_id") == "demosat-1" for item in vehicle_filtered)
+
+    subsystem_filtered = document_knowledge.search_documents({"query": "battery voltage", "subsystem_id": "eps"}, db=session)
+    assert subsystem_filtered
+    assert all(item["metadata"].get("subsystem_id") == "eps" for item in subsystem_filtered)
+    assert all("mission-notes.md" != item["metadata"].get("filename") for item in subsystem_filtered)
+
+    no_match = document_knowledge.search_documents(
+        {"query": "reaction wheel thermal bearing lubricant"},
+        db=session,
+    )
+    assert no_match == []
+
+    clamped = document_knowledge.search_documents({"query": query, "limit": 999}, db=session)
+    assert len(clamped) <= 8
+
+    with pytest.raises(HTTPException) as exc_info:
+        document_knowledge.search_documents({"query": "   "}, db=session)
+    assert exc_info.value.status_code == 400
+    assert exc_info.value.detail == "query is required"
 
 
 @pytest.mark.anyio
