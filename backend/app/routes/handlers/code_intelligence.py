@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 
 from app.config import get_settings
 from app.database import get_db
+from app.intelligence.code_index_job_query import find_active_index_job
 from app.intelligence.events import emit_event
 from app.intelligence.indexing import get_current_commit_for_root
 from app.intelligence.managed_code_paths import longest_managed_code_root_for_path
@@ -252,15 +253,7 @@ async def index_repository(body: dict, db: Session = Depends(get_db)):
             "message": "index already ready for current commit",
         }
 
-    existing_job = (
-        db.query(CodeIndexJob)
-        .filter(
-            CodeIndexJob.repository_id == repository.id,
-            CodeIndexJob.target_commit_sha == (current_sha or ""),
-            CodeIndexJob.status.in_(("queued", "running")),
-        )
-        .one_or_none()
-    )
+    existing_job = find_active_index_job(db, repository.id, current_sha or "")
     if existing_job:
         return {
             "repository_id": str(repository.id),
@@ -353,12 +346,29 @@ def search_code(body: dict, db: Session = Depends(get_db)):
         raise HTTPException(status_code=400, detail="query is required")
     limit = min(max(int(body.get("limit", 6)), 1), 8)
     branch = body.get("branch", "main")
+    resolved_repo: CodeRepository | None = None
     if body.get("repository"):
-        repo = db.query(CodeRepository).filter(CodeRepository.name == body["repository"]).one_or_none()
-        if not repo:
-            raise HTTPException(status_code=404, detail="repository not found")
-        if repo.default_branch != branch:
-            pass
+        resolved_repo = (
+            db.query(CodeRepository)
+            .filter(
+                CodeRepository.name == body["repository"],
+                CodeRepository.default_branch == branch,
+            )
+            .one_or_none()
+        )
+        if not resolved_repo:
+            raise HTTPException(
+                status_code=503,
+                detail={
+                    "error_code": "code_index_not_ready",
+                    "message": f"Code index is not ready for {body['repository']} on {branch}.",
+                    "repository": body["repository"],
+                    "root": None,
+                    "branch": branch,
+                    "index_status": "not_indexed",
+                },
+            )
+        repo = resolved_repo
         if repo.index_status == "failed":
             raise HTTPException(
                 status_code=503,
@@ -403,11 +413,9 @@ def search_code(body: dict, db: Session = Depends(get_db)):
 
     rows = db.query(CodeChunk, CodeRepository).join(CodeRepository, CodeRepository.id == CodeChunk.repository_id).filter(CodeChunk.branch == branch).all()
     rg_boosts: dict[tuple[str, int], float] = {}
-    if body.get("repository"):
-        repo = db.query(CodeRepository).filter(CodeRepository.name == body["repository"]).one_or_none()
-        if repo and not _is_logical_managed_source_uri(repo.source_uri):
-            for match in _run_ripgrep_search(repo.source_uri, query, limit=max(limit * 4, 24)):
-                rg_boosts[(match["file_path"], match["line"])] = 1.5
+    if resolved_repo is not None and not _is_logical_managed_source_uri(resolved_repo.source_uri):
+        for match in _run_ripgrep_search(resolved_repo.source_uri, query, limit=max(limit * 4, 24)):
+            rg_boosts[(match["file_path"], match["line"])] = 1.5
 
     scored: list[dict] = []
     for chunk, repository in rows:

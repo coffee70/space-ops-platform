@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime, timezone
 import sys
 import types
 import uuid
@@ -24,7 +25,7 @@ if "sentence_transformers" not in sys.modules:
 from app.intelligence import indexing
 from app.intelligence.chunking import chunk_code_with_metadata
 from app.intelligence.managed_code_paths import canonicalize_managed_code_path
-from app.models.intelligence import CodeChunk, CodeRepository
+from app.models.intelligence import CodeChunk, CodeIndexJob, CodeRepository
 from app.routes.handlers import code_intelligence, tool_execution
 
 
@@ -53,6 +54,7 @@ class _ModelQuery:
         self._model = model
         self._filter_criteria: tuple = ()
         self._order_start_line = False
+        self._order_jobs_by_requested_at = False
 
     def filter(self, *args, **_kwargs):
         self._filter_criteria = self._filter_criteria + args
@@ -61,6 +63,8 @@ class _ModelQuery:
     def order_by(self, *args, **_kwargs):
         if any("start_line" in str(a) for a in args):
             self._order_start_line = True
+        if any("requested_at" in str(a) for a in args):
+            self._order_jobs_by_requested_at = True
         return self
 
     def one_or_none(self):
@@ -73,9 +77,20 @@ class _ModelQuery:
             raise ValueError("Expected exactly one row")
         return rows[0]
 
+    def first(self):
+        rows = self.all()
+        if not rows:
+            return None
+        if self._model is CodeIndexJob and self._order_jobs_by_requested_at:
+            rows = sorted(rows, key=lambda j: j.requested_at or datetime.min.replace(tzinfo=timezone.utc))
+        return rows[0]
+
     def all(self):
         if self._model is CodeRepository:
-            return list(self._session.code_repositories)
+            rows = list(self._session.code_repositories)
+            if self._filter_criteria:
+                rows = [r for r in rows if self._obj_matches_all_filters(r)]
+            return rows
         if self._model is CodeChunk:
             rows = list(self._session.code_chunks)
             if self._filter_criteria:
@@ -83,7 +98,51 @@ class _ModelQuery:
             if self._order_start_line:
                 rows = sorted(rows, key=lambda c: (c.start_line or 0, c.end_line or 0))
             return rows
+        if self._model is CodeIndexJob:
+            rows = list(self._session.code_index_jobs)
+            if self._filter_criteria:
+                rows = [j for j in rows if self._obj_matches_all_filters(j)]
+            return rows
         return []
+
+    @staticmethod
+    def _expand_filter(c):
+        if c is None:
+            return []
+        if getattr(c, "left", None) is not None:
+            return [c]
+        if hasattr(c, "clauses"):
+            parts: list = []
+            for sub in c.clauses:
+                parts.extend(_ModelQuery._expand_filter(sub))
+            return parts
+        return [c]
+
+    def _obj_matches_all_filters(self, obj) -> bool:
+        for fc in self._filter_criteria:
+            for leaf in self._expand_filter(fc):
+                if not self._leaf_matches_object(obj, leaf):
+                    return False
+        return True
+
+    def _leaf_matches_object(self, obj, leaf) -> bool:
+        from sqlalchemy.sql import operators
+
+        key, val = self._clause_field_value(leaf)
+        op = getattr(leaf, "operator", None)
+        if key is None:
+            return True
+        cur = getattr(obj, key, None)
+        if op is operators.in_op:
+            coll = val
+            if hasattr(leaf, "right") and coll is None:
+                ev = getattr(leaf.right, "effective_value", None)
+                if ev is not None:
+                    coll = ev
+            if coll is None:
+                return False
+            return cur in list(coll)
+        return cur == val
 
     @staticmethod
     def _clause_field_value(clause) -> tuple[str | None, object | None]:
@@ -99,11 +158,12 @@ class _ModelQuery:
 
     def _chunk_matches_filters(self, chunk: CodeChunk) -> bool:
         for clause in self._filter_criteria:
-            key, val = self._clause_field_value(clause)
-            if not key:
-                continue
-            if getattr(chunk, key, object()) != val:
-                return False
+            for leaf in self._expand_filter(clause):
+                key, val = self._clause_field_value(leaf)
+                if not key:
+                    continue
+                if getattr(chunk, key, object()) != val:
+                    return False
         return True
 
     def delete(self, **_kwargs):
@@ -119,6 +179,7 @@ class _SessionDouble:
     def __init__(self):
         self.code_repositories: list[CodeRepository] = []
         self.code_chunks: list[CodeChunk] = []
+        self.code_index_jobs: list[CodeIndexJob] = []
 
     def add(self, obj):
         if getattr(obj, "id", None) is None and hasattr(obj, "id"):
@@ -127,6 +188,8 @@ class _SessionDouble:
             self.code_repositories.append(obj)
         if isinstance(obj, CodeChunk):
             self.code_chunks.append(obj)
+        if isinstance(obj, CodeIndexJob):
+            self.code_index_jobs.append(obj)
 
     def flush(self):
         return None

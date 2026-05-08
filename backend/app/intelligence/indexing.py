@@ -227,17 +227,18 @@ async def index_repository_now(
             skipped_file_count += 1
             continue
 
-        file_chunks_ok = True
+        new_rows: list[CodeChunk] = []
+        embed_failed = False
         for chunk in chunks:
             try:
                 embedding = provider.embed(chunk.content)
             except Exception:
+                embed_failed = True
                 failed_file_count += 1
                 if len(failed_files_preview) < max_failed_file_preview:
                     failed_files_preview.append(path)
-                file_chunks_ok = False
                 break
-            db.add(
+            new_rows.append(
                 CodeChunk(
                     repository_id=repository_id,
                     branch=branch,
@@ -256,9 +257,12 @@ async def index_repository_now(
                     indexed_at=datetime.now(timezone.utc),
                 )
             )
-            chunk_count += 1
-        if file_chunks_ok:
-            file_count += 1
+        if embed_failed:
+            continue
+        for row in new_rows:
+            db.add(row)
+        chunk_count += len(new_rows)
+        file_count += 1
 
     repo.updated_at = datetime.now(timezone.utc)
     return IndexRepositoryResult(
