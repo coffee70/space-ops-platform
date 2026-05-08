@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import threading
+import time
 import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
@@ -38,25 +39,25 @@ def _ensure_repository_for_root(db, root: str, branch: str) -> CodeRepository:
     return repo
 
 
-def _enqueue_if_needed(db, root: str, branch: str) -> None:
+def _enqueue_if_needed(db, root: str, branch: str) -> bool:
     try:
         sha = asyncio.run(get_current_commit_for_root(root, branch))
     except Exception:
         logger.exception("startup commit check failed for root=%s branch=%s", root, branch)
-        return
+        return False
 
     repo = _ensure_repository_for_root(db, root, branch)
     repo.current_commit_sha = sha or repo.current_commit_sha
     now = datetime.now(timezone.utc)
 
     if sha and repo.indexed_commit_sha == sha and repo.index_status == "ready":
-        return
+        return True
 
     if sha and repo.indexed_commit_sha and repo.indexed_commit_sha != sha:
         repo.index_status = "stale"
 
     if find_active_index_job(db, repo.id, sha or ""):
-        return
+        return True
 
     job = CodeIndexJob(
         id=uuid.uuid4(),
@@ -70,20 +71,38 @@ def _enqueue_if_needed(db, root: str, branch: str) -> None:
     repo.index_status = "queued"
     repo.index_requested_at = now
     db.add(job)
+    return True
 
 
-def startup_enqueue_roots() -> None:
+def startup_enqueue_roots(max_attempts: int | None = None, delay_seconds: float | None = None) -> None:
     settings = get_settings()
     branch = settings.code_indexer_default_branch
-    roots = settings.get_code_indexer_startup_roots()
-    if not roots:
+    pending_roots = settings.get_code_indexer_startup_roots()
+    if not pending_roots:
         return
-    try:
-        with get_db_context() as db:
-            for root in roots:
-                _enqueue_if_needed(db, root, branch)
-    except Exception:
-        logger.exception("startup enqueue failed")
+    attempts = max(1, max_attempts or int(settings.code_indexer_startup_enqueue_attempts))
+    delay = max(0.0, delay_seconds if delay_seconds is not None else float(settings.code_indexer_poll_interval_seconds))
+    for attempt in range(1, attempts + 1):
+        failed_roots: list[str] = []
+        try:
+            with get_db_context() as db:
+                for root in pending_roots:
+                    if not _enqueue_if_needed(db, root, branch):
+                        failed_roots.append(root)
+        except Exception:
+            logger.exception("startup enqueue failed")
+            failed_roots = pending_roots
+        if not failed_roots:
+            return
+        pending_roots = failed_roots
+        if attempt < attempts:
+            logger.warning(
+                "startup enqueue will retry for roots=%s attempt=%s/%s",
+                ",".join(pending_roots),
+                attempt + 1,
+                attempts,
+            )
+            time.sleep(delay)
 
 
 def _claim_next_job(db) -> CodeIndexJob | None:

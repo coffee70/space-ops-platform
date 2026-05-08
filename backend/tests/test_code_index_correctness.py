@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from contextlib import contextmanager
 from datetime import datetime, timezone
 import uuid
 from unittest.mock import AsyncMock
@@ -119,6 +120,47 @@ def test_process_one_job_marks_failed_without_calling_mark_failed_on_success(mon
     monkeypatch.setattr(worker_main, "_claim_and_mark_running", lambda: None)
     worker_main.process_one_job()
     assert mark_calls == []
+
+
+def test_startup_enqueue_retries_after_transient_commit_check_failure(monkeypatch) -> None:
+    from services.code_indexer_worker import main as worker_main
+
+    session = _SessionDouble()
+    calls = {"count": 0}
+
+    async def flaky_commit_check(root: str, branch: str) -> str:
+        assert root == "project/space-ops-platform"
+        assert branch == "main"
+        calls["count"] += 1
+        if calls["count"] == 1:
+            raise RuntimeError("control-plane still starting")
+        return "sha-after-retry"
+
+    class Settings:
+        code_indexer_default_branch = "main"
+        code_indexer_poll_interval_seconds = 5
+        code_indexer_startup_enqueue_attempts = 2
+
+        def get_code_indexer_startup_roots(self) -> list[str]:
+            return ["project/space-ops-platform"]
+
+    @contextmanager
+    def fake_db():
+        yield session
+
+    monkeypatch.setattr(worker_main, "get_current_commit_for_root", flaky_commit_check)
+    monkeypatch.setattr(worker_main, "get_settings", lambda: Settings())
+    monkeypatch.setattr(worker_main, "get_db_context", fake_db)
+    monkeypatch.setattr(worker_main.time, "sleep", lambda _seconds: None)
+
+    worker_main.startup_enqueue_roots()
+
+    assert calls["count"] == 2
+    assert len(session.code_repositories) == 1
+    assert session.code_repositories[0].index_status == "queued"
+    assert session.code_repositories[0].current_commit_sha == "sha-after-retry"
+    assert len(session.code_index_jobs) == 1
+    assert session.code_index_jobs[0].target_commit_sha == "sha-after-retry"
 
 
 def test_process_one_job_invokes_mark_failed_when_index_raises(monkeypatch) -> None:

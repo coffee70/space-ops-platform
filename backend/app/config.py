@@ -30,6 +30,7 @@ class Settings(BaseSettings):
     code_indexer_startup_roots: str = "project/space-ops-platform,project/space-ops-apps"
     code_indexer_default_branch: str = "main"
     code_indexer_max_failed_file_preview: int = 10
+    code_indexer_startup_enqueue_attempts: int = 60
 
     def get_cors_origins_list(self) -> list[str]:
         """Return CORS origins as a list, stripping whitespace."""
