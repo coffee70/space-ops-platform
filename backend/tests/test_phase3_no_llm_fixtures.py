@@ -23,7 +23,8 @@ if "sentence_transformers" not in sys.modules:
     sys.modules["sentence_transformers"] = _st
 
 from app.intelligence.chunking import chunk_text
-from app.models.intelligence import AgentEvent, CodeChunk, CodeRepository, Document, DocumentChunk
+from app.intelligence import indexing
+from app.models.intelligence import AgentEvent, CodeChunk, CodeIndexJob, CodeRepository, Document, DocumentChunk
 from app.routes.handlers import code_intelligence, document_knowledge
 
 FIXTURES_ROOT = Path(__file__).resolve().parent / "fixtures"
@@ -66,6 +67,12 @@ class _ModelQuery:
         rows = self.all()
         return rows[0] if rows else None
 
+    def one(self):
+        rows = self.all()
+        if len(rows) != 1:
+            raise ValueError("Expected exactly one row")
+        return rows[0]
+
     def first(self):
         rows = self.all()
         return rows[0] if rows else None
@@ -73,7 +80,7 @@ class _ModelQuery:
     def count(self):
         return len(self.all())
 
-    def delete(self):
+    def delete(self, **_kwargs):
         if self._model is CodeChunk:
             self._session.code_chunks.clear()
         return 0
@@ -87,6 +94,8 @@ class _ModelQuery:
             return list(self._session.code_repositories)
         if self._model is CodeChunk:
             return list(self._session.code_chunks)
+        if self._model is CodeIndexJob:
+            return list(self._session.code_index_jobs)
         return []
 
 
@@ -96,6 +105,7 @@ class _SessionDouble:
         self.document_chunks: list[DocumentChunk] = []
         self.code_repositories: list[CodeRepository] = []
         self.code_chunks: list[CodeChunk] = []
+        self.code_index_jobs: list[CodeIndexJob] = []
         self.events: list[AgentEvent] = []
 
     def add(self, obj):
@@ -109,6 +119,8 @@ class _SessionDouble:
             self.code_repositories.append(obj)
         elif isinstance(obj, CodeChunk):
             self.code_chunks.append(obj)
+        elif isinstance(obj, CodeIndexJob):
+            self.code_index_jobs.append(obj)
         elif isinstance(obj, AgentEvent):
             self.events.append(obj)
 
@@ -166,47 +178,51 @@ async def test_phase3_fixture_document_upload_emits_lifecycle_events_and_searcha
 
 @pytest.mark.anyio
 async def test_phase3_fixture_code_indexing_emits_started_and_completed_events(monkeypatch) -> None:
-    monkeypatch.setattr(code_intelligence, "get_embedding_provider", lambda: _Provider())
+    monkeypatch.setattr("app.intelligence.embedding.get_embedding_provider", lambda: _Provider())
     session = _SessionDouble()
     fixture_root = FIXTURES_ROOT / "phase3_code" / "phase3-test-fixture-service"
     fixture_file = fixture_root / "app" / "main.py"
     service_root = "project/space-ops-platform/backend/services/phase3-test-fixture-service"
 
-    async def fake_cp_get(path: str, params: dict | None = None):
-        if path == "code/tree":
-            req = params.get("path") if params else None
-            if req == service_root:
-                return {
-                    "commit_sha": "abc1234",
-                    "data": {
-                        "entries": [
-                            {"path": f"{service_root}/app", "name": "app", "is_dir": True},
-                        ]
-                    },
-                }
-            if req == f"{service_root}/app":
-                return {
-                    "commit_sha": "abc1234",
-                    "data": {
-                        "entries": [
-                            {
-                                "path": f"{service_root}/app/main.py",
-                                "name": "main.py",
-                                "is_dir": False,
-                            },
-                        ]
-                    },
-                }
-            raise AssertionError(f"unexpected tree path: {req!r}")
-        if path == "code/file":
-            assert params.get("path") == f"{service_root}/app/main.py"
-            return {
-                "commit_sha": "abc1234",
-                "data": {"content": fixture_file.read_text(encoding="utf-8")},
-            }
-        raise AssertionError(path)
+    async def fake_commit(_root: str, _branch: str) -> str:
+        return "abc1234"
 
-    monkeypatch.setattr(code_intelligence, "_cp_get", fake_cp_get)
+    monkeypatch.setattr(code_intelligence, "get_current_commit_for_root", fake_commit)
+
+    trees: dict[str, dict] = {
+        service_root: {
+            "commit_sha": "abc1234",
+            "data": {
+                "entries": [
+                    {"path": f"{service_root}/app", "name": "app", "is_dir": True},
+                ]
+            },
+        },
+        f"{service_root}/app": {
+            "commit_sha": "abc1234",
+            "data": {
+                "entries": [
+                    {
+                        "path": f"{service_root}/app/main.py",
+                        "name": "main.py",
+                        "is_dir": False,
+                    },
+                ]
+            },
+        },
+    }
+    file_text = fixture_file.read_text(encoding="utf-8")
+
+    async def fake_cp_json(path: str, params: dict | None = None):
+        if path != "code/tree":
+            raise AssertionError(path)
+        req = params.get("path") if params else None
+        assert req in trees, req
+        return trees[req]
+
+    async def fake_cp_file(branch: str, path: str):
+        assert path == f"{service_root}/app/main.py"
+        return {"commit_sha": "abc1234", "data": {"content": file_text}}
 
     result = await code_intelligence.index_repository(
         {
@@ -219,9 +235,26 @@ async def test_phase3_fixture_code_indexing_emits_started_and_completed_events(m
         db=session,
     )
 
-    assert result["file_count"] == 1
-    assert result["chunk_count"] >= 1
-    assert [event.event_type for event in session.events] == ["code.index_started", "code.index_completed"]
+    assert result["index_status"] == "queued"
+    assert result.get("job_id")
+    assert [event.event_type for event in session.events] == ["code.index_started"]
+
+    monkeypatch.setattr(indexing, "cp_get_json", fake_cp_json)
+    monkeypatch.setattr(indexing, "cp_get_file_payload", fake_cp_file)
+
+    repo = session.code_repositories[0]
+    index_result = await indexing.index_repository_now(
+        repository_id=repo.id,
+        root=service_root,
+        branch="main",
+        target_commit_sha="abc1234",
+        db=session,
+    )
+    assert index_result.file_count == 1
+    assert index_result.chunk_count >= 1
+    repo.index_status = "ready"
+    repo.indexed_commit_sha = "abc1234"
+    repo.current_commit_sha = "abc1234"
 
     search_results = code_intelligence.search_code({"query": "metadata endpoint", "branch": "main", "limit": 2}, db=session)
     assert search_results

@@ -21,6 +21,7 @@ if "sentence_transformers" not in sys.modules:
     _st.SentenceTransformer = _SentenceTransformer
     sys.modules["sentence_transformers"] = _st
 
+from app.intelligence import indexing
 from app.intelligence.chunking import chunk_code_with_metadata
 from app.intelligence.managed_code_paths import canonicalize_managed_code_path
 from app.models.intelligence import CodeChunk, CodeRepository
@@ -66,6 +67,12 @@ class _ModelQuery:
         rows = self.all()
         return rows[0] if rows else None
 
+    def one(self):
+        rows = self.all()
+        if len(rows) != 1:
+            raise ValueError("Expected exactly one row")
+        return rows[0]
+
     def all(self):
         if self._model is CodeRepository:
             return list(self._session.code_repositories)
@@ -99,7 +106,7 @@ class _ModelQuery:
                 return False
         return True
 
-    def delete(self):
+    def delete(self, **_kwargs):
         if self._model is CodeChunk and self._filter_criteria:
             self._session.code_chunks = [c for c in self._session.code_chunks if not self._chunk_matches_filters(c)]
             self._filter_criteria = ()
@@ -201,7 +208,15 @@ def test_chunk_code_with_metadata_includes_preamble_before_first_symbol() -> Non
 
 def test_search_scoring_prefers_phrase_path_and_symbol_matches() -> None:
     session = _SessionDouble()
-    repo = CodeRepository(name="space-ops-apps", source_uri="/tmp/space-ops-apps", layer="layer2", default_branch="main")
+    repo = CodeRepository(
+        name="space-ops-apps",
+        source_uri="/tmp/space-ops-apps",
+        layer="layer2",
+        default_branch="main",
+        index_status="ready",
+        indexed_commit_sha="abc",
+        current_commit_sha="abc",
+    )
     session.add(repo)
 
     session.add(
@@ -224,7 +239,15 @@ def test_search_scoring_prefers_phrase_path_and_symbol_matches() -> None:
 
 def test_search_smoke_queries_return_plausible_files() -> None:
     session = _SessionDouble()
-    repo = CodeRepository(name="space-ops-platform", source_uri="/tmp/space-ops-platform", layer="layer2", default_branch="main")
+    repo = CodeRepository(
+        name="space-ops-platform",
+        source_uri="/tmp/space-ops-platform",
+        layer="layer2",
+        default_branch="main",
+        index_status="ready",
+        indexed_commit_sha="abc",
+        current_commit_sha="abc",
+    )
     session.add(repo)
     session.add(_chunk(repo.id, "backend/services/source_registry.py", "Source registry service index and health"))
     session.add(_chunk(repo.id, "backend/services/telemetry_detail_view.py", "Telemetry detail table and view service"))
@@ -239,7 +262,7 @@ def test_search_smoke_queries_return_plausible_files() -> None:
 @pytest.mark.anyio
 async def test_index_repository_walks_nested_tree_control_plane_shape(monkeypatch) -> None:
     session = _SessionDouble()
-    monkeypatch.setattr(code_intelligence, "get_embedding_provider", lambda: _Provider())
+    monkeypatch.setattr("app.intelligence.embedding.get_embedding_provider", lambda: _Provider())
 
     root = "project/space-ops-platform"
     nested_py = "class Nested:\n    pass\n"
@@ -281,21 +304,38 @@ async def test_index_repository_walks_nested_tree_control_plane_shape(monkeypatc
         f"{root}/backend/services/source_registry.py": nested_py,
     }
 
-    async def fake_cp_get(path: str, params: dict | None = None):
+    async def fake_cp_json(path: str, params: dict | None = None):
         if path == "code/tree":
             req_path = params.get("path") if params else None
             assert req_path in trees, req_path
             return trees[req_path]
-        if path == "code/file":
-            fp = params.get("path")
-            return {"commit_sha": "abc1234", "data": {"content": files[fp]}}
         raise AssertionError((path, params))
 
-    monkeypatch.setattr(code_intelligence, "_cp_get", fake_cp_get)
+    async def fake_cp_file(branch: str, path: str):
+        assert path in files, path
+        return {"commit_sha": "abc1234", "data": {"content": files[path]}}
 
-    result = await code_intelligence.index_repository({"root": root, "branch": "main"}, db=session)
-    assert result["file_count"] == 2
-    assert result["chunk_count"] >= 2
+    monkeypatch.setattr(indexing, "cp_get_json", fake_cp_json)
+    monkeypatch.setattr(indexing, "cp_get_file_payload", fake_cp_file)
+
+    repo = CodeRepository(
+        name=root.split("/")[-1],
+        source_uri=root,
+        layer="layer2",
+        default_branch="main",
+    )
+    session.add(repo)
+    session.flush()
+
+    result = await indexing.index_repository_now(
+        repository_id=repo.id,
+        root=root,
+        branch="main",
+        target_commit_sha="abc1234",
+        db=session,
+    )
+    assert result.file_count == 2
+    assert result.chunk_count >= 2
     indexed_paths = {c.file_path for c in session.code_chunks}
     assert f"{root}/backend/services/source_registry.py" in indexed_paths
     assert f"{root}/shallow.py" in indexed_paths
@@ -318,7 +358,15 @@ async def test_index_repository_walks_nested_tree_control_plane_shape(monkeypatc
 
 def test_related_context_returns_same_file_chunks_for_canonical_path() -> None:
     session = _SessionDouble()
-    repo = CodeRepository(name="space-ops-platform", source_uri="project/space-ops-platform", layer="layer2", default_branch="main")
+    repo = CodeRepository(
+        name="space-ops-platform",
+        source_uri="project/space-ops-platform",
+        layer="layer2",
+        default_branch="main",
+        index_status="ready",
+        indexed_commit_sha="abc",
+        current_commit_sha="abc",
+    )
     session.add(repo)
     fp = "project/space-ops-platform/backend/z.py"
     session.add(_chunk(repo.id, fp, "a = 1\n", start_line=1, end_line=1, symbol_name=None, symbol_type=None))

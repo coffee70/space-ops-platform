@@ -28,6 +28,19 @@ def is_canonical_managed_code_path(path: str) -> bool:
     return False
 
 
+def longest_managed_code_root_for_path(path: str) -> str | None:
+    """Return the longest matching managed root prefix for a canonical Layer 1 file path."""
+    normalized = path.strip().lstrip("/")
+    if not normalized:
+        return None
+    best: str | None = None
+    for root in MANAGED_CODE_PATH_PREFIXES:
+        if normalized == root or normalized.startswith(f"{root}/"):
+            if best is None or len(root) > len(best):
+                best = root
+    return best
+
+
 def canonicalize_managed_code_path(repository: str, path: str) -> str:
     """Resolve tool (repository, path) inputs to a single canonical path for code/file and indexing APIs."""
     repo = repository.strip()

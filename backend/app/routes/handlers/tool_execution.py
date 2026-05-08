@@ -23,6 +23,19 @@ from platform_common.service_proxy import build_service_proxy_url
 EXECUTION_MODE_RANK = {"read_only": 0, "suggest": 1, "execute": 2, "governed_execute": 3}
 
 
+def _detail_from_http_response(resp: httpx.Response) -> str | dict:
+    """Prefer JSON `detail` object from downstream FastAPI services for structured errors (e.g. 503 index)."""
+    try:
+        data = resp.json()
+    except ValueError:
+        return resp.text
+    if isinstance(data, dict) and "detail" in data:
+        return data["detail"]
+    if isinstance(data, dict):
+        return data
+    return resp.text
+
+
 def _cp_url(path: str) -> str:
     base = get_settings().control_plane_url.rstrip('/')
     return f"{base}/{path.lstrip('/')}"
@@ -32,7 +45,7 @@ async def _cp_get(path: str, params: dict | None = None) -> dict | list:
     async with httpx.AsyncClient(timeout=30.0) as client:
         resp = await client.get(_cp_url(path), params=params)
     if resp.status_code >= 400:
-        raise HTTPException(status_code=resp.status_code, detail=resp.text)
+        raise HTTPException(status_code=resp.status_code, detail=_detail_from_http_response(resp))
     return resp.json()
 
 
@@ -40,7 +53,7 @@ async def _cp_post(path: str, json_body: dict) -> dict:
     async with httpx.AsyncClient(timeout=30.0) as client:
         resp = await client.post(_cp_url(path), json=json_body)
     if resp.status_code >= 400:
-        raise HTTPException(status_code=resp.status_code, detail=resp.text)
+        raise HTTPException(status_code=resp.status_code, detail=_detail_from_http_response(resp))
     return resp.json()
 
 
@@ -48,7 +61,7 @@ async def _cp_put(path: str, json_body: dict) -> dict:
     async with httpx.AsyncClient(timeout=30.0) as client:
         resp = await client.put(_cp_url(path), json=json_body)
     if resp.status_code >= 400:
-        raise HTTPException(status_code=resp.status_code, detail=resp.text)
+        raise HTTPException(status_code=resp.status_code, detail=_detail_from_http_response(resp))
     return resp.json()
 
 
@@ -57,7 +70,7 @@ async def _runtime_get(slug: str, path: str, params: dict | None = None) -> dict
     async with httpx.AsyncClient(timeout=30.0, follow_redirects=False) as client:
         resp = await client.get(url, params=params)
     if resp.status_code >= 400:
-        raise HTTPException(status_code=resp.status_code, detail=resp.text)
+        raise HTTPException(status_code=resp.status_code, detail=_detail_from_http_response(resp))
     return resp.json()
 
 
@@ -66,7 +79,7 @@ async def _runtime_post(slug: str, path: str, json_body: dict | None = None) -> 
     async with httpx.AsyncClient(timeout=30.0, follow_redirects=False) as client:
         resp = await client.post(url, json=json_body or {})
     if resp.status_code >= 400:
-        raise HTTPException(status_code=resp.status_code, detail=resp.text)
+        raise HTTPException(status_code=resp.status_code, detail=_detail_from_http_response(resp))
     return resp.json()
 
 

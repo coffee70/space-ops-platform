@@ -1,0 +1,193 @@
+"""Polls `ai_code_index_jobs`, runs indexing, and performs startup root checks."""
+
+from __future__ import annotations
+
+import asyncio
+import logging
+import threading
+import uuid
+from contextlib import asynccontextmanager
+from datetime import datetime, timezone
+
+from app.config import get_settings
+from app.database import get_db_context
+from app.intelligence.indexing import get_current_commit_for_root, index_repository_now
+from app.models.intelligence import CodeIndexJob, CodeRepository
+from platform_common.web import create_service_app
+
+logger = logging.getLogger(__name__)
+
+
+def _ensure_repository_for_root(db, root: str, branch: str) -> CodeRepository:
+    repo = db.query(CodeRepository).filter(CodeRepository.source_uri == root, CodeRepository.default_branch == branch).one_or_none()
+    if repo:
+        return repo
+    repo = CodeRepository(
+        name=root.split("/")[-1],
+        source_uri=root,
+        layer="layer2",
+        default_branch=branch,
+        created_at=datetime.now(timezone.utc),
+        updated_at=datetime.now(timezone.utc),
+    )
+    db.add(repo)
+    db.flush()
+    return repo
+
+
+def _find_active_job(db, repository_id: uuid.UUID, target_commit_sha: str) -> CodeIndexJob | None:
+    return (
+        db.query(CodeIndexJob)
+        .filter(
+            CodeIndexJob.repository_id == repository_id,
+            CodeIndexJob.target_commit_sha == target_commit_sha,
+            CodeIndexJob.status.in_(("queued", "running")),
+        )
+        .one_or_none()
+    )
+
+
+def _enqueue_if_needed(db, root: str, branch: str) -> None:
+    try:
+        sha = asyncio.run(get_current_commit_for_root(root, branch))
+    except Exception:
+        logger.exception("startup commit check failed for root=%s branch=%s", root, branch)
+        return
+
+    repo = _ensure_repository_for_root(db, root, branch)
+    repo.current_commit_sha = sha or repo.current_commit_sha
+    now = datetime.now(timezone.utc)
+
+    if sha and repo.indexed_commit_sha == sha and repo.index_status == "ready":
+        return
+
+    if sha and repo.indexed_commit_sha and repo.indexed_commit_sha != sha:
+        repo.index_status = "stale"
+
+    if _find_active_job(db, repo.id, sha or ""):
+        return
+
+    job = CodeIndexJob(
+        id=uuid.uuid4(),
+        repository_id=repo.id,
+        root=root,
+        branch=branch,
+        target_commit_sha=sha or "",
+        status="queued",
+        requested_at=now,
+    )
+    repo.index_status = "queued"
+    repo.index_requested_at = now
+    db.add(job)
+
+
+def startup_enqueue_roots() -> None:
+    settings = get_settings()
+    branch = settings.code_indexer_default_branch
+    roots = settings.get_code_indexer_startup_roots()
+    if not roots:
+        return
+    try:
+        with get_db_context() as db:
+            for root in roots:
+                _enqueue_if_needed(db, root, branch)
+    except Exception:
+        logger.exception("startup enqueue failed")
+
+
+def _claim_next_job(db) -> CodeIndexJob | None:
+    return (
+        db.query(CodeIndexJob)
+        .filter(CodeIndexJob.status == "queued")
+        .order_by(CodeIndexJob.requested_at.asc())
+        .with_for_update(skip_locked=True)
+        .first()
+    )
+
+
+def process_one_job() -> None:
+    settings = get_settings()
+    max_preview = settings.code_indexer_max_failed_file_preview
+    try:
+        with get_db_context() as db:
+            job = _claim_next_job(db)
+            if not job:
+                return
+            repo = db.query(CodeRepository).filter(CodeRepository.id == job.repository_id).one()
+            job.status = "running"
+            started = datetime.now(timezone.utc)
+            job.started_at = started
+            repo.index_status = "indexing"
+            repo.index_started_at = started
+            repo.last_error = None
+
+            try:
+                result = asyncio.run(
+                    index_repository_now(
+                        repository_id=job.repository_id,
+                        root=job.root,
+                        branch=job.branch,
+                        target_commit_sha=job.target_commit_sha,
+                        db=db,
+                        max_failed_file_preview=max_preview,
+                    )
+                )
+            except Exception as exc:
+                logger.exception("index job failed")
+                job.status = "failed"
+                failed_at = datetime.now(timezone.utc)
+                job.completed_at = failed_at
+                job.error = str(exc)[:2000]
+                repo.index_status = "failed"
+                repo.last_error = str(exc)[:2000]
+                return
+
+            job.status = "completed"
+            job.completed_at = datetime.now(timezone.utc)
+            job.file_count = result.file_count
+            job.chunk_count = result.chunk_count
+            job.skipped_file_count = result.skipped_file_count
+            job.failed_file_count = result.failed_file_count
+            job.failed_files_preview_json = result.failed_files_preview
+            repo.file_count = result.file_count
+            repo.chunk_count = result.chunk_count
+            repo.skipped_file_count = result.skipped_file_count
+            repo.failed_file_count = result.failed_file_count
+            repo.indexed_commit_sha = result.target_commit_sha
+            repo.current_commit_sha = result.target_commit_sha
+            repo.index_status = "ready"
+            repo.index_completed_at = job.completed_at
+            repo.last_error = None
+    except Exception:
+        logger.exception("failed to process code index job")
+
+
+def _worker_thread(stop: threading.Event) -> None:
+    settings = get_settings()
+    interval = max(1, int(settings.code_indexer_poll_interval_seconds))
+    startup_enqueue_roots()
+    while not stop.is_set():
+        try:
+            process_one_job()
+        except Exception:
+            logger.exception("worker iteration error")
+        stop.wait(timeout=interval)
+
+
+@asynccontextmanager
+async def _lifespan(_: FastAPI):
+    stop = threading.Event()
+    thread = threading.Thread(target=_worker_thread, args=(stop,), name="code-indexer-worker", daemon=True)
+    thread.start()
+    try:
+        yield
+    finally:
+        stop.set()
+        thread.join(timeout=15.0)
+
+
+app = create_service_app(
+    title="Code Indexer Worker",
+    description="Background code indexing worker with health check.",
+    lifespan=_lifespan,
+)

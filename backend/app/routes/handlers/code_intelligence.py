@@ -12,11 +12,10 @@ from sqlalchemy.orm import Session
 
 from app.config import get_settings
 from app.database import get_db
-from app.intelligence.chunking import chunk_code_with_metadata
-from app.intelligence.embedding import DEFAULT_EMBEDDING_MODEL, get_embedding_provider
 from app.intelligence.events import emit_event
-from app.intelligence.hashing import sha256_text
-from app.models.intelligence import CodeChunk, CodeRepository
+from app.intelligence.indexing import get_current_commit_for_root
+from app.intelligence.managed_code_paths import longest_managed_code_root_for_path
+from app.models.intelligence import CodeChunk, CodeIndexJob, CodeRepository
 
 
 def _cp_url(path: str) -> str:
@@ -44,6 +43,15 @@ def _repo_summary(repo: CodeRepository) -> dict:
     }
 
 
+def _repository_is_searchable(repo: CodeRepository) -> bool:
+    return (
+        repo.index_status == "ready"
+        and bool(repo.indexed_commit_sha)
+        and bool(repo.current_commit_sha)
+        and repo.indexed_commit_sha == repo.current_commit_sha
+    )
+
+
 _TOKEN_SPLIT_PATTERN = re.compile(r"[^a-z0-9]+")
 _CAMEL_SPLIT_PATTERN = re.compile(r"(?<=[a-z0-9])(?=[A-Z])")
 _STOP_WORDS = {"the", "and", "for", "with", "from", "this", "that", "into", "code"}
@@ -59,6 +67,14 @@ def _tokenize(value: str) -> list[str]:
     normalized = _CAMEL_SPLIT_PATTERN.sub(" ", value).lower()
     bits = _TOKEN_SPLIT_PATTERN.split(normalized)
     return [bit for bit in bits if len(bit) >= 2 and bit not in _STOP_WORDS]
+
+
+def _is_test_or_spec_path(path: str) -> bool:
+    p = (path or "").lower().replace("\\", "/")
+    if "/test/" in p or "/tests/" in p or "__tests__" in p:
+        return True
+    base = p.rsplit("/", 1)[-1]
+    return ".test." in base or ".spec." in base
 
 
 def _score_code_chunk(query: str, chunk: CodeChunk) -> tuple[float, dict]:
@@ -90,11 +106,14 @@ def _score_code_chunk(query: str, chunk: CodeChunk) -> tuple[float, dict]:
         score += 2.0
 
     query_token_set = set(query_tokens)
-    extension = (chunk.file_path.rsplit(".", 1)[-1].lower() if "." in chunk.file_path else "")
+    extension = chunk.file_path.rsplit(".", 1)[-1].lower() if "." in chunk.file_path else ""
     if query_token_set.intersection(_UI_HINTS) and extension in _UI_EXTENSIONS:
         score += 1.0
     if query_token_set.intersection(_SERVICE_HINTS) and extension in _SERVICE_EXTENSIONS:
         score += 1.0
+
+    if _is_test_or_spec_path(chunk.file_path or ""):
+        score -= 2.0
 
     debug = {
         "path_token_hits": path_hits,
@@ -103,12 +122,12 @@ def _score_code_chunk(query: str, chunk: CodeChunk) -> tuple[float, dict]:
         "exact_phrase_in_path": bool(query_phrase and query_phrase in path_text),
         "exact_phrase_in_symbol": bool(query_phrase and query_phrase in symbol_text),
         "exact_phrase_in_content": bool(query_phrase and query_phrase in content_text),
+        "test_spec_path_penalty": _is_test_or_spec_path(chunk.file_path or ""),
     }
     return score, debug
 
 
 def _is_logical_managed_source_uri(uri: str) -> bool:
-    """Layer 1 stores repo roots like project/space-ops-platform — not a filesystem path for ripgrep."""
     u = uri.strip().lstrip("/")
     if not u:
         return False
@@ -186,119 +205,20 @@ def list_repositories(db: Session = Depends(get_db)):
     return [_repo_summary(repo) for repo in repos]
 
 
-def _should_skip_index_path(path: str) -> bool:
-    normalized = path.replace("\\", "/")
-    return any(skip in normalized for skip in ["node_modules", ".next", "/dist/", "/build/", "/coverage/", "/.git/"])
-
-
-# Control-plane /code/file uses UTF-8 text reads; skip common non-text assets so full-tree indexing does not fail.
-_BINARY_CODE_INDEX_EXTENSIONS = frozenset(
-    {
-        "png",
-        "jpg",
-        "jpeg",
-        "gif",
-        "webp",
-        "bmp",
-        "ico",
-        "tif",
-        "tiff",
-        "pdf",
-        "zip",
-        "gz",
-        "tgz",
-        "bz2",
-        "xz",
-        "7z",
-        "rar",
-        "mp3",
-        "mp4",
-        "m4a",
-        "wav",
-        "ogg",
-        "webm",
-        "mov",
-        "avi",
-        "mkv",
-        "woff",
-        "woff2",
-        "ttf",
-        "otf",
-        "eot",
-        "wasm",
-        "so",
-        "dylib",
-        "dll",
-        "exe",
-        "bin",
-        "sqlite",
-        "jar",
-        "apk",
-        "dmg",
-        "iso",
-        "ppt",
-        "pptx",
-        "xls",
-        "xlsx",
-        "doc",
-        "docx",
-        "npz",
-        "npy",
-        "parquet",
-        "pickle",
-        "pkl",
-    }
-)
-
-
-def _should_skip_binary_index_path(path: str) -> bool:
-    if "." not in path:
-        return False
-    ext = path.rsplit(".", 1)[-1].lower()
-    return ext in _BINARY_CODE_INDEX_EXTENSIONS
-
-
-def _tree_entry_is_dir(entry: dict) -> bool:
-    if "is_dir" in entry and entry["is_dir"] is not None:
-        return bool(entry["is_dir"])
-    etype = entry.get("type")
-    if etype == "file":
-        return False
-    if etype in {"dir", "directory", "folder"}:
-        return True
-    return False
-
-
-async def _collect_code_file_paths(branch: str, root: str) -> tuple[list[str], str]:
-    """Walk control-plane code/tree recursively (entries use is_dir like ManagedGitRepository.get_tree)."""
-    paths: list[str] = []
-    head_sha = ""
-
-    async def walk(current_path: str) -> None:
-        nonlocal head_sha
-        tree = await _cp_get("code/tree", params={"branch": branch, "path": current_path})
-        head_sha = tree.get("commit_sha") or head_sha
-        entries = tree.get("data", {}).get("entries", [])
-        for entry in entries:
-            entry_path = entry.get("path")
-            if not entry_path or _should_skip_index_path(entry_path):
-                continue
-            if _tree_entry_is_dir(entry):
-                await walk(entry_path)
-            else:
-                if _should_skip_binary_index_path(entry_path):
-                    continue
-                paths.append(entry_path)
-
-    await walk(root)
-    return paths, head_sha
-
-
 async def index_repository(body: dict, db: Session = Depends(get_db)):
     root = body.get("root")
     branch = body.get("branch", "main")
+    force = bool(body.get("force"))
     if not root:
         raise HTTPException(status_code=400, detail="root is required")
+
+    try:
+        current_sha = await get_current_commit_for_root(root, branch)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=502,
+            detail={"error_code": "control_plane_unavailable", "message": f"could not resolve current commit: {exc}"},
+        ) from exc
 
     repository = db.query(CodeRepository).filter(CodeRepository.source_uri == root, CodeRepository.default_branch == branch).one_or_none()
     if not repository:
@@ -313,11 +233,67 @@ async def index_repository(body: dict, db: Session = Depends(get_db)):
         db.add(repository)
         db.flush()
 
+    repository.current_commit_sha = current_sha or repository.current_commit_sha
+
+    if (
+        not force
+        and repository.index_status == "ready"
+        and repository.indexed_commit_sha
+        and current_sha
+        and repository.indexed_commit_sha == current_sha
+    ):
+        return {
+            "repository_id": str(repository.id),
+            "job_id": None,
+            "root": root,
+            "branch": branch,
+            "target_commit_sha": current_sha,
+            "index_status": "ready",
+            "message": "index already ready for current commit",
+        }
+
+    existing_job = (
+        db.query(CodeIndexJob)
+        .filter(
+            CodeIndexJob.repository_id == repository.id,
+            CodeIndexJob.target_commit_sha == (current_sha or ""),
+            CodeIndexJob.status.in_(("queued", "running")),
+        )
+        .one_or_none()
+    )
+    if existing_job:
+        return {
+            "repository_id": str(repository.id),
+            "job_id": str(existing_job.id),
+            "root": root,
+            "branch": branch,
+            "target_commit_sha": current_sha,
+            "index_status": repository.index_status if repository.index_status in ("queued", "indexing") else "queued",
+        }
+
+    now = datetime.now(timezone.utc)
+    job = CodeIndexJob(
+        id=uuid.uuid4(),
+        repository_id=repository.id,
+        root=root,
+        branch=branch,
+        target_commit_sha=current_sha or "",
+        status="queued",
+        requested_at=now,
+    )
+    repository.index_status = "queued"
+    repository.index_requested_at = now
+    repository.last_error = None
+    if repository.indexed_commit_sha and current_sha and repository.indexed_commit_sha != current_sha:
+        repository.index_status = "queued"
+    db.add(job)
+    db.flush()
+
     if body.get("conversation_id") and body.get("agent_run_id") and body.get("request_id"):
         emit_event(
             db,
             event_type="code.index_started",
-            payload={"repository": repository.name, "branch": branch, "commit_sha": ""},
+            payload={"repository": repository.name, "branch": branch, "commit_sha": current_sha or ""},
             conversation_id=body.get("conversation_id"),
             agent_run_id=body.get("agent_run_id"),
             request_id=body.get("request_id"),
@@ -325,78 +301,50 @@ async def index_repository(body: dict, db: Session = Depends(get_db)):
             emitted_by="code-intelligence-service",
         )
 
-    try:
-        file_paths, tree_head_sha = await _collect_code_file_paths(branch, root)
-        provider = get_embedding_provider()
-        file_count = 0
-        chunk_count = 0
-        for path in file_paths:
-            file_data = await _cp_get("code/file", params={"branch": branch, "path": path})
-            content = file_data.get("data", {}).get("content", "")
-            if not content or len(content) > 100_000:
-                continue
-            language = path.split(".")[-1] if "." in path else None
-            chunks = chunk_code_with_metadata(content, language=language)
-            commit_sha = file_data.get("commit_sha") or tree_head_sha or ""
-            db.query(CodeChunk).filter(CodeChunk.repository_id == repository.id, CodeChunk.branch == branch, CodeChunk.file_path == path).delete()
-            for chunk in chunks:
-                db.add(
-                    CodeChunk(
-                        repository_id=repository.id,
-                        branch=branch,
-                        commit_sha=commit_sha,
-                        file_path=path,
-                        language=language,
-                        symbol_name=chunk.symbol_name,
-                        symbol_type=chunk.symbol_type,
-                        start_line=chunk.start_line,
-                        end_line=chunk.end_line,
-                        content=chunk.content,
-                        content_hash=sha256_text(chunk.content),
-                        embedding=provider.embed(chunk.content),
-                        embedding_model=DEFAULT_EMBEDDING_MODEL,
-                        metadata_json=chunk.metadata,
-                        indexed_at=datetime.now(timezone.utc),
-                    )
-                )
-                chunk_count += 1
-            file_count += 1
+    return {
+        "repository_id": str(repository.id),
+        "job_id": str(job.id),
+        "root": root,
+        "branch": branch,
+        "target_commit_sha": current_sha,
+        "index_status": "queued",
+    }
 
-        repository.updated_at = datetime.now(timezone.utc)
-        if body.get("conversation_id") and body.get("agent_run_id") and body.get("request_id"):
-            emit_event(
-                db,
-                event_type="code.index_completed",
-                payload={"repository": repository.name, "branch": branch, "commit_sha": "", "file_count": file_count, "chunk_count": chunk_count, "duration_ms": 0},
-                conversation_id=body.get("conversation_id"),
-                agent_run_id=body.get("agent_run_id"),
-                request_id=body.get("request_id"),
-                sequence=2,
-                emitted_by="code-intelligence-service",
-            )
-        return {"repository_id": str(repository.id), "file_count": file_count, "chunk_count": chunk_count}
-    except Exception as exc:
-        if body.get("conversation_id") and body.get("agent_run_id") and body.get("request_id"):
-            emit_event(
-                db,
-                event_type="code.index_failed",
-                payload={"repository": repository.name, "branch": branch, "error_code": "code_index_failed", "message": str(exc)},
-                conversation_id=body.get("conversation_id"),
-                agent_run_id=body.get("agent_run_id"),
-                request_id=body.get("request_id"),
-                sequence=2,
-                emitted_by="code-intelligence-service",
-            )
-        raise
+
+def _status_payload(repo: CodeRepository, db: Session) -> dict:
+    live_chunk_total = db.query(CodeChunk).filter(CodeChunk.repository_id == repo.id).count()
+    return {
+        **_repo_summary(repo),
+        "chunk_count": live_chunk_total,
+        "index_status": repo.index_status,
+        "indexed_commit_sha": repo.indexed_commit_sha,
+        "current_commit_sha": repo.current_commit_sha,
+        "file_count": repo.file_count,
+        "skipped_file_count": repo.skipped_file_count,
+        "failed_file_count": repo.failed_file_count,
+        "last_error": repo.last_error,
+        "index_requested_at": repo.index_requested_at,
+        "index_started_at": repo.index_started_at,
+        "index_completed_at": repo.index_completed_at,
+    }
 
 
 def get_repository_status(repository_id: str, db: Session = Depends(get_db)):
-    repo = db.query(CodeRepository).filter(CodeRepository.id == uuid.UUID(repository_id)).one_or_none()
+    try:
+        rid = uuid.UUID(repository_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="invalid repository id") from exc
+    repo = db.query(CodeRepository).filter(CodeRepository.id == rid).one_or_none()
     if not repo:
         raise HTTPException(status_code=404, detail="repository not found")
-    chunk_count = db.query(CodeChunk).filter(CodeChunk.repository_id == repo.id).count()
-    latest = db.query(CodeChunk).filter(CodeChunk.repository_id == repo.id).order_by(CodeChunk.indexed_at.desc()).first()
-    return {**_repo_summary(repo), "chunk_count": chunk_count, "latest_commit_sha": latest.commit_sha if latest else None, "indexed_at": latest.indexed_at if latest else None}
+    return _status_payload(repo, db)
+
+
+def get_repository_status_lookup(root: str = Query(...), branch: str = Query("main"), db: Session = Depends(get_db)):
+    repo = db.query(CodeRepository).filter(CodeRepository.source_uri == root, CodeRepository.default_branch == branch).one_or_none()
+    if not repo:
+        raise HTTPException(status_code=404, detail="repository not found")
+    return _status_payload(repo, db)
 
 
 def search_code(body: dict, db: Session = Depends(get_db)):
@@ -404,16 +352,67 @@ def search_code(body: dict, db: Session = Depends(get_db)):
     if not query:
         raise HTTPException(status_code=400, detail="query is required")
     limit = min(max(int(body.get("limit", 6)), 1), 8)
-    rows = db.query(CodeChunk, CodeRepository).join(CodeRepository, CodeRepository.id == CodeChunk.repository_id).filter(CodeChunk.branch == body.get("branch", "main")).all()
+    branch = body.get("branch", "main")
+    if body.get("repository"):
+        repo = db.query(CodeRepository).filter(CodeRepository.name == body["repository"]).one_or_none()
+        if not repo:
+            raise HTTPException(status_code=404, detail="repository not found")
+        if repo.default_branch != branch:
+            pass
+        if repo.index_status == "failed":
+            raise HTTPException(
+                status_code=503,
+                detail={
+                    "error_code": "code_index_failed",
+                    "message": f"Code index failed for {repo.source_uri} on {branch}.",
+                    "repository": repo.name,
+                    "root": repo.source_uri,
+                    "branch": branch,
+                    "index_status": "failed",
+                    "last_error": repo.last_error or "",
+                },
+            )
+        if not _repository_is_searchable(repo):
+            raise HTTPException(
+                status_code=503,
+                detail={
+                    "error_code": "code_index_not_ready",
+                    "message": f"Code index is not ready for {repo.source_uri} on {branch}.",
+                    "repository": repo.name,
+                    "root": repo.source_uri,
+                    "branch": branch,
+                    "index_status": repo.index_status,
+                },
+            )
+        target_repos = {repo.id}
+    else:
+        candidates = db.query(CodeRepository).filter(CodeRepository.default_branch == branch).all()
+        if not any(_repository_is_searchable(r) for r in candidates):
+            raise HTTPException(
+                status_code=503,
+                detail={
+                    "error_code": "code_index_not_ready",
+                    "message": f"No ready code index for branch {branch}.",
+                    "repository": None,
+                    "root": None,
+                    "branch": branch,
+                    "index_status": "not_indexed",
+                },
+            )
+        target_repos = {r.id for r in candidates if _repository_is_searchable(r)}
+
+    rows = db.query(CodeChunk, CodeRepository).join(CodeRepository, CodeRepository.id == CodeChunk.repository_id).filter(CodeChunk.branch == branch).all()
     rg_boosts: dict[tuple[str, int], float] = {}
     if body.get("repository"):
         repo = db.query(CodeRepository).filter(CodeRepository.name == body["repository"]).one_or_none()
-        if repo:
+        if repo and not _is_logical_managed_source_uri(repo.source_uri):
             for match in _run_ripgrep_search(repo.source_uri, query, limit=max(limit * 4, 24)):
                 rg_boosts[(match["file_path"], match["line"])] = 1.5
 
     scored: list[dict] = []
     for chunk, repository in rows:
+        if repository.id not in target_repos:
+            continue
         if body.get("repository") and repository.name != body["repository"]:
             continue
         score, ranking_signals = _score_code_chunk(query, chunk)
@@ -474,6 +473,55 @@ def related_context(body: dict, db: Session = Depends(get_db)):
     branch = body.get("branch", "main")
     line = body.get("line")
     limit = min(max(int(body.get("limit", 6)), 1), 25)
+
+    root_prefix = longest_managed_code_root_for_path(path)
+    if not root_prefix:
+        raise HTTPException(
+            status_code=400,
+            detail={"error_code": "invalid_managed_code_path", "message": "file_path is not under a managed code root"},
+        )
+
+    repo = db.query(CodeRepository).filter(CodeRepository.source_uri == root_prefix, CodeRepository.default_branch == branch).one_or_none()
+    if not repo:
+        short = root_prefix.split("/")[-1] if "/" in root_prefix else root_prefix
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "error_code": "code_index_not_ready",
+                "message": f"Code index is not ready for {root_prefix} on {branch}.",
+                "repository": short,
+                "root": root_prefix,
+                "branch": branch,
+                "index_status": "not_indexed",
+            },
+        )
+
+    if repo.index_status == "failed":
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "error_code": "code_index_failed",
+                "message": f"Code index failed for {root_prefix} on {branch}.",
+                "repository": repo.name,
+                "root": root_prefix,
+                "branch": branch,
+                "index_status": "failed",
+                "last_error": repo.last_error or "",
+            },
+        )
+    if not _repository_is_searchable(repo):
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "error_code": "code_index_not_ready",
+                "message": f"Code index is not ready for {root_prefix} on {branch}.",
+                "repository": repo.name,
+                "root": root_prefix,
+                "branch": branch,
+                "index_status": repo.index_status,
+            },
+        )
+
     rows = db.query(CodeChunk).filter(CodeChunk.file_path == path, CodeChunk.branch == branch).order_by(CodeChunk.start_line.asc()).all()
     if line:
         rows.sort(key=lambda row: min(abs((row.start_line or line) - line), abs((row.end_line or line) - line)))
