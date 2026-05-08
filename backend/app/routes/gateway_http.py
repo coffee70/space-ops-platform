@@ -74,7 +74,14 @@ def _resolve_intelligence_service(path: str) -> tuple[str, str]:
         return "document-knowledge-service", path[len("documents/") :] if path.startswith("documents/") else ""
     if re.fullmatch(r"documents/[^/]+", path) or re.fullmatch(r"documents/[^/]+/chunks", path):
         return "document-knowledge-service", path[len("documents/") :]
-    if path in {"code/repositories", "code/repositories/index", "code/search", "code/source-file", "code/related-context"}:
+    if path in {
+        "code/repositories",
+        "code/repositories/index",
+        "code/repositories/status",
+        "code/search",
+        "code/source-file",
+        "code/related-context",
+    }:
         return "code-intelligence-service", path[len("code/") :]
     if re.fullmatch(r"code/repositories/[^/]+/status", path):
         return "code-intelligence-service", path[len("code/") :] if path.startswith("code/") else ""

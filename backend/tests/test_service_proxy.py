@@ -203,6 +203,10 @@ def test_gateway_routes_proxy_expected_service_paths(monkeypatch) -> None:
     assert client.get("/intelligence/documents").status_code == 200
     assert client.post("/intelligence/documents/search", json={"query": "q"}).status_code == 200
     assert client.get("/intelligence/code/repositories").status_code == 200
+    assert (
+        client.get("/intelligence/code/repositories/status", params={"root": "project/space-ops-platform", "branch": "main"}).status_code
+        == 200
+    )
     assert client.post("/intelligence/code/repositories/index", json={"root": "/tmp/repo", "branch": "main"}).status_code == 200
     assert client.post("/intelligence/code/search", json={"query": "q", "branch": "main"}).status_code == 200
     assert client.get("/intelligence/code/source-file", params={"branch": "main", "path": "foo.py"}).status_code == 200
@@ -223,6 +227,7 @@ def test_gateway_routes_proxy_expected_service_paths(monkeypatch) -> None:
         ("document-knowledge-service", ""),
         ("document-knowledge-service", "search"),
         ("code-intelligence-service", "repositories"),
+        ("code-intelligence-service", "repositories/status"),
         ("code-intelligence-service", "repositories/index"),
         ("code-intelligence-service", "search"),
         ("code-intelligence-service", "source-file"),
