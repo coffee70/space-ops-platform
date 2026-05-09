@@ -5,6 +5,30 @@ const FIXTURE_UNIT_ID = "phase3-test-fixture-service";
 const FIXTURE_BRANCH = "feature/phase3-no-llm";
 const FIXTURE_SOURCE_ROOT = `project/space-ops-platform/backend/services/${FIXTURE_UNIT_ID}`;
 
+const PREVIEW_FIXTURE_UNIT_ID = "derived-telemetry-service";
+const PREVIEW_FIXTURE_APPLICATION_ID = "telemetry";
+const PREVIEW_FIXTURE_BRANCH = "preview/derived-telemetry-preview";
+const PREVIEW_FIXTURE_SOURCE_ROOT = `project/space-ops-platform/backend/services/${PREVIEW_FIXTURE_UNIT_ID}`;
+const PREVIEW_FIXTURE_FILES: Array<{ path: string; content: string }> = [
+  {
+    path: `${PREVIEW_FIXTURE_SOURCE_ROOT}/app/main.py`,
+    content: [
+      "from fastapi import FastAPI",
+      "",
+      'app = FastAPI(title="Derived Telemetry Service (preview)")',
+      "",
+      '@app.get("/health")',
+      "def health():",
+      '    return {"status": "ok", "service": "derived-telemetry-service", "variant": "preview"}',
+      "",
+      '@app.get("/metadata")',
+      "def metadata():",
+      '    return {"display_name": "Derived Telemetry Service", "mode": "preview"}',
+      "",
+    ].join("\n"),
+  },
+];
+
 const FIXTURE_FILES: Array<{ path: string; content: string }> = [
   {
     path: `${FIXTURE_SOURCE_ROOT}/requirements.txt`,
@@ -83,6 +107,33 @@ async function executeTool(input: {
   });
   await input.stream.emitRawEvents(response.raw_events as RawEventFact[] | undefined);
   return response;
+}
+
+async function emitChangeSummary(input: {
+  stream: AgentEventStream;
+  branch: string;
+  baseBranch?: string;
+  baseCommitSha?: string;
+  commitSha?: string;
+  changedFiles: string[];
+  targetUnitId?: string;
+  targetApplicationId?: string;
+  affectedCapability: string;
+  riskLevel?: "low" | "medium" | "high";
+  validationStatus?: "not_run" | "running" | "passed" | "failed";
+}): Promise<void> {
+  await input.stream.emitEvent("change.summary", {
+    branch: input.branch,
+    base_branch: input.baseBranch ?? "main",
+    base_commit_sha: input.baseCommitSha ?? null,
+    commit_sha: input.commitSha ?? null,
+    changed_files: input.changedFiles,
+    target_unit_id: input.targetUnitId ?? null,
+    target_application_id: input.targetApplicationId ?? null,
+    affected_capability: input.affectedCapability,
+    risk_level: input.riskLevel ?? "low",
+    validation_status: input.validationStatus ?? "not_run",
+  });
 }
 
 async function emitCompletedRun(input: {
@@ -185,10 +236,50 @@ export async function runScriptedMode(input: {
     }
     await execute("create_commit", { branch: FIXTURE_BRANCH, message: "Add deterministic Phase 3 fixture service" });
     await execute("deploy_service_or_application", { unit_id: FIXTURE_UNIT_ID, branch: FIXTURE_BRANCH });
+    await emitChangeSummary({
+      stream: input.stream,
+      branch: FIXTURE_BRANCH,
+      changedFiles: FIXTURE_FILES.map((file) => file.path),
+      targetUnitId: FIXTURE_UNIT_ID,
+      affectedCapability: "phase3-test-fixture",
+    });
     return {
       status: "completed",
       toolCallCount,
       assistantText: "Deterministic scripted write/deploy workflow completed through the managed fork and deployment path.",
+    };
+  }
+
+  if (input.mode === "scripted_change_preview") {
+    await execute("create_working_branch", {
+      branch: PREVIEW_FIXTURE_BRANCH,
+      from_branch: "main",
+    });
+    for (const file of PREVIEW_FIXTURE_FILES) {
+      await execute("write_source_file", {
+        branch: PREVIEW_FIXTURE_BRANCH,
+        path: file.path,
+        content: file.content,
+      });
+    }
+    await execute("create_commit", {
+      branch: PREVIEW_FIXTURE_BRANCH,
+      message: "Preview: tag derived telemetry metadata as preview variant",
+    });
+    await emitChangeSummary({
+      stream: input.stream,
+      branch: PREVIEW_FIXTURE_BRANCH,
+      baseBranch: "main",
+      changedFiles: PREVIEW_FIXTURE_FILES.map((file) => file.path),
+      targetUnitId: PREVIEW_FIXTURE_UNIT_ID,
+      targetApplicationId: PREVIEW_FIXTURE_APPLICATION_ID,
+      affectedCapability: "telemetry-detail",
+    });
+    return {
+      status: "completed",
+      toolCallCount,
+      assistantText:
+        "I created a preview branch and scoped change. Ready to deploy when you are.",
     };
   }
 
@@ -245,6 +336,13 @@ export async function runScriptedMode(input: {
     }
     await execute("create_commit", { branch: FIXTURE_BRANCH, message: "Add deterministic Phase 3 fixture service" });
     await execute("deploy_service_or_application", { unit_id: FIXTURE_UNIT_ID, branch: FIXTURE_BRANCH });
+    await emitChangeSummary({
+      stream: input.stream,
+      branch: FIXTURE_BRANCH,
+      changedFiles: FIXTURE_FILES.map((file) => file.path),
+      targetUnitId: FIXTURE_UNIT_ID,
+      affectedCapability: "phase3-test-fixture",
+    });
     await execute("delete_managed_resources", { mode: "managed_unit", unit_id: FIXTURE_UNIT_ID });
     return {
       status: "completed",

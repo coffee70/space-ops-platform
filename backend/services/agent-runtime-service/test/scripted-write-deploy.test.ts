@@ -105,6 +105,17 @@ test("scripted_write_deploy uses execute-only tools through tool-execution in or
   const chunks = parseNdjson(await response.text());
   const completed = chunks.find((chunk) => chunk.kind === "event" && (chunk as { event: { event_type: string } }).event.event_type === "run.completed");
   assert.ok(completed);
+  const changeSummary = chunks.find(
+    (chunk) => chunk.kind === "event" && (chunk as { event: { event_type: string } }).event.event_type === "change.summary",
+  ) as { event: { payload: Record<string, unknown> } } | undefined;
+  assert.ok(changeSummary, "change.summary event should be emitted after deploy");
+  assert.equal(changeSummary?.event.payload.branch, "feature/phase3-no-llm");
+  assert.equal(changeSummary?.event.payload.target_unit_id, "phase3-test-fixture-service");
+  assert.equal(changeSummary?.event.payload.affected_capability, "phase3-test-fixture");
+  assert.deepEqual(changeSummary?.event.payload.changed_files, [
+    "project/space-ops-platform/backend/services/phase3-test-fixture-service/requirements.txt",
+    "project/space-ops-platform/backend/services/phase3-test-fixture-service/app/main.py",
+  ]);
   assert.deepEqual(toolExecution.calls.map((call) => call.tool_name), [
     "create_working_branch",
     "scaffold_service",
