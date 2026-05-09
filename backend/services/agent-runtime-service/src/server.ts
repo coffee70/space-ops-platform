@@ -23,6 +23,7 @@ export function createApp(overrides?: Partial<RunDependencies>): Hono {
     modelRunner: overrides?.modelRunner ?? createModelRunner(config),
     now: overrides?.now ?? (() => new Date()),
     createId: overrides?.createId ?? (() => crypto.randomUUID()),
+    changeSummaryRegistryClient: overrides?.changeSummaryRegistryClient,
   };
 
   const app = new Hono();

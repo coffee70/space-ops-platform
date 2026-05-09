@@ -109,6 +109,21 @@ async function executeTool(input: {
   return response;
 }
 
+function extractBaseCommitSha(output: unknown): string | undefined {
+  if (typeof output !== "object" || output === null) return undefined;
+  const envelope = output as Record<string, unknown>;
+  const data = envelope.data;
+  if (typeof data !== "object" || data === null) return undefined;
+  const value = (data as Record<string, unknown>).base_commit_sha;
+  return typeof value === "string" && value.length > 0 ? value : undefined;
+}
+
+function extractCommitSha(output: unknown): string | undefined {
+  if (typeof output !== "object" || output === null) return undefined;
+  const value = (output as Record<string, unknown>).commit_sha;
+  return typeof value === "string" && value.length > 0 ? value : undefined;
+}
+
 async function emitChangeSummary(input: {
   stream: AgentEventStream;
   branch: string;
@@ -251,7 +266,7 @@ export async function runScriptedMode(input: {
   }
 
   if (input.mode === "scripted_change_preview") {
-    await execute("create_working_branch", {
+    const branchResponse = await execute("create_working_branch", {
       branch: PREVIEW_FIXTURE_BRANCH,
       from_branch: "main",
     });
@@ -262,14 +277,22 @@ export async function runScriptedMode(input: {
         content: file.content,
       });
     }
-    await execute("create_commit", {
+    const commitResponse = await execute("create_commit", {
       branch: PREVIEW_FIXTURE_BRANCH,
       message: "Preview: tag derived telemetry metadata as preview variant",
     });
+    // Capture the exact baseline commit SHA from create_working_branch and the
+    // resulting commit SHA from create_commit so the change summary carries
+    // accurate Git metadata even on the scripted product path. The aggregator
+    // path covers real flows; scripted mirrors the structure for fixtures.
+    const baseCommitSha = extractBaseCommitSha(branchResponse.output);
+    const commitSha = extractCommitSha(commitResponse.output);
     await emitChangeSummary({
       stream: input.stream,
       branch: PREVIEW_FIXTURE_BRANCH,
       baseBranch: "main",
+      baseCommitSha,
+      commitSha,
       changedFiles: PREVIEW_FIXTURE_FILES.map((file) => file.path),
       targetUnitId: PREVIEW_FIXTURE_UNIT_ID,
       targetApplicationId: PREVIEW_FIXTURE_APPLICATION_ID,
