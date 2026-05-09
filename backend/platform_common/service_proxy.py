@@ -58,7 +58,13 @@ def build_service_proxy_url(service_slug: str, path: str = "") -> str:
     return _kernel_service_proxy_url(service_slug, path)
 
 
-async def proxy_request(service_slug: str, request: Request, *, path: str = "") -> Response:
+async def proxy_request(
+    service_slug: str,
+    request: Request,
+    *,
+    path: str = "",
+    timeout: httpx.Timeout | None = None,
+) -> Response:
     headers = {
         key: value
         for key, value in request.headers.items()
@@ -67,8 +73,9 @@ async def proxy_request(service_slug: str, request: Request, *, path: str = "") 
     body = await request.body()
     upstream = _kernel_service_proxy_url(service_slug, path, request.url.query)
 
+    effective_timeout = timeout or KERNEL_SERVICE_PROXY_TIMEOUT
     try:
-        client = httpx.AsyncClient(follow_redirects=False, timeout=KERNEL_SERVICE_PROXY_TIMEOUT)
+        client = httpx.AsyncClient(follow_redirects=False, timeout=effective_timeout)
         upstream_request = client.build_request(
             request.method,
             upstream,

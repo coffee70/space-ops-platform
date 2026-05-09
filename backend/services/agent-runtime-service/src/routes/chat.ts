@@ -3,6 +3,8 @@ import { z } from "zod";
 
 import { buildSystemPrompt } from "../ai/prompts.js";
 import { createToolSet, filterToolDefinitionsForExecutionMode } from "../ai/tools.js";
+import { ChangeSummaryAggregator } from "../change-summary.js";
+import { HttpChangeSummaryRegistryClient } from "../clients/registry-units.js";
 import { AgentEventStream } from "../events/stream.js";
 import { RunSequencer } from "../events/sequencer.js";
 import { runFallback } from "../fallback.js";
@@ -187,6 +189,12 @@ async function orchestrateChat(input: {
     const toolDefinitions = await dependencies.toolRegistryClient.listTools(input.trace);
     const toolsForMode = filterToolDefinitionsForExecutionMode(toolDefinitions, input.executionMode);
     let toolCallCount = 0;
+    const changeSummaryAggregator = new ChangeSummaryAggregator({
+      stream,
+      registryClient:
+        dependencies.changeSummaryRegistryClient ?? new HttpChangeSummaryRegistryClient(dependencies.config),
+      logger: { warn: (message, error) => console.warn(message, error) },
+    });
     const tools = createToolSet({
       toolDefinitions,
       toolExecutionClient: dependencies.toolExecutionClient,
@@ -194,6 +202,9 @@ async function orchestrateChat(input: {
       executionMode: input.executionMode,
       onToolCallRequested: () => {
         toolCallCount += 1;
+      },
+      onToolCallCompleted: async (definition, _toolCallId, args, output) => {
+        await changeSummaryAggregator.observeToolCompletion(definition.name, args, output);
       },
       emitRawToolEvents: async (events) => {
         await stream.emitRawEvents(events as RawEventFact[] | undefined);

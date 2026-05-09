@@ -241,5 +241,10 @@ export interface RunDependencies {
   config: RuntimeConfig;
   now: () => Date;
   createId: () => string;
+  /**
+   * Optional override for the change-summary registry client. The default
+   * implementation talks to the control-plane over HTTP. Tests inject a fake.
+   */
+  changeSummaryRegistryClient?: import("./change-summary.js").ChangeSummaryRegistryClient;
 }
 import type { ToolSet } from "ai";

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 
+import httpx
 from fastapi import APIRouter, HTTPException, Request
 
 from platform_common.service_proxy import proxy_request
@@ -95,4 +96,7 @@ def _resolve_intelligence_service(path: str) -> tuple[str, str]:
 @router.api_route("/intelligence/{path:path}", methods=["GET", "POST", "PATCH", "PUT", "DELETE", "HEAD"])
 async def proxy_intelligence(request: Request, path: str):
     service_slug, target_path = _resolve_intelligence_service(path)
-    return await proxy_request(service_slug, request, path=target_path)
+    timeout = None
+    if service_slug == "agent-runtime-service" and target_path == "chat" and request.method.upper() == "POST":
+        timeout = httpx.Timeout(connect=5.0, read=300.0, write=300.0, pool=5.0)
+    return await proxy_request(service_slug, request, path=target_path, timeout=timeout)

@@ -106,6 +106,13 @@ export function createToolSet(input: {
   trace: TraceEnvelope;
   executionMode: ExecutionMode;
   onToolCallRequested?: (definition: ToolDefinition, toolCallId: string, args: Record<string, unknown>) => void | Promise<void>;
+  onToolCallCompleted?: (
+    definition: ToolDefinition,
+    toolCallId: string,
+    args: Record<string, unknown>,
+    output: unknown,
+    status: "completed" | "failed" | "confirmation_required",
+  ) => void | Promise<void>;
   emitRawToolEvents: (events: RawEventFact[] | undefined) => Promise<void>;
 }): ToolSet {
   const toolEntries = filterToolDefinitionsForExecutionMode(input.toolDefinitions, input.executionMode)
@@ -126,6 +133,9 @@ export function createToolSet(input: {
             execution_mode: input.executionMode,
           });
           await input.emitRawToolEvents(response.raw_events);
+          if (response.status === "completed") {
+            await input.onToolCallCompleted?.(definition, toolCallId, normalizedArgs, response.output, response.status);
+          }
           return response.output;
         },
       }),
