@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { createApp } from "../src/server.js";
-import { contextResolvedEvent, FakeContextClient, FakeToolExecutionClient, FakeToolRegistryClient, MemoryConversationStore, parseNdjson } from "./helpers.js";
+import { baseRuntimeConfig, contextResolvedEvent, FakeContextClient, FakeToolExecutionClient, FakeToolRegistryClient, MemoryConversationStore, parseNdjson } from "./helpers.js";
 
 test("scripted_error emits deterministic error and run.failed without invoking the model", async () => {
   const store = new MemoryConversationStore();
@@ -12,18 +12,11 @@ test("scripted_error emits deterministic error and run.failed without invoking t
   });
 
   const app = createApp({
-    config: {
-      port: 8080,
-      databaseUrl: "postgres://example",
-      controlPlaneUrl: "http://localhost:8100",
-      openAiApiKey: null,
-      openAiBaseUrl: null,
-      modelId: "gpt-4o-mini",
+    config: baseRuntimeConfig({
       maxSteps: 3,
       requestTimeoutMs: 1000,
       scriptedMode: "scripted_error",
-      allowMissingKeyFallback: true,
-    },
+    }),
     store,
     contextClient: new FakeContextClient([contextResolvedEvent()]),
     toolRegistryClient: new FakeToolRegistryClient([]),
@@ -37,7 +30,8 @@ test("scripted_error emits deterministic error and run.failed without invoking t
       raw_events: [],
     }),
     modelRunner: {
-      async *stream() {
+      async *stream(input) {
+        void input.model;
         throw new Error("model runner should not be invoked in scripted mode");
       },
     },

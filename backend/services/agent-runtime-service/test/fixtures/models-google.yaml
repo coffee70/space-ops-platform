@@ -1,0 +1,23 @@
+version: 1
+
+defaults:
+  chatModel: google-gemini-test
+  codingModel: google-gemini-test
+  fastModel: google-gemini-test
+  restrictedModel: google-gemini-test
+
+providers:
+  google-main:
+    type: google
+    displayName: Google
+    apiKeyEnv: GOOGLE_API_KEY
+
+models:
+  - id: google-gemini-test
+    providerRef: google-main
+    providerModelId: gemini-2.0-flash
+    enabled: true
+    defaultFor: [chat]
+    governance:
+      allowedModes: [read_only, suggest, execute]
+      dataBoundary: external_api

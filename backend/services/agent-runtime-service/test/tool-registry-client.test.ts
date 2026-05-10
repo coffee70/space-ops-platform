@@ -2,20 +2,10 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { HttpToolRegistryClient } from "../src/clients/tool-registry.js";
+import { baseRuntimeConfig } from "./helpers.js";
 
 test("tool registry client forwards trace headers", async () => {
-  const client = new HttpToolRegistryClient({
-    port: 8080,
-    databaseUrl: "postgres://example",
-    controlPlaneUrl: "http://localhost:8100",
-    openAiApiKey: null,
-    openAiBaseUrl: null,
-    modelId: "gpt-4o-mini",
-    maxSteps: 3,
-    requestTimeoutMs: 1000,
-    scriptedMode: null,
-    allowMissingKeyFallback: false,
-  });
+  const client = new HttpToolRegistryClient(baseRuntimeConfig({ allowMissingKeyFallback: false }));
 
   const fetchCalls: Array<{ url: string; init?: RequestInit }> = [];
   const originalFetch = globalThis.fetch;

@@ -2,7 +2,15 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { createApp } from "../src/server.js";
-import { contextResolvedEvent, FakeContextClient, FakeToolExecutionClient, FakeToolRegistryClient, MemoryConversationStore, parseNdjson } from "./helpers.js";
+import {
+  baseRuntimeConfig,
+  contextResolvedEvent,
+  FakeContextClient,
+  FakeToolExecutionClient,
+  FakeToolRegistryClient,
+  MemoryConversationStore,
+  parseNdjson,
+} from "./helpers.js";
 
 test("fallback path still emits runtime-owned completion lifecycle", async () => {
   const store = new MemoryConversationStore();
@@ -12,18 +20,10 @@ test("fallback path still emits runtime-owned completion lifecycle", async () =>
   });
 
   const app = createApp({
-    config: {
-      port: 8080,
-      databaseUrl: "postgres://example",
-      controlPlaneUrl: "http://localhost:8100",
-      openAiApiKey: null,
-      openAiBaseUrl: null,
-      modelId: "gpt-4o-mini",
+    config: baseRuntimeConfig({
       maxSteps: 3,
       requestTimeoutMs: 1000,
-      scriptedMode: null,
-      allowMissingKeyFallback: true,
-    },
+    }),
     store,
     contextClient: new FakeContextClient([contextResolvedEvent()]),
     toolRegistryClient: new FakeToolRegistryClient([]),
@@ -37,7 +37,8 @@ test("fallback path still emits runtime-owned completion lifecycle", async () =>
       raw_events: [],
     }),
     modelRunner: {
-      async *stream() {
+      async *stream(input) {
+        void input.model;
         throw new Error("model runner should not be invoked in fallback mode");
       },
     },

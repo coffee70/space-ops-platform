@@ -3,7 +3,7 @@ import test from "node:test";
 
 import { createApp } from "../src/server.js";
 import type { ToolDefinition, ToolExecutionResponse } from "../src/types.js";
-import { contextResolvedEvent, FakeContextClient, FakeToolExecutionClient, FakeToolRegistryClient, MemoryConversationStore, parseNdjson } from "./helpers.js";
+import { baseRuntimeConfig, contextResolvedEvent, FakeContextClient, FakeToolExecutionClient, FakeToolRegistryClient, MemoryConversationStore, parseNdjson } from "./helpers.js";
 
 const PREVIEW_TOOL_DEFINITIONS: ToolDefinition[] = [
   "create_working_branch",
@@ -66,24 +66,18 @@ test("scripted_change_preview prepares a preview branch and emits change.summary
 
   const toolExecution = new FakeToolExecutionClient((input) => toolResponse(input.tool_name, input.trace));
   const app = createApp({
-    config: {
-      port: 8080,
-      databaseUrl: "postgres://example",
-      controlPlaneUrl: "http://localhost:8100",
-      openAiApiKey: null,
-      openAiBaseUrl: null,
-      modelId: "gpt-4o-mini",
+    config: baseRuntimeConfig({
       maxSteps: 3,
       requestTimeoutMs: 1000,
       scriptedMode: "scripted_change_preview",
-      allowMissingKeyFallback: true,
-    },
+    }),
     store,
     contextClient: new FakeContextClient([contextResolvedEvent()]),
     toolRegistryClient: new FakeToolRegistryClient(PREVIEW_TOOL_DEFINITIONS),
     toolExecutionClient: toolExecution,
     modelRunner: {
-      async *stream() {
+      async *stream(input) {
+        void input.model;
         throw new Error("model runner should not be invoked in scripted mode");
       },
     },

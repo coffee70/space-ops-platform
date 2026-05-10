@@ -1,3 +1,6 @@
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
 import type {
   ContextPacketResponse,
   ContextRetrievalClient,
@@ -11,12 +14,37 @@ import type {
   ModelStreamPart,
   PersistedEvent,
   RawEventFact,
+  RetrievalPlan,
+  RuntimeConfig,
   ToolDefinition,
   ToolExecutionClient,
   ToolExecutionResponse,
   ToolRegistryClient,
   TraceEnvelope,
 } from "../src/types.js";
+
+const SERVICE_ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
+
+export function baseRuntimeConfig(overrides: Partial<RuntimeConfig> = {}): RuntimeConfig {
+  return {
+    port: 8080,
+    databaseUrl: "postgres://example",
+    controlPlaneUrl: "http://localhost:8100",
+    openAiApiKey: null,
+    openAiBaseUrl: null,
+    modelId: "gpt-4o-mini",
+    maxSteps: 5,
+    requestTimeoutMs: 1000,
+    scriptedMode: null,
+    allowMissingKeyFallback: true,
+    nodeEnv: "test",
+    modelsConfigPath: path.join(SERVICE_ROOT, "config", "models.local.yaml.example"),
+    openRouterApiKey: null,
+    openRouterBaseUrl: null,
+    modelMetadataCacheTtlSeconds: null,
+    ...overrides,
+  };
+}
 
 export class MemoryConversationStore implements ConversationStore {
   conversations = new Map<string, ConversationDetail>();
@@ -91,6 +119,7 @@ export class FakeContextClient implements ContextRetrievalClient {
     mission_id?: string | null;
     vehicle_id?: string | null;
     execution_mode: ExecutionMode;
+    retrieval_plan: RetrievalPlan;
   }): Promise<ContextPacketResponse> {
     return {
       conversation_id: input.trace.conversation_id,
@@ -185,7 +214,8 @@ export function parseNdjson(body: string): Array<Record<string, unknown>> {
 
 export function createStaticModelRunner(parts: Array<ModelStreamPart>): ModelRunner {
   return {
-    async *stream() {
+    async *stream(input) {
+      void input.model;
       for (const part of parts) {
         yield part;
       }

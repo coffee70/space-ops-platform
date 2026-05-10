@@ -13,6 +13,7 @@ import type {
   ToolExecutionResponse,
 } from "../src/types.js";
 import {
+  baseRuntimeConfig,
   contextResolvedEvent,
   FakeContextClient,
   FakeToolExecutionClient,
@@ -130,10 +131,10 @@ class StaticRegistryClient implements ChangeSummaryRegistryClient {
 }
 
 function modelRunnerWithTools(): ModelRunner {
-  // The fake model deterministically issues three tool calls in order, mirroring
-  // what a real LLM would request when previewing a scoped change.
   return {
-    async *stream({ tools }: { tools: Record<string, { execute?: (args: unknown, options: { toolCallId: string }) => Promise<unknown> }> }): AsyncIterable<ModelStreamPart> {
+    async *stream(input): AsyncIterable<ModelStreamPart> {
+      void input.model;
+      const { tools } = input;
       yield { type: "text-delta", textDelta: "Preparing preview..." };
       const branchTool = tools.create_working_branch;
       const writeTool = tools.write_source_file;
@@ -193,18 +194,12 @@ test("real LLM-driven tool flow emits change.summary with structured base_commit
   });
   const toolExecution = new FakeToolExecutionClient((input) => toolExecutionResponse(input.tool_name, input.trace));
   const app = createApp({
-    config: {
-      port: 8080,
-      databaseUrl: "postgres://example",
-      controlPlaneUrl: "http://localhost:8100",
+    config: baseRuntimeConfig({
       openAiApiKey: "test-key",
-      openAiBaseUrl: null,
-      modelId: "gpt-4o-mini",
       maxSteps: 8,
       requestTimeoutMs: 1000,
-      scriptedMode: null,
       allowMissingKeyFallback: false,
-    },
+    }),
     store,
     contextClient: new FakeContextClient([contextResolvedEvent()]),
     toolRegistryClient: new FakeToolRegistryClient(REAL_TOOL_DEFINITIONS),

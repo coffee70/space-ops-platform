@@ -1,6 +1,7 @@
 import { serve } from "@hono/node-server";
 import { Hono } from "hono";
 
+import { ModelCatalogService } from "./ai/model-catalog.js";
 import { createModelRunner } from "./ai/model.js";
 import { HttpContextRetrievalClient } from "./clients/context-retrieval.js";
 import { HttpToolExecutionClient } from "./clients/tool-execution.js";
@@ -9,6 +10,7 @@ import { loadConfig } from "./config.js";
 import { PgConversationStore } from "./db/conversations.js";
 import { registerChatRoutes } from "./routes/chat.js";
 import { registerConversationRoutes } from "./routes/conversations.js";
+import { registerModelRoutes } from "./routes/models.js";
 import type { RunDependencies } from "./types.js";
 
 export function createApp(overrides?: Partial<RunDependencies>): Hono {
@@ -21,6 +23,7 @@ export function createApp(overrides?: Partial<RunDependencies>): Hono {
     toolRegistryClient: overrides?.toolRegistryClient ?? new HttpToolRegistryClient(config),
     toolExecutionClient: overrides?.toolExecutionClient ?? new HttpToolExecutionClient(config),
     modelRunner: overrides?.modelRunner ?? createModelRunner(config),
+    modelCatalog: overrides?.modelCatalog ?? new ModelCatalogService(config),
     now: overrides?.now ?? (() => new Date()),
     createId: overrides?.createId ?? (() => crypto.randomUUID()),
     changeSummaryRegistryClient: overrides?.changeSummaryRegistryClient,
@@ -31,6 +34,7 @@ export function createApp(overrides?: Partial<RunDependencies>): Hono {
   app.get("/health", (c) => c.json({ status: "ok" }));
 
   registerConversationRoutes(app, dependencies);
+  registerModelRoutes(app, dependencies);
   registerChatRoutes(app, dependencies);
 
   return app;

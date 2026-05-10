@@ -1,0 +1,25 @@
+version: 1
+
+defaults:
+  chatModel: m1
+  codingModel: m1
+  fastModel: m1
+  restrictedModel: m1
+
+providers:
+  openai-main:
+    type: openai
+    displayName: OpenAI
+    apiKeyEnv: OPENAI_API_KEY
+
+models:
+  - id: m1
+    providerRef: openai-main
+    providerModelId: gpt-4o-mini
+    enabled: true
+    defaultFor: [chat]
+    governance:
+      allowedModes: [read_only, suggest, execute]
+      dataBoundary: external_api
+    metadataOverrides:
+      display_name_typo: "should fail validation"

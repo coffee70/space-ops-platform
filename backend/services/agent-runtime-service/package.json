@@ -9,11 +9,14 @@
     "test": "tsx --test test/*.test.ts"
   },
   "dependencies": {
+    "@ai-sdk/anthropic": "^2.0.0",
     "@ai-sdk/openai": "^2.0.0",
+    "@ai-sdk/openai-compatible": "^1.0.0",
     "@hono/node-server": "^1.13.7",
     "ai": "^5.0.0",
     "hono": "^4.6.15",
     "pg": "^8.13.1",
+    "yaml": "^2.6.0",
     "zod": "^3.23.8"
   },
   "devDependencies": {

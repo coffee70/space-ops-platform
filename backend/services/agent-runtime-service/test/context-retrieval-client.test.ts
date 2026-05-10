@@ -2,20 +2,10 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { HttpContextRetrievalClient } from "../src/clients/context-retrieval.js";
+import { baseRuntimeConfig } from "./helpers.js";
 
 test("context retrieval client posts to /packet with trace headers and retrieval plan", async () => {
-  const client = new HttpContextRetrievalClient({
-    port: 8080,
-    databaseUrl: "postgres://example",
-    controlPlaneUrl: "http://localhost:8100",
-    openAiApiKey: null,
-    openAiBaseUrl: null,
-    modelId: "gpt-4o-mini",
-    maxSteps: 3,
-    requestTimeoutMs: 1000,
-    scriptedMode: null,
-    allowMissingKeyFallback: false,
-  });
+  const client = new HttpContextRetrievalClient(baseRuntimeConfig({ allowMissingKeyFallback: false }));
 
   const fetchCalls: Array<{ url: string; init?: RequestInit }> = [];
   const originalFetch = globalThis.fetch;

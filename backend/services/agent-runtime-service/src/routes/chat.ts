@@ -2,6 +2,7 @@ import type { Hono } from "hono";
 import { z } from "zod";
 
 import { buildSystemPrompt } from "../ai/prompts.js";
+import { ModelSelectionError } from "../ai/model-errors.js";
 import { createToolSet, filterToolDefinitionsForExecutionMode } from "../ai/tools.js";
 import { ChangeSummaryAggregator } from "../change-summary.js";
 import { HttpChangeSummaryRegistryClient } from "../clients/registry-units.js";
@@ -17,6 +18,7 @@ const chatRequestSchema = z.object({
   execution_mode: z.enum(["read_only", "suggest", "execute", "governed_execute"]).optional(),
   mission_id: z.string().trim().min(1).optional().nullable(),
   vehicle_id: z.string().trim().min(1).optional().nullable(),
+  model_id: z.string().trim().min(1).optional().nullable(),
   client_context: z
     .object({
       current_application_id: z.string().trim().min(1).optional(),
@@ -133,6 +135,7 @@ export function registerChatRoutes(app: Hono, dependencies: RunDependencies): vo
       latestUserMessage: latestMessage.content.trim(),
       requestMessages: payload.messages,
       trace,
+      modelId: payload.model_id,
     });
 
     return stream.response;
@@ -149,6 +152,7 @@ async function orchestrateChat(input: {
   latestUserMessage: string;
   requestMessages: ChatInputMessage[];
   trace: { conversation_id: string; agent_run_id: string; request_id: string };
+  modelId: string | null | undefined;
 }): Promise<void> {
   const { dependencies, stream } = input;
 
@@ -246,9 +250,28 @@ async function orchestrateChat(input: {
       return;
     }
 
-    if (!dependencies.config.openAiApiKey) {
+    let selection;
+    try {
+      selection = await dependencies.modelCatalog.resolveForChat(input.modelId, input.executionMode);
+    } catch (error) {
+      if (error instanceof ModelSelectionError) {
+        await stream.fail(error);
+        return;
+      }
+      throw error;
+    }
+
+    const requiresStrictApiKey =
+      selection.runtime.providerType === "openai" || selection.runtime.providerType === "anthropic";
+
+    if (requiresStrictApiKey && !selection.runtime.apiKey) {
       if (!dependencies.config.allowMissingKeyFallback) {
-        throw new Error("Model API key is not configured and deterministic no-LLM mode is not enabled.");
+        await stream.fail(
+          new Error(
+            `Model API key is not configured for provider ${selection.option.provider} and deterministic no-LLM mode is not enabled.`,
+          ),
+        );
+        return;
       }
       await runFallback({
         stream,
@@ -270,12 +293,23 @@ async function orchestrateChat(input: {
       return;
     }
 
+    await stream.emitEvent("model.selected", {
+      model_id: selection.option.id,
+      provider_type: selection.option.providerType,
+      provider_model_id: selection.option.providerModelId,
+      model_name: selection.option.name,
+      provider: selection.option.provider,
+      data_boundary: selection.option.governance.dataBoundary,
+      capabilities: selection.option.capabilities,
+    });
+
     let assistantText = "";
     for await (const part of dependencies.modelRunner.stream({
       system: systemPrompt,
       messages: modelMessages,
       tools,
       maxSteps: dependencies.config.maxSteps,
+      model: selection.runtime,
     })) {
       if (part.type === "text-delta" && typeof part.textDelta === "string" && part.textDelta.length > 0) {
         assistantText += part.textDelta;
@@ -294,17 +328,22 @@ async function orchestrateChat(input: {
       metadata: {
         agent_run_id: input.trace.agent_run_id,
         request_id: input.trace.request_id,
+        model_id: selection.option.id,
+        provider_type: selection.option.providerType,
+        provider_model_id: selection.option.providerModelId,
+        provider: selection.option.provider,
+        data_boundary: selection.option.governance.dataBoundary,
       },
-      });
-      await stream.emitEvent("message.completed", {
-        message_id: assistantMessage.id,
-        content_preview: contentPreview(finalAssistantText),
-      });
-      await stream.emitEvent("run.completed", {
-        assistant_message_id: assistantMessage.id,
-        tool_call_count: toolCallCount,
-        context_packet_id: context.context_packet_id,
-      });
+    });
+    await stream.emitEvent("message.completed", {
+      message_id: assistantMessage.id,
+      content_preview: contentPreview(finalAssistantText),
+    });
+    await stream.emitEvent("run.completed", {
+      assistant_message_id: assistantMessage.id,
+      tool_call_count: toolCallCount,
+      context_packet_id: context.context_packet_id,
+    });
     await stream.close();
   } catch (error) {
     await stream.fail(error);

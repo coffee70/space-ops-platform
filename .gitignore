@@ -18,3 +18,5 @@ tmp/
 node_modules/
 backend/services/*/dist/
 backend/services/*/build/
+# Instantiation-specific model registry (copy from models.local.yaml.example — never commit).
+**/models.local.yaml

@@ -29,6 +29,15 @@ export const AGENT_EVENT_REQUIRED_PAYLOAD_FIELDS = {
   ],
   "message.delta": ["text_delta"],
   "message.completed": ["message_id", "content_preview"],
+  "model.selected": [
+    "model_id",
+    "provider_type",
+    "provider_model_id",
+    "model_name",
+    "provider",
+    "data_boundary",
+    "capabilities",
+  ],
   error: ["error_code", "message", "source"],
 } as const;
 
