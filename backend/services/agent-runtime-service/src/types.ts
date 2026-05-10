@@ -217,6 +217,7 @@ export type ModelProviderType =
   | "openai"
   | "anthropic"
   | "openai-compatible"
+  | "google"
   | "azure-openai"
   | "bedrock"
   | "vertex"

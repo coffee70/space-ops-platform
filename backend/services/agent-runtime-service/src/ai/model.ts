@@ -7,23 +7,32 @@ import type { ModelRunner, ModelStreamPart, ResolvedRuntimeModel, RuntimeConfig 
 
 function createLanguageModel(model: ResolvedRuntimeModel) {
   if (model.providerType === "openai") {
+    if (!model.apiKey) {
+      throw new Error(`Model ${model.id} is missing required API key for provider openai`);
+    }
     return createOpenAI({
-      apiKey: model.apiKey!,
+      apiKey: model.apiKey,
       baseURL: model.baseUrl ?? undefined,
     })(model.providerModelId);
   }
 
   if (model.providerType === "anthropic") {
+    if (!model.apiKey) {
+      throw new Error(`Model ${model.id} is missing required API key for provider anthropic`);
+    }
     return createAnthropic({
-      apiKey: model.apiKey!,
+      apiKey: model.apiKey,
     })(model.providerModelId);
   }
 
   if (model.providerType === "openai-compatible") {
+    if (!model.baseUrl) {
+      throw new Error(`Model ${model.id} is missing required baseUrl for OpenAI-compatible provider`);
+    }
     return createOpenAICompatible({
       name: model.id,
       apiKey: model.apiKey ?? "local",
-      baseURL: model.baseUrl!,
+      baseURL: model.baseUrl,
     })(model.providerModelId);
   }
 
@@ -34,16 +43,6 @@ export function createModelRunner(_config: RuntimeConfig): ModelRunner {
   return {
     async *stream(input): AsyncIterable<ModelStreamPart> {
       const model = input.model;
-
-      if (model.providerType === "openai" || model.providerType === "anthropic") {
-        if (!model.apiKey) {
-          return;
-        }
-      }
-
-      if (model.providerType === "openai-compatible" && !model.baseUrl) {
-        return;
-      }
 
       const languageModel = createLanguageModel(model);
 

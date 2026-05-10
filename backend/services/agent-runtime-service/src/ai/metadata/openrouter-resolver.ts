@@ -1,6 +1,8 @@
 import type { LoadedModelRegistry } from "../model-registry-config.js";
 import type { ModelCapability, ModelMetadata, ModelRegistryEntry, ModelRegistryProvider } from "../../types.js";
 
+const OPENROUTER_FETCH_TIMEOUT_MS = 5000;
+
 type OpenRouterModel = {
   id: string;
   name?: string;
@@ -33,7 +35,18 @@ type CacheEntry = {
   modelsById: Map<string, OpenRouterModel>;
 };
 
-let cache: CacheEntry | null = null;
+/** Keyed by resolver endpoint + auth presence (never stores secrets). */
+const cacheByKey = new Map<string, CacheEntry>();
+
+/** Clears OpenRouter fetch caches (for isolated tests). */
+export function resetOpenRouterResolverCacheForTests(): void {
+  cacheByKey.clear();
+}
+
+export function buildOpenRouterCacheKey(baseUrl: string, hasAuth: boolean): string {
+  const normalized = baseUrl.replace(/\/$/, "");
+  return `${normalized}|auth=${hasAuth}|output=text`;
+}
 
 function ttlMs(registry: LoadedModelRegistry, runtimeTtlSeconds: number | null): number {
   const fromRegistry = registry.metadataResolvers?.openrouter?.cacheTtlSeconds;
@@ -52,37 +65,60 @@ export async function ensureOpenRouterCatalog(
 
   const now = Date.now();
   const ttl = ttlMs(registry, runtime.modelMetadataCacheTtlSeconds);
-  if (cache && now - cache.fetchedAt < ttl) {
-    return { modelsById: cache.modelsById, cached: true, updatedAt: new Date(cache.fetchedAt).toISOString() };
-  }
 
   const apiKey = runtime.openRouterApiKey ?? resolveProcessEnvKey(openrouter.apiKeyEnv);
   const baseUrl =
     runtime.openRouterBaseUrl?.trim() ||
     openrouter.baseUrl.trim();
 
+  const cacheKey = buildOpenRouterCacheKey(baseUrl, Boolean(apiKey));
+  const cachedEntry = cacheByKey.get(cacheKey);
+  if (cachedEntry && now - cachedEntry.fetchedAt < ttl) {
+    return { modelsById: cachedEntry.modelsById, cached: true, updatedAt: new Date(cachedEntry.fetchedAt).toISOString() };
+  }
+
   const headers: Record<string, string> = {};
   if (apiKey) {
     headers.Authorization = `Bearer ${apiKey}`;
   } else if (!openrouter.allowUnauthenticated) {
-    return { modelsById: cache?.modelsById ?? new Map(), cached: Boolean(cache), updatedAt: new Date(cache?.fetchedAt ?? 0).toISOString() };
+    const stale = cacheByKey.get(cacheKey);
+    return {
+      modelsById: stale?.modelsById ?? new Map(),
+      cached: Boolean(stale),
+      updatedAt: new Date(stale?.fetchedAt ?? 0).toISOString(),
+    };
   }
 
+  const url = `${baseUrl.replace(/\/$/, "")}?output_modalities=text`;
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), OPENROUTER_FETCH_TIMEOUT_MS);
+
   try {
-    const url = `${baseUrl.replace(/\/$/, "")}?output_modalities=text`;
-    const response = await fetch(url, { headers });
+    const response = await fetch(url, { headers, signal: controller.signal });
     if (!response.ok) {
-      return { modelsById: cache?.modelsById ?? new Map(), cached: Boolean(cache), updatedAt: new Date(cache?.fetchedAt ?? 0).toISOString() };
+      const stale = cacheByKey.get(cacheKey);
+      return {
+        modelsById: stale?.modelsById ?? new Map(),
+        cached: Boolean(stale),
+        updatedAt: new Date(stale?.fetchedAt ?? 0).toISOString(),
+      };
     }
     const body = (await response.json()) as { data?: OpenRouterModel[] };
     const modelsById = new Map<string, OpenRouterModel>();
     for (const model of body.data ?? []) {
       modelsById.set(model.id, model);
     }
-    cache = { fetchedAt: now, modelsById };
+    cacheByKey.set(cacheKey, { fetchedAt: now, modelsById });
     return { modelsById, cached: false, updatedAt: new Date(now).toISOString() };
   } catch {
-    return { modelsById: cache?.modelsById ?? new Map(), cached: Boolean(cache), updatedAt: new Date(cache?.fetchedAt ?? 0).toISOString() };
+    const stale = cacheByKey.get(cacheKey);
+    return {
+      modelsById: stale?.modelsById ?? new Map(),
+      cached: Boolean(stale),
+      updatedAt: new Date(stale?.fetchedAt ?? 0).toISOString(),
+    };
+  } finally {
+    clearTimeout(timeoutId);
   }
 }
 

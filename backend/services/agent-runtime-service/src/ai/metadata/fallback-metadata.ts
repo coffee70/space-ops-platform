@@ -7,7 +7,7 @@ export function fallbackMetadataForEntry(input: { entry: ModelRegistryEntry; pro
   const pm = entry.providerModelId;
 
   if (provider.type === "openai" && GPT5_FAMILY.test(pm)) {
-    const suffix = pm.match(GPT5_FAMILY)?.[2] ?? "";
+    const suffix = pm.match(GPT5_FAMILY)?.[3] ?? "";
     let qualityTier: ModelMetadata["qualityTier"] = "frontier";
     let reasoningTier: ModelMetadata["reasoningTier"] = "strong";
     let speedTier: ModelMetadata["speedTier"] = "balanced";

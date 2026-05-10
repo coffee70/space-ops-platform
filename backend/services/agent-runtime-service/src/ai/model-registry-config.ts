@@ -14,6 +14,7 @@ const providerTypeSchema = z.enum([
   "openai",
   "anthropic",
   "openai-compatible",
+  "google",
   "azure-openai",
   "bedrock",
   "vertex",
@@ -48,7 +49,7 @@ const metadataOverridesSchema = z
     reasoningTier: z.enum(["none", "light", "strong", "unknown"]).optional(),
     recommendedFor: z.array(z.string()).optional(),
   })
-  .passthrough();
+  .strict();
 
 const modelEntrySchema = z.object({
   id: z.string().min(1),

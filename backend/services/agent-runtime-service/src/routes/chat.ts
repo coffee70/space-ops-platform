@@ -328,6 +328,11 @@ async function orchestrateChat(input: {
       metadata: {
         agent_run_id: input.trace.agent_run_id,
         request_id: input.trace.request_id,
+        model_id: selection.option.id,
+        provider_type: selection.option.providerType,
+        provider_model_id: selection.option.providerModelId,
+        provider: selection.option.provider,
+        data_boundary: selection.option.governance.dataBoundary,
       },
     });
     await stream.emitEvent("message.completed", {

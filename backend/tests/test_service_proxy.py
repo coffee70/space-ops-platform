@@ -179,7 +179,7 @@ def test_proxy_request_streams_upstream_body(monkeypatch) -> None:
 def test_gateway_routes_proxy_expected_service_paths(monkeypatch) -> None:
     calls: list[tuple[str, str]] = []
 
-    async def fake_proxy_request(service_slug: str, request: Request, *, path: str = ""):
+    async def fake_proxy_request(service_slug: str, request: Request, *, path: str = "", **_: object):
         calls.append((service_slug, path))
         return service_proxy.Response(status_code=200, content=b"ok", media_type="text/plain")
 

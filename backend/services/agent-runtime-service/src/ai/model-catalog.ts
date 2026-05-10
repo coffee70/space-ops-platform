@@ -149,7 +149,7 @@ export class ModelCatalogService implements ModelCatalogPort {
       throw new ModelSelectionError("unknown_model", `Unknown model: ${resolvedId}`);
     }
 
-    const unsupported: ModelProviderType[] = ["azure-openai", "bedrock", "vertex", "vercel-gateway"];
+    const unsupported: ModelProviderType[] = ["google", "azure-openai", "bedrock", "vertex", "vercel-gateway"];
     if (unsupported.includes(provider.type)) {
       throw new ModelSelectionError("provider_not_implemented", `Provider type ${provider.type} is not implemented yet.`);
     }
