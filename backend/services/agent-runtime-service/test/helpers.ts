@@ -38,7 +38,7 @@ export function baseRuntimeConfig(overrides: Partial<RuntimeConfig> = {}): Runti
     scriptedMode: null,
     allowMissingKeyFallback: true,
     nodeEnv: "test",
-    modelsConfigPath: path.join(SERVICE_ROOT, "config", "models.local.yaml"),
+    modelsConfigPath: path.join(SERVICE_ROOT, "config", "models.local.yaml.example"),
     openRouterApiKey: null,
     openRouterBaseUrl: null,
     modelMetadataCacheTtlSeconds: null,

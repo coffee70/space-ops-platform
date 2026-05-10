@@ -1,3 +1,12 @@
+# Instantiation-specific model registry — copy to `models.local.yaml` (gitignored).
+#
+#   cp models.local.yaml.example models.local.yaml
+#
+# If `models.local.yaml` is missing, agent-runtime loads this file as the default.
+# API keys belong in environment variables (`OPENAI_API_KEY`, etc.) via `apiKeyEnv`.
+# Override path only when needed: AGENT_RUNTIME_MODELS_CONFIG_PATH=/abs/path/registry.yaml
+#
+
 version: 1
 
 defaults:

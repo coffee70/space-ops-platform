@@ -108,32 +108,52 @@ export type LoadedModelRegistry = {
   models: ModelRegistryEntry[];
 };
 
-function resolveBundledConfigPath(): string {
+function resolveRegistryConfigDir(): string {
   const here = path.dirname(fileURLToPath(import.meta.url));
-  return path.join(here, "..", "..", "config", "models.local.yaml");
+  return path.join(here, "..", "..", "config");
+}
+
+/** Bundled fallbacks: optional gitignored override, then committed example. */
+function bundledRegistryConfigCandidates(): string[] {
+  const dir = resolveRegistryConfigDir();
+  return [path.join(dir, "models.local.yaml"), path.join(dir, "models.local.yaml.example")];
+}
+
+function uniqueCandidatePaths(configuredPath: string | null | undefined): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  const push = (p: string) => {
+    const normalized = path.normalize(p);
+    if (seen.has(normalized)) return;
+    seen.add(normalized);
+    out.push(normalized);
+  };
+  const trimmed = configuredPath?.trim() ?? "";
+  if (trimmed) push(trimmed);
+  for (const bundled of bundledRegistryConfigCandidates()) {
+    push(bundled);
+  }
+  return out;
 }
 
 export function loadModelRegistryConfig(runtime: RuntimeConfig): LoadedModelRegistry {
-  const configuredPath = runtime.modelsConfigPath?.trim();
-  const bundledPath = resolveBundledConfigPath();
-  const candidatePaths = configuredPath ? [configuredPath, bundledPath] : [bundledPath];
+  const candidatePaths = uniqueCandidatePaths(runtime.modelsConfigPath);
 
   let rawYaml: string | null = null;
-  let usedPath: string | null = null;
   for (const candidate of candidatePaths) {
     if (candidate && existsSync(candidate)) {
       rawYaml = readFileSync(candidate, "utf8");
-      usedPath = candidate;
       break;
     }
   }
 
   if (!rawYaml) {
     const isProd = runtime.nodeEnv === "production";
+    const envHint = runtime.modelsConfigPath?.trim() ?? "<default bundled paths>";
     if (isProd) {
-      throw new Error(`Model registry config not found (AGENT_RUNTIME_MODELS_CONFIG_PATH=${configuredPath ?? "<unset>"}).`);
+      throw new Error(`Model registry config not found (AGENT_RUNTIME_MODELS_CONFIG_PATH=${envHint}). Tried: ${candidatePaths.join(", ")}`);
     }
-    throw new Error(`Model registry config not found. Tried: ${candidatePaths.filter(Boolean).join(", ")}`);
+    throw new Error(`Model registry config not found. Tried: ${candidatePaths.join(", ")}`);
   }
 
   const parsedUnknown = parse(rawYaml);

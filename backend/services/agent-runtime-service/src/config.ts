@@ -12,6 +12,7 @@ const emptyStringToUndefined = (value: unknown): unknown => {
   return value;
 };
 
+/** Prefer explicit path env; default filename is gitignored when copied from models.local.yaml.example. */
 function defaultModelsConfigPath(): string {
   const here = path.dirname(fileURLToPath(import.meta.url));
   return path.join(here, "..", "config", "models.local.yaml");
