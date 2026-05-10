@@ -2,16 +2,9 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { createApp } from "../src/server.js";
-import {
-  FakeContextClient,
-  FakeToolExecutionClient,
-  FakeToolRegistryClient,
-  MemoryConversationStore,
-  baseRuntimeConfig,
-  createStaticModelRunner,
-} from "./helpers.js";
+import { baseRuntimeConfig, FakeContextClient, FakeToolExecutionClient, FakeToolRegistryClient, MemoryConversationStore } from "./helpers.js";
 
-test("health endpoint returns ok", async () => {
+test("GET /models returns stack catalog metadata", async () => {
   const app = createApp({
     config: baseRuntimeConfig(),
     store: new MemoryConversationStore(),
@@ -26,10 +19,12 @@ test("health endpoint returns ok", async () => {
       output: {},
       raw_events: [],
     }),
-    modelRunner: createStaticModelRunner([]),
   });
 
-  const response = await app.request("/health");
+  const response = await app.request("/models");
   assert.equal(response.status, 200);
-  assert.deepEqual(await response.json(), { status: "ok" });
+  const body = (await response.json()) as { default_model_id: string; models: unknown[]; metadata: { registrySource: string } };
+  assert.equal(body.default_model_id, "openai-gpt-5-5");
+  assert.ok(Array.isArray(body.models) && body.models.length > 0);
+  assert.equal(body.metadata.registrySource, "config");
 });

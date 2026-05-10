@@ -199,6 +199,7 @@ def test_gateway_routes_proxy_expected_service_paths(monkeypatch) -> None:
     assert client.post("/intelligence/agent/chat", json=chat_body).status_code == 200
     assert client.get("/intelligence/agent/conversations").status_code == 200
     assert client.get("/intelligence/agent/health").status_code == 200
+    assert client.get("/intelligence/agent/models").status_code == 200
     assert client.post("/intelligence/context/packet", json={"agent_run_id": "a", "request_id": "r", "message": "m"}).status_code == 200
     assert client.get("/intelligence/documents").status_code == 200
     assert client.post("/intelligence/documents/search", json={"query": "q"}).status_code == 200
@@ -223,6 +224,7 @@ def test_gateway_routes_proxy_expected_service_paths(monkeypatch) -> None:
         ("agent-runtime-service", "chat"),
         ("agent-runtime-service", "conversations"),
         ("agent-runtime-service", "health"),
+        ("agent-runtime-service", "models"),
         ("context-retrieval-service", "packet"),
         ("document-knowledge-service", ""),
         ("document-knowledge-service", "search"),

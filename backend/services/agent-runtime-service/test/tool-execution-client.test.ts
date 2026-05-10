@@ -2,20 +2,10 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { HttpToolExecutionClient } from "../src/clients/tool-execution.js";
+import { baseRuntimeConfig } from "./helpers.js";
 
 test("tool execution client posts through tool-execution-service only", async () => {
-  const client = new HttpToolExecutionClient({
-    port: 8080,
-    databaseUrl: "postgres://example",
-    controlPlaneUrl: "http://localhost:8100",
-    openAiApiKey: null,
-    openAiBaseUrl: null,
-    modelId: "gpt-4o-mini",
-    maxSteps: 3,
-    requestTimeoutMs: 1000,
-    scriptedMode: null,
-    allowMissingKeyFallback: false,
-  });
+  const client = new HttpToolExecutionClient(baseRuntimeConfig({ allowMissingKeyFallback: false }));
 
   const calls: Array<{ url: string; init?: RequestInit }> = [];
   const originalFetch = globalThis.fetch;
@@ -65,18 +55,7 @@ test("tool execution client posts through tool-execution-service only", async ()
 });
 
 test("tool execution client forwards top-level confirmation token", async () => {
-  const client = new HttpToolExecutionClient({
-    port: 8080,
-    databaseUrl: "postgres://example",
-    controlPlaneUrl: "http://localhost:8100",
-    openAiApiKey: null,
-    openAiBaseUrl: null,
-    modelId: "gpt-4o-mini",
-    maxSteps: 3,
-    requestTimeoutMs: 1000,
-    scriptedMode: null,
-    allowMissingKeyFallback: false,
-  });
+  const client = new HttpToolExecutionClient(baseRuntimeConfig({ allowMissingKeyFallback: false }));
 
   const calls: Array<{ url: string; init?: RequestInit }> = [];
   const originalFetch = globalThis.fetch;

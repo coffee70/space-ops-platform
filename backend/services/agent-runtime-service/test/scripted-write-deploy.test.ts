@@ -3,7 +3,7 @@ import test from "node:test";
 
 import { createApp } from "../src/server.js";
 import type { ToolDefinition, ToolExecutionResponse } from "../src/types.js";
-import { contextResolvedEvent, FakeContextClient, FakeToolExecutionClient, FakeToolRegistryClient, MemoryConversationStore, parseNdjson } from "./helpers.js";
+import { baseRuntimeConfig, contextResolvedEvent, FakeContextClient, FakeToolExecutionClient, FakeToolRegistryClient, MemoryConversationStore, parseNdjson } from "./helpers.js";
 
 const WRITE_TOOL_DEFINITIONS: ToolDefinition[] = [
   "create_working_branch",
@@ -68,24 +68,18 @@ test("scripted_write_deploy uses execute-only tools through tool-execution in or
 
   const toolExecution = new FakeToolExecutionClient((input) => toolResponse(input.tool_name, input.trace));
   const app = createApp({
-    config: {
-      port: 8080,
-      databaseUrl: "postgres://example",
-      controlPlaneUrl: "http://localhost:8100",
-      openAiApiKey: null,
-      openAiBaseUrl: null,
-      modelId: "gpt-4o-mini",
+    config: baseRuntimeConfig({
       maxSteps: 3,
       requestTimeoutMs: 1000,
       scriptedMode: "scripted_write_deploy",
-      allowMissingKeyFallback: true,
-    },
+    }),
     store,
     contextClient: new FakeContextClient([contextResolvedEvent()]),
     toolRegistryClient: new FakeToolRegistryClient(WRITE_TOOL_DEFINITIONS),
     toolExecutionClient: toolExecution,
     modelRunner: {
-      async *stream() {
+      async *stream(input) {
+        void input.model;
         throw new Error("model runner should not be invoked in scripted mode");
       },
     },
@@ -139,24 +133,18 @@ test("scripted_write_deploy fails before mutation when execution mode is read_on
 
   const toolExecution = new FakeToolExecutionClient((input) => toolResponse(input.tool_name, input.trace));
   const app = createApp({
-    config: {
-      port: 8080,
-      databaseUrl: "postgres://example",
-      controlPlaneUrl: "http://localhost:8100",
-      openAiApiKey: null,
-      openAiBaseUrl: null,
-      modelId: "gpt-4o-mini",
+    config: baseRuntimeConfig({
       maxSteps: 3,
       requestTimeoutMs: 1000,
       scriptedMode: "scripted_write_deploy",
-      allowMissingKeyFallback: true,
-    },
+    }),
     store,
     contextClient: new FakeContextClient([contextResolvedEvent()]),
     toolRegistryClient: new FakeToolRegistryClient(WRITE_TOOL_DEFINITIONS),
     toolExecutionClient: toolExecution,
     modelRunner: {
-      async *stream() {
+      async *stream(input) {
+        void input.model;
         throw new Error("model runner should not be invoked in scripted mode");
       },
     },

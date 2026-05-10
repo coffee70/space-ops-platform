@@ -2,7 +2,14 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { createApp } from "../src/server.js";
-import { contextResolvedEvent, FakeContextClient, FakeToolExecutionClient, FakeToolRegistryClient, MemoryConversationStore } from "./helpers.js";
+import {
+  baseRuntimeConfig,
+  contextResolvedEvent,
+  FakeContextClient,
+  FakeToolExecutionClient,
+  FakeToolRegistryClient,
+  MemoryConversationStore,
+} from "./helpers.js";
 
 test("chat stream delivers message deltas before completion across multiple chunks", async () => {
   const store = new MemoryConversationStore();
@@ -12,18 +19,12 @@ test("chat stream delivers message deltas before completion across multiple chun
   });
 
   const app = createApp({
-    config: {
-      port: 8080,
-      databaseUrl: "postgres://example",
-      controlPlaneUrl: "http://localhost:8100",
+    config: baseRuntimeConfig({
       openAiApiKey: "test-key",
-      openAiBaseUrl: null,
-      modelId: "gpt-4o-mini",
       maxSteps: 3,
       requestTimeoutMs: 1000,
-      scriptedMode: null,
       allowMissingKeyFallback: false,
-    },
+    }),
     store,
     contextClient: new FakeContextClient([contextResolvedEvent()]),
     toolRegistryClient: new FakeToolRegistryClient([]),
@@ -37,7 +38,8 @@ test("chat stream delivers message deltas before completion across multiple chun
       raw_events: [],
     }),
     modelRunner: {
-      async *stream() {
+      async *stream(input) {
+        void input.model;
         yield { type: "text-delta", textDelta: "Hello" };
         await new Promise((resolve) => setTimeout(resolve, 10));
         yield { type: "text-delta", textDelta: " world" };

@@ -2,22 +2,18 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { createApp } from "../src/server.js";
-import { FakeContextClient, FakeToolExecutionClient, FakeToolRegistryClient, MemoryConversationStore, createStaticModelRunner } from "./helpers.js";
+import {
+  FakeContextClient,
+  FakeToolExecutionClient,
+  FakeToolRegistryClient,
+  MemoryConversationStore,
+  baseRuntimeConfig,
+  createStaticModelRunner,
+} from "./helpers.js";
 
 function createTestApp(store: MemoryConversationStore) {
   return createApp({
-    config: {
-      port: 8080,
-      databaseUrl: "postgres://example",
-      controlPlaneUrl: "http://localhost:8100",
-      openAiApiKey: null,
-      openAiBaseUrl: null,
-      modelId: "gpt-4o-mini",
-      maxSteps: 3,
-      requestTimeoutMs: 1000,
-      scriptedMode: null,
-      allowMissingKeyFallback: true,
-    },
+    config: baseRuntimeConfig({ maxSteps: 3 }),
     store,
     contextClient: new FakeContextClient(),
     toolRegistryClient: new FakeToolRegistryClient([]),

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { createApp } from "../src/server.js";
-import { contextResolvedEvent, FakeContextClient, FakeToolExecutionClient, FakeToolRegistryClient, MemoryConversationStore, parseNdjson } from "./helpers.js";
+import { baseRuntimeConfig, contextResolvedEvent, FakeContextClient, FakeToolExecutionClient, FakeToolRegistryClient, MemoryConversationStore, parseNdjson } from "./helpers.js";
 
 test("chat orchestration emits backend-owned run, context, tool, and completion events", async () => {
   const store = new MemoryConversationStore();
@@ -67,24 +67,19 @@ test("chat orchestration emits backend-owned run, context, tool, and completion 
   });
 
   const app = createApp({
-    config: {
-      port: 8080,
-      databaseUrl: "postgres://example",
-      controlPlaneUrl: "http://localhost:8100",
+    config: baseRuntimeConfig({
       openAiApiKey: "test-key",
-      openAiBaseUrl: null,
-      modelId: "gpt-4o-mini",
       maxSteps: 3,
       requestTimeoutMs: 1000,
-      scriptedMode: null,
       allowMissingKeyFallback: false,
-    },
+    }),
     store,
     contextClient: new FakeContextClient([contextResolvedEvent()]),
     toolRegistryClient: toolRegistry,
     toolExecutionClient: toolExecution,
     modelRunner: {
       async *stream(input) {
+        void input.model;
         const runtimeTool = input.tools.get_platform_service as {
           execute: (args: { service_slug: string }, options: { toolCallId: string; messages: [] }) => Promise<unknown>;
         };
@@ -117,19 +112,29 @@ test("chat orchestration emits backend-owned run, context, tool, and completion 
 
   assert.deepEqual(
     events.map((event) => event.event.event_type),
-    ["run.started", "context.requested", "context.resolved", "tool.started", "tool.completed", "message.delta", "message.completed", "run.completed"],
+    [
+      "run.started",
+      "context.requested",
+      "context.resolved",
+      "model.selected",
+      "tool.started",
+      "tool.completed",
+      "message.delta",
+      "message.completed",
+      "run.completed",
+    ],
   );
   assert.deepEqual(
     events.map((event) => event.event.agent_run_id),
-    ["agent-run-1", "agent-run-1", "agent-run-1", "agent-run-1", "agent-run-1", "agent-run-1", "agent-run-1", "agent-run-1"],
+    Array.from({ length: 9 }, () => "agent-run-1"),
   );
   assert.deepEqual(
     events.map((event) => event.event.request_id),
-    ["request-1", "request-1", "request-1", "request-1", "request-1", "request-1", "request-1", "request-1"],
+    Array.from({ length: 9 }, () => "request-1"),
   );
   assert.deepEqual(
     events.map((event) => event.event.sequence),
-    [1, 2, 3, 4, 5, 6, 7, 8],
+    [1, 2, 3, 4, 5, 6, 7, 8, 9],
   );
   const startedEvents = events.filter((chunk) => chunk.event.event_type === "tool.started");
   assert.equal(startedEvents.length, 1);
@@ -173,18 +178,10 @@ test("invalid downstream raw events become canonical error events", async () => 
   });
 
   const app = createApp({
-    config: {
-      port: 8080,
-      databaseUrl: "postgres://example",
-      controlPlaneUrl: "http://localhost:8100",
-      openAiApiKey: null,
-      openAiBaseUrl: null,
-      modelId: "gpt-4o-mini",
+    config: baseRuntimeConfig({
       maxSteps: 3,
       requestTimeoutMs: 1000,
-      scriptedMode: null,
-      allowMissingKeyFallback: true,
-    },
+    }),
     store,
     contextClient: new FakeContextClient([
       {
@@ -204,7 +201,8 @@ test("invalid downstream raw events become canonical error events", async () => 
       raw_events: [],
     }),
     modelRunner: {
-      async *stream() {
+      async *stream(input) {
+        void input.model;
         throw new Error("model runner should not be invoked in fallback mode");
       },
     },
@@ -238,18 +236,12 @@ test("missing execution mode preserves persisted conversation mode for prompt co
   let observedSystemPrompt = "";
 
   const app = createApp({
-    config: {
-      port: 8080,
-      databaseUrl: "postgres://example",
-      controlPlaneUrl: "http://localhost:8100",
+    config: baseRuntimeConfig({
       openAiApiKey: "test-key",
-      openAiBaseUrl: null,
-      modelId: "gpt-4o-mini",
       maxSteps: 3,
       requestTimeoutMs: 1000,
-      scriptedMode: null,
       allowMissingKeyFallback: false,
-    },
+    }),
     store,
     contextClient: new FakeContextClient([contextResolvedEvent()]),
     toolRegistryClient: new FakeToolRegistryClient([]),
@@ -264,6 +256,7 @@ test("missing execution mode preserves persisted conversation mode for prompt co
     }),
     modelRunner: {
       async *stream(input) {
+        void input.model;
         observedSystemPrompt = input.system;
         yield { type: "text-delta", textDelta: "read_only enforced" };
         yield { type: "finish", finishReason: "stop" };
@@ -294,18 +287,12 @@ test("explicit request execution mode overrides persisted conversation mode", as
   let observedSystemPrompt = "";
 
   const app = createApp({
-    config: {
-      port: 8080,
-      databaseUrl: "postgres://example",
-      controlPlaneUrl: "http://localhost:8100",
+    config: baseRuntimeConfig({
       openAiApiKey: "test-key",
-      openAiBaseUrl: null,
-      modelId: "gpt-4o-mini",
       maxSteps: 3,
       requestTimeoutMs: 1000,
-      scriptedMode: null,
       allowMissingKeyFallback: false,
-    },
+    }),
     store,
     contextClient: new FakeContextClient([contextResolvedEvent()]),
     toolRegistryClient: new FakeToolRegistryClient([]),
@@ -320,6 +307,7 @@ test("explicit request execution mode overrides persisted conversation mode", as
     }),
     modelRunner: {
       async *stream(input) {
+        void input.model;
         observedSystemPrompt = input.system;
         yield { type: "text-delta", textDelta: "suggest mode applied" };
         yield { type: "finish", finishReason: "stop" };
@@ -351,18 +339,12 @@ test("chat rejects unknown execution mode values", async () => {
   });
 
   const app = createApp({
-    config: {
-      port: 8080,
-      databaseUrl: "postgres://example",
-      controlPlaneUrl: "http://localhost:8100",
+    config: baseRuntimeConfig({
       openAiApiKey: "test-key",
-      openAiBaseUrl: null,
-      modelId: "gpt-4o-mini",
       maxSteps: 3,
       requestTimeoutMs: 1000,
-      scriptedMode: null,
       allowMissingKeyFallback: false,
-    },
+    }),
     store,
     contextClient: new FakeContextClient([contextResolvedEvent()]),
     toolRegistryClient: new FakeToolRegistryClient([]),
@@ -376,7 +358,8 @@ test("chat rejects unknown execution mode values", async () => {
       raw_events: [],
     }),
     modelRunner: {
-      async *stream() {
+      async *stream(input) {
+        void input.model;
         yield { type: "text-delta", textDelta: "should not run" };
         yield { type: "finish", finishReason: "stop" };
       },
