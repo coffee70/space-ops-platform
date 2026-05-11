@@ -8,6 +8,8 @@ from pathlib import Path
 from typing import Any
 
 import yaml
+import yaml.nodes
+from yaml.constructor import ConstructorError
 
 from app.models.schemas import (
     AiEngineerModelConfigFetchResponse,
@@ -18,6 +20,34 @@ from app.models.schemas import (
 )
 
 _ENV_VAR_NAME_PATTERN = re.compile(r"^[A-Z][A-Z0-9_]*$")
+# Provider/apiKeyEnv must reference env vars, not pasted secrets (OpenAI/Anthropic-style keys).
+_SK_LIKE_SECRET_PATTERN = re.compile(r"^sk-[a-zA-Z0-9_-]{8,}$")
+
+
+class _DuplicateKeySafeLoader(yaml.SafeLoader):
+    """Reject duplicate YAML mapping keys (safe_load would silently keep the last value)."""
+
+
+def _construct_duplicate_safe_mapping(loader: yaml.Loader, node: yaml.nodes.MappingNode, deep: bool = False) -> dict[str, Any]:
+    loader.flatten_mapping(node)
+    mapping: dict[str, Any] = {}
+    for key_node, value_node in node.value:
+        key = loader.construct_object(key_node, deep=deep)
+        if key in mapping:
+            raise ConstructorError(
+                "while constructing a mapping",
+                node.start_mark,
+                f"Duplicate key {key!r}",
+                key_node.start_mark,
+            )
+        mapping[key] = loader.construct_object(value_node, deep=deep)
+    return mapping
+
+
+_DuplicateKeySafeLoader.add_constructor(
+    yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG,
+    _construct_duplicate_safe_mapping,
+)
 _PROVIDER_TYPES = frozenset(
     {
         "openai",
@@ -73,8 +103,8 @@ def _loc_error(loc: list[str], message: str, *, type_name: str = "value_error") 
 
 def _load_yaml_object(content: str) -> tuple[dict[str, Any] | None, list[AiEngineerModelConfigValidationError]]:
     try:
-        parsed = yaml.safe_load(content)
-    except yaml.YAMLError as exc:
+        parsed = yaml.load(content, Loader=_DuplicateKeySafeLoader)
+    except (yaml.YAMLError, ConstructorError) as exc:
         return None, [_yaml_error(str(exc), type_name=exc.__class__.__name__)]
     if not isinstance(parsed, dict):
         return None, [_yaml_error("Top-level content must be an object", type_name="type_error.object")]
@@ -83,6 +113,14 @@ def _load_yaml_object(content: str) -> tuple[dict[str, Any] | None, list[AiEngin
 
 def _is_plausible_env_reference(name: str) -> bool:
     return bool(_ENV_VAR_NAME_PATTERN.fullmatch(name.strip()))
+
+
+def _looks_like_literal_api_key_value(name: str) -> bool:
+    """True if apiKeyEnv looks like an embedded provider secret rather than an env var name."""
+    s = name.strip()
+    if _SK_LIKE_SECRET_PATTERN.fullmatch(s):
+        return True
+    return False
 
 
 def _collect_env_references(payload: dict[str, Any]) -> list[str]:
@@ -189,8 +227,14 @@ def _validate_model_registry_payload(payload: dict[str, Any]) -> tuple[AiEnginee
                                 type_name="value_error.pattern",
                             )
                         )
-                    if name.lower().startswith("sk-"):
-                        warnings.append(f"Provider {pid}: apiKeyEnv looks like a secret literal; use an env var name instead.")
+                    elif _looks_like_literal_api_key_value(name):
+                        errors.append(
+                            _loc_error(
+                                ["providers", str(pid), "apiKeyEnv"],
+                                "apiKeyEnv must be an environment variable name, not a pasted API key (never store secrets in YAML)",
+                                type_name="value_error.literal_secret",
+                            )
+                        )
 
     models_raw = payload.get("models")
     if not isinstance(models_raw, list) or len(models_raw) == 0:
@@ -387,6 +431,14 @@ def _validate_model_registry_payload(payload: dict[str, Any]) -> tuple[AiEnginee
                                     ["metadataResolvers", "openrouter", "apiKeyEnv"],
                                     "apiKeyEnv should look like an environment variable name",
                                     type_name="value_error.pattern",
+                                )
+                            )
+                        elif _looks_like_literal_api_key_value(ake):
+                            errors.append(
+                                _loc_error(
+                                    ["metadataResolvers", "openrouter", "apiKeyEnv"],
+                                    "apiKeyEnv must name an environment variable, not a pasted API key",
+                                    type_name="value_error.literal_secret",
                                 )
                             )
                     if "cacheTtlSeconds" in or_conf and (
