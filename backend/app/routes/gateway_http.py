@@ -55,7 +55,7 @@ async def proxy_vehicle_configs(request: Request, path: str = ""):
 @router.api_route("/intelligence/agent/model-config/{path:path}", methods=["GET", "PUT", "POST"])
 async def proxy_model_config_service(request: Request, path: str = ""):
     suffix = f"model-config/{path}".rstrip("/") if path else "model-config"
-    return await proxy_request("model-config-service", request, path=suffix)
+    return await proxy_request("model-registry-service", request, path=suffix)
 
 
 @router.api_route("/simulator/{path:path}", methods=["GET", "POST"])

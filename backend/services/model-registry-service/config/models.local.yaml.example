@@ -1,0 +1,18 @@
+version: 1
+defaults:
+  chatModel: m1
+  codingModel: m1
+  fastModel: m1
+  restrictedModel: m1
+providers:
+  p1:
+    type: openai
+    displayName: OpenAI
+    apiKeyEnv: OPENAI_API_KEY
+models:
+  - id: m1
+    providerRef: p1
+    providerModelId: gpt-4o-mini
+    enabled: true
+    defaultFor: [chat, coding, fast]
+
