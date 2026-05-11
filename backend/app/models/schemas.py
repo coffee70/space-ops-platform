@@ -757,18 +757,18 @@ class VehicleConfigSaveResponse(BaseModel):
     saved: bool = True
 
 
-# --- AI Engineer model registry (models.local.yaml) ---
+# --- Model config (models.local.yaml) admin API ---
 
 
-class AiEngineerModelConfigValidationError(BaseModel):
-    """Structured validation error for AI Engineer model config APIs."""
+class ModelConfigValidationError(BaseModel):
+    """Structured validation error for model-config APIs (aligned with agent-runtime)."""
 
     loc: list[str]
     message: str
     type: str
 
 
-class AiEngineerModelConfigParsedSummary(BaseModel):
+class ModelConfigParsedSummary(BaseModel):
     """Lightweight parsed summary for Control Panel badges."""
 
     provider_count: int = 0
@@ -780,41 +780,41 @@ class AiEngineerModelConfigParsedSummary(BaseModel):
     warnings: list[str] = Field(default_factory=list)
 
 
-class AiEngineerModelConfigFetchResponse(BaseModel):
+class ModelConfigFetchResponse(BaseModel):
     """Response for loading the active model registry YAML."""
 
     path: str
     content: str
     format: Literal["yaml"] = "yaml"
-    parsed: Optional[AiEngineerModelConfigParsedSummary] = None
-    validation_errors: list[AiEngineerModelConfigValidationError] = Field(default_factory=list)
+    parsed: Optional[ModelConfigParsedSummary] = None
+    validation_errors: list[ModelConfigValidationError] = Field(default_factory=list)
 
 
-class AiEngineerModelConfigValidationRequest(BaseModel):
+class ModelConfigValidationRequest(BaseModel):
     """Request body for POST /intelligence/agent/model-config/validate."""
 
     content: str
 
 
-class AiEngineerModelConfigValidationResponse(BaseModel):
+class ModelConfigValidationResponse(BaseModel):
     """Validation response for model registry content."""
 
     valid: bool
-    parsed: Optional[AiEngineerModelConfigParsedSummary] = None
-    errors: list[AiEngineerModelConfigValidationError] = Field(default_factory=list)
+    parsed: Optional[ModelConfigParsedSummary] = None
+    errors: list[ModelConfigValidationError] = Field(default_factory=list)
 
 
-class AiEngineerModelConfigSaveRequest(BaseModel):
+class ModelConfigSaveRequest(BaseModel):
     """Request body for PUT /intelligence/agent/model-config."""
 
     content: str
 
 
-class AiEngineerModelConfigSaveResponse(BaseModel):
+class ModelConfigSaveResponse(BaseModel):
     """Response for saving model registry file."""
 
     path: str
-    parsed: AiEngineerModelConfigParsedSummary
+    parsed: ModelConfigParsedSummary
     saved: bool = True
 
 

@@ -240,8 +240,8 @@ def test_gateway_routes_proxy_expected_service_paths(monkeypatch) -> None:
         ("tool-registry-service", "definitions/seed"),
         ("tool-registry-service", "definitions/get_platform_service"),
         ("tool-execution-service", "execute"),
-        ("ai-engineer-model-config-service", "model-config"),
-        ("ai-engineer-model-config-service", "model-config/validate"),
+        ("model-config-service", "model-config"),
+        ("model-config-service", "model-config/validate"),
     ]
 
 
