@@ -160,3 +160,63 @@ test("GET /models returns list payload", async () => {
   }
 });
 
+test("POST /models/resolve-chat resolves default chat model", async () => {
+  const { filePath, dir } = writeTmpYaml(MIN_VALID);
+  try {
+    const config = loadConfig({ MODEL_CONFIG_PATH: filePath });
+    const app = createApp({ config });
+    const response = await app.request("/models/resolve-chat", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ model_id: null, execution_mode: "read_only" }),
+    });
+    assert.equal(response.status, 200);
+    const body = (await response.json()) as { option: { id: string }; runtime: { providerModelId: string } };
+    assert.equal(body.option.id, "m1");
+    assert.equal(body.runtime.providerModelId, "gpt-4o-mini");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("PUT /model-config invalidates catalog for subsequent /models and /models/resolve-chat", async () => {
+  const { filePath, dir } = writeTmpYaml(MIN_VALID);
+  try {
+    const config = loadConfig({ MODEL_CONFIG_PATH: filePath });
+    const app = createApp({ config });
+
+    const before = await app.request("/models");
+    assert.equal(before.status, 200);
+    assert.equal(((await before.json()) as { default_model_id: string }).default_model_id, "m1");
+
+    const updated = MIN_VALID
+      .replaceAll("m1", "m2")
+      .replace("providerModelId: gpt-4o-mini", "providerModelId: gpt-5.1-mini");
+
+    const save = await app.request("/model-config", {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ content: updated }),
+    });
+    assert.equal(save.status, 200);
+
+    const after = await app.request("/models");
+    assert.equal(after.status, 200);
+    const afterBody = (await after.json()) as { default_model_id: string; models: Array<{ id: string; providerModelId: string }> };
+    assert.equal(afterBody.default_model_id, "m2");
+    assert.equal(afterBody.models[0].id, "m2");
+    assert.equal(afterBody.models[0].providerModelId, "gpt-5.1-mini");
+
+    const resolved = await app.request("/models/resolve-chat", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ execution_mode: "read_only" }),
+    });
+    assert.equal(resolved.status, 200);
+    const resolvedBody = (await resolved.json()) as { option: { id: string }; runtime: { providerModelId: string } };
+    assert.equal(resolvedBody.option.id, "m2");
+    assert.equal(resolvedBody.runtime.providerModelId, "gpt-5.1-mini");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

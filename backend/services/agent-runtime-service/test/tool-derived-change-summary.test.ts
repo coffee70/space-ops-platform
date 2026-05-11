@@ -16,6 +16,7 @@ import {
   baseRuntimeConfig,
   contextResolvedEvent,
   FakeContextClient,
+  FakeModelCatalog,
   FakeToolExecutionClient,
   FakeToolRegistryClient,
   MemoryConversationStore,
@@ -205,6 +206,7 @@ test("real LLM-driven tool flow emits change.summary with structured base_commit
     toolRegistryClient: new FakeToolRegistryClient(REAL_TOOL_DEFINITIONS),
     toolExecutionClient: toolExecution,
     modelRunner: modelRunnerWithTools(),
+    modelCatalog: new FakeModelCatalog(),
     changeSummaryRegistryClient: new StaticRegistryClient(),
   });
 

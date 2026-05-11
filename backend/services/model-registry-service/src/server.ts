@@ -6,6 +6,8 @@ import { readFileSync, writeFileSync, existsSync } from "node:fs";
 
 import { loadConfig } from "./config.js";
 import { ModelCatalogService } from "./ai/model-catalog.js";
+import { ModelSelectionError } from "./ai/model-errors.js";
+import { invalidateOpenRouterResolverCache } from "./ai/metadata/openrouter-resolver.js";
 import { validateModelRegistryConfigContent } from "./ai/model-registry-config.js";
 
 function normalizeLineEndings(content: string): string {
@@ -83,6 +85,7 @@ export function createApp(overrides?: { config?: RuntimeConfig }) {
     writeFileSync(configPath, normalized, "utf-8");
     // Invalidate in-memory catalog so the next /models call uses the updated file.
     catalog = null;
+    invalidateOpenRouterResolverCache();
 
     return c.json({
       path: configPath,
@@ -112,6 +115,9 @@ export function createApp(overrides?: { config?: RuntimeConfig }) {
       const resolved: ResolvedChatModel = await getCatalog().resolveForChat(modelId, executionMode);
       return c.json(resolved);
     } catch (err) {
+      if (err instanceof ModelSelectionError) {
+        return c.json({ detail: { message: err.message, code: err.code } }, 400);
+      }
       return c.json({ detail: { message: String(err) } }, 400);
     }
   });
@@ -124,4 +130,3 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   const app = createApp({ config });
   serve({ fetch: app.fetch, port: config.port });
 }
-

@@ -1,4 +1,5 @@
 import type { ExecutionMode, ListAiEngineerModelsResponse, ModelCatalogPort, ResolvedChatModel, RuntimeConfig } from "../types.js";
+import { ModelSelectionError, type ModelSelectionErrorCode } from "../ai/model-errors.js";
 
 function normalizeBaseUrl(baseUrl: string): string {
   return baseUrl.trim().replace(/\/$/, "");
@@ -10,8 +11,21 @@ async function jsonRequest<T>(url: string, init: RequestInit, timeoutMs: number)
   try {
     const response = await fetch(url, { ...init, signal: controller.signal });
     if (!response.ok) {
+      let message = `HTTP ${response.status}`;
+      let code: ModelSelectionErrorCode = "unknown_model";
       const text = await response.text().catch(() => "");
-      throw new Error(`HTTP ${response.status} ${text}`.trim());
+      try {
+        const body = JSON.parse(text) as { detail?: { message?: unknown; code?: unknown } | string };
+        if (typeof body.detail === "string") {
+          message = body.detail;
+        } else if (body.detail && typeof body.detail.message === "string") {
+          message = body.detail.message;
+          if (typeof body.detail.code === "string") code = body.detail.code as ModelSelectionErrorCode;
+        }
+      } catch {
+        if (text.trim().length > 0) message = `${message} ${text}`.trim();
+      }
+      throw new ModelSelectionError(code, message);
     }
     return (await response.json()) as T;
   } finally {
@@ -51,4 +65,3 @@ export class HttpModelRegistryClient implements ModelCatalogPort {
     );
   }
 }
-

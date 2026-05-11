@@ -757,67 +757,6 @@ class VehicleConfigSaveResponse(BaseModel):
     saved: bool = True
 
 
-# --- Model config (models.local.yaml) admin API ---
-
-
-class ModelConfigValidationError(BaseModel):
-    """Structured validation error for model-config APIs (aligned with agent-runtime)."""
-
-    loc: list[str]
-    message: str
-    type: str
-
-
-class ModelConfigParsedSummary(BaseModel):
-    """Lightweight parsed summary for Control Panel badges."""
-
-    provider_count: int = 0
-    model_count: int = 0
-    enabled_model_count: int = 0
-    default_model_id: Optional[str] = None
-    provider_types: list[str] = Field(default_factory=list)
-    missing_api_key_envs: list[str] = Field(default_factory=list)
-    warnings: list[str] = Field(default_factory=list)
-
-
-class ModelConfigFetchResponse(BaseModel):
-    """Response for loading the active model registry YAML."""
-
-    path: str
-    content: str
-    format: Literal["yaml"] = "yaml"
-    parsed: Optional[ModelConfigParsedSummary] = None
-    validation_errors: list[ModelConfigValidationError] = Field(default_factory=list)
-
-
-class ModelConfigValidationRequest(BaseModel):
-    """Request body for POST /intelligence/agent/model-config/validate."""
-
-    content: str
-
-
-class ModelConfigValidationResponse(BaseModel):
-    """Validation response for model registry content."""
-
-    valid: bool
-    parsed: Optional[ModelConfigParsedSummary] = None
-    errors: list[ModelConfigValidationError] = Field(default_factory=list)
-
-
-class ModelConfigSaveRequest(BaseModel):
-    """Request body for PUT /intelligence/agent/model-config."""
-
-    content: str
-
-
-class ModelConfigSaveResponse(BaseModel):
-    """Response for saving model registry file."""
-
-    path: str
-    parsed: ModelConfigParsedSummary
-    saved: bool = True
-
-
 # --- Position mapping and samples ---
 class PositionChannelMappingSchema(BaseModel):
     """Per-source mapping from telemetry channels to position vectors."""

@@ -361,7 +361,7 @@ export type CompiledRegistryFail = {
   errors: ModelRegistryValidateConfigErrorItem[];
 };
 
-/** Shared validation path for file load + HTTP POST /models/validate-config. */
+/** Shared validation path for file load + HTTP POST /model-config/validate. */
 export function compileRegistryYamlContent(content: string): CompiledRegistryOk | CompiledRegistryFail {
   const trimmed = typeof content === "string" ? content : "";
 
@@ -429,7 +429,7 @@ export function loadModelRegistryConfig(runtime: RuntimeConfig): LoadedModelRegi
     const isProd = runtime.nodeEnv === "production";
     const envHint = runtime.modelsConfigPath?.trim() ?? "<default bundled paths>";
     if (isProd) {
-      throw new Error(`Model registry config not found (AGENT_RUNTIME_MODELS_CONFIG_PATH=${envHint}). Tried: ${candidatePaths.join(", ")}`);
+      throw new Error(`Model registry config not found (MODEL_CONFIG_PATH=${envHint}). Tried: ${candidatePaths.join(", ")}`);
     }
     throw new Error(`Model registry config not found. Tried: ${candidatePaths.join(", ")}`);
   }

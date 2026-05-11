@@ -1,7 +1,6 @@
 import { serve } from "@hono/node-server";
 import { Hono } from "hono";
 
-import { ModelCatalogService } from "./ai/model-catalog.js";
 import { createModelRunner } from "./ai/model.js";
 import { HttpModelRegistryClient } from "./clients/model-registry.js";
 import { HttpContextRetrievalClient } from "./clients/context-retrieval.js";
@@ -24,9 +23,7 @@ export function createApp(overrides?: Partial<RunDependencies>): Hono {
     toolRegistryClient: overrides?.toolRegistryClient ?? new HttpToolRegistryClient(config),
     toolExecutionClient: overrides?.toolExecutionClient ?? new HttpToolExecutionClient(config),
     modelRunner: overrides?.modelRunner ?? createModelRunner(config),
-    modelCatalog:
-      overrides?.modelCatalog ??
-      (config.modelRegistryBaseUrl ? new HttpModelRegistryClient(config) : new ModelCatalogService(config)),
+    modelCatalog: overrides?.modelCatalog ?? new HttpModelRegistryClient(config),
     now: overrides?.now ?? (() => new Date()),
     createId: overrides?.createId ?? (() => crypto.randomUUID()),
     changeSummaryRegistryClient: overrides?.changeSummaryRegistryClient,

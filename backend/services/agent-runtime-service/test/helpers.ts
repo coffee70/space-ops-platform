@@ -1,6 +1,3 @@
-import path from "node:path";
-import { fileURLToPath } from "node:url";
-
 import type {
   ContextPacketResponse,
   ContextRetrievalClient,
@@ -11,6 +8,10 @@ import type {
   ConversationStore,
   ExecutionMode,
   ModelRunner,
+  ModelCatalogPort,
+  AiEngineerModelOption,
+  ListAiEngineerModelsResponse,
+  ResolvedChatModel,
   ModelStreamPart,
   PersistedEvent,
   RawEventFact,
@@ -22,8 +23,6 @@ import type {
   ToolRegistryClient,
   TraceEnvelope,
 } from "../src/types.js";
-
-const SERVICE_ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
 
 export function baseRuntimeConfig(overrides: Partial<RuntimeConfig> = {}): RuntimeConfig {
   return {
@@ -38,13 +37,91 @@ export function baseRuntimeConfig(overrides: Partial<RuntimeConfig> = {}): Runti
     scriptedMode: null,
     allowMissingKeyFallback: true,
     nodeEnv: "test",
-    modelsConfigPath: path.join(SERVICE_ROOT, "config", "models.local.yaml.example"),
-    modelRegistryBaseUrl: null,
+    modelRegistryBaseUrl: "http://model-registry-service:8080",
     openRouterApiKey: null,
     openRouterBaseUrl: null,
     modelMetadataCacheTtlSeconds: null,
     ...overrides,
   };
+}
+
+export function modelOption(overrides: Partial<AiEngineerModelOption> = {}): AiEngineerModelOption {
+  return {
+    id: "openai-gpt-5-1-mini",
+    providerRef: "openai-main",
+    providerType: "openai",
+    providerModelId: "gpt-5.1-mini",
+    name: "GPT-5.1 Mini",
+    provider: "OpenAI",
+    description: null,
+    enabled: true,
+    isAvailable: true,
+    disabledReason: null,
+    isDefault: true,
+    defaultFor: ["chat", "fast"],
+    governance: {
+      allowedModes: ["read_only", "suggest", "execute"],
+      dataBoundary: "external_api",
+    },
+    contextWindow: null,
+    maxOutputTokens: null,
+    inputModalities: ["text"],
+    outputModalities: ["text"],
+    supportedParameters: [],
+    capabilities: ["text", "tool-use"],
+    pricing: {
+      inputPerMillionTokens: null,
+      outputPerMillionTokens: null,
+      currency: "USD",
+    },
+    qualityTier: "advanced",
+    costTier: "$",
+    speedTier: "fast",
+    reasoningTier: "light",
+    recommendedFor: ["fast-chat"],
+    metadataSources: ["test"],
+    ...overrides,
+  };
+}
+
+export class FakeModelCatalog implements ModelCatalogPort {
+  constructor(
+    private readonly response: ListAiEngineerModelsResponse = {
+      default_model_id: "openai-gpt-5-1-mini",
+      models: [modelOption()],
+      metadata: {
+        registrySource: "config",
+        metadataResolvers: ["test"],
+        cached: true,
+        updatedAt: new Date(0).toISOString(),
+      },
+    },
+    private readonly resolver: (modelId: string | null | undefined, executionMode: ExecutionMode) => Promise<ResolvedChatModel> | ResolvedChatModel = (
+      modelId,
+      _executionMode,
+    ) => {
+      const option = this.response.models.find((candidate) => candidate.id === (modelId ?? this.response.default_model_id));
+      if (!option) throw new Error(`unknown model: ${modelId ?? ""}`);
+      return {
+        option,
+        runtime: {
+          id: option.id,
+          providerType: option.providerType,
+          providerModelId: option.providerModelId,
+          apiKey: "test-key",
+          baseUrl: null,
+        },
+      };
+    },
+  ) {}
+
+  async listModelsResponse(): Promise<ListAiEngineerModelsResponse> {
+    return this.response;
+  }
+
+  async resolveForChat(modelId: string | null | undefined, executionMode: ExecutionMode): Promise<ResolvedChatModel> {
+    return this.resolver(modelId, executionMode);
+  }
 }
 
 export class MemoryConversationStore implements ConversationStore {

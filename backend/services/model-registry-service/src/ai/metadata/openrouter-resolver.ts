@@ -38,10 +38,12 @@ type CacheEntry = {
 /** Keyed by resolver endpoint + auth presence (never stores secrets). */
 const cacheByKey = new Map<string, CacheEntry>();
 
-/** Clears OpenRouter fetch caches (for isolated tests). */
-export function resetOpenRouterResolverCacheForTests(): void {
+/** Clears OpenRouter fetch caches after registry updates and for isolated tests. */
+export function invalidateOpenRouterResolverCache(): void {
   cacheByKey.clear();
 }
+
+export const resetOpenRouterResolverCacheForTests = invalidateOpenRouterResolverCache;
 
 export function buildOpenRouterCacheKey(baseUrl: string, hasAuth: boolean): string {
   const normalized = baseUrl.replace(/\/$/, "");

@@ -6,6 +6,7 @@ import {
   baseRuntimeConfig,
   contextResolvedEvent,
   FakeContextClient,
+  FakeModelCatalog,
   FakeToolExecutionClient,
   FakeToolRegistryClient,
   MemoryConversationStore,
@@ -47,6 +48,7 @@ test("chat stream delivers message deltas before completion across multiple chun
         yield { type: "finish", finishReason: "stop" };
       },
     },
+    modelCatalog: new FakeModelCatalog(),
   });
 
   const response = await app.request("/chat", {
