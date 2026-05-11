@@ -51,6 +51,13 @@ async def proxy_vehicle_configs(request: Request, path: str = ""):
     return await proxy_request("vehicle-config-service", request, path=f"vehicle-configs/{path}")
 
 
+@router.api_route("/intelligence/agent/model-config", methods=["GET", "PUT", "POST"])
+@router.api_route("/intelligence/agent/model-config/{path:path}", methods=["GET", "PUT", "POST"])
+async def proxy_ai_engineer_model_config(request: Request, path: str = ""):
+    suffix = f"model-config/{path}".rstrip("/") if path else "model-config"
+    return await proxy_request("ai-engineer-model-config-service", request, path=suffix)
+
+
 @router.api_route("/simulator/{path:path}", methods=["GET", "POST"])
 async def proxy_simulator(request: Request, path: str):
     return await proxy_request("simulator-control-service", request, path=f"simulator/{path}")

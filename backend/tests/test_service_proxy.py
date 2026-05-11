@@ -216,6 +216,8 @@ def test_gateway_routes_proxy_expected_service_paths(monkeypatch) -> None:
     assert client.post("/intelligence/tools/definitions/seed").status_code == 200
     assert client.get("/intelligence/tools/definitions/get_platform_service").status_code == 200
     assert client.post("/intelligence/tools/execute", json={}).status_code == 200
+    assert client.get("/intelligence/agent/model-config").status_code == 200
+    assert client.post("/intelligence/agent/model-config/validate", json={"content": "not: yaml"}).status_code == 200
 
     assert calls == [
         ("source-registry-service", "telemetry/sources"),
@@ -238,6 +240,8 @@ def test_gateway_routes_proxy_expected_service_paths(monkeypatch) -> None:
         ("tool-registry-service", "definitions/seed"),
         ("tool-registry-service", "definitions/get_platform_service"),
         ("tool-execution-service", "execute"),
+        ("ai-engineer-model-config-service", "model-config"),
+        ("ai-engineer-model-config-service", "model-config/validate"),
     ]
 
 
