@@ -171,7 +171,8 @@ models:
     assert any("duplicate key" in e.message.lower() for e in result.errors)
 
 
-def test_validate_rejects_sk_like_api_key_env() -> None:
+def test_validate_rejects_sk_like_api_key_env_with_literal_secret_error() -> None:
     bad = _MIN_VALID.replace("apiKeyEnv: OPENAI_API_KEY", "apiKeyEnv: sk-proj-invalidkeyvalue123456789")
     result = validate_model_registry_content(bad)
     assert result.valid is False
+    assert any(e.type == "value_error.literal_secret" for e in result.errors)

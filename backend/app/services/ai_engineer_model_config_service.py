@@ -219,20 +219,20 @@ def _validate_model_registry_payload(payload: dict[str, Any]) -> tuple[AiEnginee
                     )
                 else:
                     name = api_key_env.strip()
-                    if not _is_plausible_env_reference(name):
+                    if _looks_like_literal_api_key_value(name):
+                        errors.append(
+                            _loc_error(
+                                ["providers", str(pid), "apiKeyEnv"],
+                                "Do not paste provider API keys into YAML; set apiKeyEnv to an environment variable name (for example OPENAI_API_KEY)",
+                                type_name="value_error.literal_secret",
+                            )
+                        )
+                    elif not _is_plausible_env_reference(name):
                         errors.append(
                             _loc_error(
                                 ["providers", str(pid), "apiKeyEnv"],
                                 "apiKeyEnv should look like an environment variable name (e.g. OPENAI_API_KEY), not a secret literal",
                                 type_name="value_error.pattern",
-                            )
-                        )
-                    elif _looks_like_literal_api_key_value(name):
-                        errors.append(
-                            _loc_error(
-                                ["providers", str(pid), "apiKeyEnv"],
-                                "apiKeyEnv must be an environment variable name, not a pasted API key (never store secrets in YAML)",
-                                type_name="value_error.literal_secret",
                             )
                         )
 
@@ -425,20 +425,20 @@ def _validate_model_registry_payload(payload: dict[str, Any]) -> tuple[AiEnginee
                                     type_name="value_error",
                                 )
                             )
+                        elif _looks_like_literal_api_key_value(ake.strip()):
+                            errors.append(
+                                _loc_error(
+                                    ["metadataResolvers", "openrouter", "apiKeyEnv"],
+                                    "Do not paste provider API keys into YAML; set apiKeyEnv to an environment variable name",
+                                    type_name="value_error.literal_secret",
+                                )
+                            )
                         elif not _is_plausible_env_reference(ake.strip()):
                             errors.append(
                                 _loc_error(
                                     ["metadataResolvers", "openrouter", "apiKeyEnv"],
                                     "apiKeyEnv should look like an environment variable name",
                                     type_name="value_error.pattern",
-                                )
-                            )
-                        elif _looks_like_literal_api_key_value(ake):
-                            errors.append(
-                                _loc_error(
-                                    ["metadataResolvers", "openrouter", "apiKeyEnv"],
-                                    "apiKeyEnv must name an environment variable, not a pasted API key",
-                                    type_name="value_error.literal_secret",
                                 )
                             )
                     if "cacheTtlSeconds" in or_conf and (
