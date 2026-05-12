@@ -1,21 +1,19 @@
 import assert from "node:assert/strict";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
 import test from "node:test";
 
+import { ModelSelectionError } from "../src/ai/model-errors.js";
 import { createApp } from "../src/server.js";
 import {
   baseRuntimeConfig,
   contextResolvedEvent,
   FakeContextClient,
+  FakeModelCatalog,
   FakeToolExecutionClient,
   FakeToolRegistryClient,
   MemoryConversationStore,
+  modelOption,
   parseNdjson,
 } from "./helpers.js";
-
-const HERE = path.dirname(fileURLToPath(import.meta.url));
-const GOOGLE_REGISTRY_YAML = path.join(HERE, "fixtures", "models-google.yaml");
 
 test("chat rejects disabled registry model with run.failed", async () => {
   const store = new MemoryConversationStore();
@@ -47,6 +45,9 @@ test("chat rejects disabled registry model with run.failed", async () => {
         yield { type: "text-delta", textDelta: "should not run" };
       },
     },
+    modelCatalog: new FakeModelCatalog(undefined, () => {
+      throw new ModelSelectionError("model_disabled", "Model is disabled: anthropic-claude-sonnet-4-6");
+    }),
   });
 
   const response = await app.request("/chat", {
@@ -100,6 +101,28 @@ test("selected OpenAI model id is passed to model runner", async () => {
         yield { type: "finish", finishReason: "stop" };
       },
     },
+    modelCatalog: new FakeModelCatalog(
+      {
+        default_model_id: "openai-gpt-5-1-mini",
+        models: [modelOption({ id: "openai-gpt-5-1-mini", providerModelId: "gpt-5.1-mini" })],
+        metadata: {
+          registrySource: "config",
+          metadataResolvers: ["test"],
+          cached: true,
+          updatedAt: new Date(0).toISOString(),
+        },
+      },
+      () => ({
+        option: modelOption({ id: "openai-gpt-5-1-mini", providerModelId: "gpt-5.1-mini" }),
+        runtime: {
+          id: "openai-gpt-5-1-mini",
+          providerType: "openai",
+          providerModelId: "gpt-5.1-mini",
+          apiKey: "test-key",
+          baseUrl: null,
+        },
+      }),
+    ),
   });
 
   const response = await app.request("/chat", {
@@ -129,7 +152,6 @@ test("chat fails cleanly when selecting google provider model", async () => {
   const app = createApp({
     config: baseRuntimeConfig({
       openAiApiKey: "test-key",
-      modelsConfigPath: GOOGLE_REGISTRY_YAML,
       allowMissingKeyFallback: false,
     }),
     store,
@@ -149,6 +171,9 @@ test("chat fails cleanly when selecting google provider model", async () => {
         yield { type: "text-delta", textDelta: "should not run" };
       },
     },
+    modelCatalog: new FakeModelCatalog(undefined, () => {
+      throw new ModelSelectionError("provider_not_implemented", "Provider type google is not implemented yet.");
+    }),
   });
 
   const response = await app.request("/chat", {
@@ -200,6 +225,28 @@ test("assistant message metadata includes selected stack model fields", async ()
         yield { type: "finish", finishReason: "stop" };
       },
     },
+    modelCatalog: new FakeModelCatalog(
+      {
+        default_model_id: "openai-gpt-5-5",
+        models: [modelOption({ id: "openai-gpt-5-5", providerModelId: "gpt-5.5", name: "GPT-5.5" })],
+        metadata: {
+          registrySource: "config",
+          metadataResolvers: ["test"],
+          cached: true,
+          updatedAt: new Date(0).toISOString(),
+        },
+      },
+      () => ({
+        option: modelOption({ id: "openai-gpt-5-5", providerModelId: "gpt-5.5", name: "GPT-5.5" }),
+        runtime: {
+          id: "openai-gpt-5-5",
+          providerType: "openai",
+          providerModelId: "gpt-5.5",
+          apiKey: "test-key",
+          baseUrl: null,
+        },
+      }),
+    ),
   });
 
   const response = await app.request("/chat", {

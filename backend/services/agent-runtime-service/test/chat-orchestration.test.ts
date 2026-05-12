@@ -2,7 +2,16 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { createApp } from "../src/server.js";
-import { baseRuntimeConfig, contextResolvedEvent, FakeContextClient, FakeToolExecutionClient, FakeToolRegistryClient, MemoryConversationStore, parseNdjson } from "./helpers.js";
+import {
+  baseRuntimeConfig,
+  contextResolvedEvent,
+  FakeContextClient,
+  FakeModelCatalog,
+  FakeToolExecutionClient,
+  FakeToolRegistryClient,
+  MemoryConversationStore,
+  parseNdjson,
+} from "./helpers.js";
 
 test("chat orchestration emits backend-owned run, context, tool, and completion events", async () => {
   const store = new MemoryConversationStore();
@@ -88,6 +97,7 @@ test("chat orchestration emits backend-owned run, context, tool, and completion 
         yield { type: "finish", finishReason: "stop" };
       },
     },
+    modelCatalog: new FakeModelCatalog(),
     createId: (() => {
       const ids = ["agent-run-1", "request-1"];
       return () => ids.shift() ?? crypto.randomUUID();
@@ -206,6 +216,7 @@ test("invalid downstream raw events become canonical error events", async () => 
         throw new Error("model runner should not be invoked in fallback mode");
       },
     },
+    modelCatalog: new FakeModelCatalog(),
   });
 
   const response = await app.request("/chat", {
@@ -262,6 +273,7 @@ test("missing execution mode preserves persisted conversation mode for prompt co
         yield { type: "finish", finishReason: "stop" };
       },
     },
+    modelCatalog: new FakeModelCatalog(),
   });
 
   const response = await app.request("/chat", {
@@ -313,6 +325,7 @@ test("explicit request execution mode overrides persisted conversation mode", as
         yield { type: "finish", finishReason: "stop" };
       },
     },
+    modelCatalog: new FakeModelCatalog(),
   });
 
   const response = await app.request("/chat", {

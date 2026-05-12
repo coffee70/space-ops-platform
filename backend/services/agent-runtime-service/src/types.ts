@@ -364,7 +364,7 @@ export interface RuntimeConfig {
   scriptedMode: string | null;
   allowMissingKeyFallback: boolean;
   nodeEnv: string | undefined;
-  modelsConfigPath: string | null;
+  modelRegistryBaseUrl: string;
   openRouterApiKey: string | null;
   openRouterBaseUrl: string | null;
   modelMetadataCacheTtlSeconds: number | null;

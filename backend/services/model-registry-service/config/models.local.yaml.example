@@ -2,9 +2,9 @@
 #
 #   cp models.local.yaml.example models.local.yaml
 #
-# If `models.local.yaml` is missing, agent-runtime loads this file as the default.
+# model-registry-service seeds its persistent runtime file from this example.
 # API keys belong in environment variables (`OPENAI_API_KEY`, etc.) via `apiKeyEnv`.
-# Override path only when needed: AGENT_RUNTIME_MODELS_CONFIG_PATH=/abs/path/registry.yaml
+# model-registry-service reads the active file from `MODEL_CONFIG_PATH`.
 #
 
 version: 1

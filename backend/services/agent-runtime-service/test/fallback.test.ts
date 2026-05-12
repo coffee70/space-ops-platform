@@ -6,9 +6,11 @@ import {
   baseRuntimeConfig,
   contextResolvedEvent,
   FakeContextClient,
+  FakeModelCatalog,
   FakeToolExecutionClient,
   FakeToolRegistryClient,
   MemoryConversationStore,
+  modelOption,
   parseNdjson,
 } from "./helpers.js";
 
@@ -42,6 +44,19 @@ test("fallback path still emits runtime-owned completion lifecycle", async () =>
         throw new Error("model runner should not be invoked in fallback mode");
       },
     },
+    modelCatalog: new FakeModelCatalog(undefined, () => {
+      const option = modelOption();
+      return {
+        option,
+        runtime: {
+          id: option.id,
+          providerType: option.providerType,
+          providerModelId: option.providerModelId,
+          apiKey: null,
+          baseUrl: null,
+        },
+      };
+    }),
   });
 
   const response = await app.request("/chat", {
