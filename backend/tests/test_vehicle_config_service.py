@@ -11,6 +11,7 @@ from app.services.vehicle_config_service import (
     update_vehicle_config,
     validate_vehicle_config_content,
 )
+from app.services.vehicle_config_seed_service import ensure_vehicle_config_seeded
 
 
 def _sample_yaml(name: str = "ISS") -> str:
@@ -51,6 +52,40 @@ def _sample_yaml_with_comments(name: str = "ISS") -> str:
             "",
         ]
     )
+
+
+def test_seed_vehicle_configs_copies_bundled_baseline_when_empty(tmp_path: Path, monkeypatch) -> None:
+    root = tmp_path / "vehicle-configurations"
+    monkeypatch.setenv("VEHICLE_CONFIG_ROOT", str(root))
+
+    ensure_vehicle_config_seeded()
+
+    assert (root / "vehicles" / "iss.yaml").is_file()
+    assert (root / "simulators" / "drogonsat.yaml").is_file()
+
+
+def test_seed_vehicle_configs_does_not_overwrite_existing_files(tmp_path: Path, monkeypatch) -> None:
+    root = tmp_path / "vehicle-configurations"
+    target = root / "vehicles" / "iss.yaml"
+    target.parent.mkdir(parents=True)
+    target.write_text("custom: true\n", encoding="utf-8")
+    monkeypatch.setenv("VEHICLE_CONFIG_ROOT", str(root))
+
+    ensure_vehicle_config_seeded()
+
+    assert target.read_text(encoding="utf-8") == "custom: true\n"
+    assert not (root / "simulators" / "drogonsat.yaml").exists()
+
+
+def test_list_vehicle_configs_returns_seeded_files(tmp_path: Path, monkeypatch) -> None:
+    root = tmp_path / "vehicle-configurations"
+    monkeypatch.setenv("VEHICLE_CONFIG_ROOT", str(root))
+    ensure_vehicle_config_seeded()
+
+    paths = {item.path for item in list_vehicle_configs()}
+
+    assert "vehicles/iss.yaml" in paths
+    assert "simulators/drogonsat.yaml" in paths
 
 
 def test_list_vehicle_configs_reads_metadata(tmp_path: Path, monkeypatch) -> None:

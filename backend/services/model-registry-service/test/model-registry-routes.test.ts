@@ -2,10 +2,10 @@ import assert from "node:assert/strict";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { mkdirSync, writeFileSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync, rmSync } from "node:fs";
 
 import { loadConfig } from "../src/config.js";
-import { createApp } from "../src/server.js";
+import { createApp, ensureModelRegistryConfigFile } from "../src/server.js";
 
 const MIN_VALID = `version: 1
 defaults:
@@ -62,15 +62,45 @@ test("GET /model-config returns content + parsed summary", async () => {
   }
 });
 
-test("GET /model-config returns 404 when YAML is missing", async () => {
-  const dir = path.join(os.tmpdir(), `model-registry-missing-${Date.now()}`);
+test("startup seeds missing model registry YAML from bundled example", () => {
+  const dir = path.join(os.tmpdir(), `model-registry-seed-${Date.now()}`);
   mkdirSync(dir);
   try {
-    const missing = path.join(dir, "models.local.yaml");
-    const config = loadConfig({ MODEL_CONFIG_PATH: missing });
+    const target = path.join(dir, "models.local.yaml");
+    const example = path.resolve("config/models.local.yaml.example");
+
+    ensureModelRegistryConfigFile(target, example);
+
+    assert.equal(existsSync(target), true);
+    assert.equal(readFileSync(target, "utf-8"), readFileSync(example, "utf-8"));
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("startup does not overwrite existing model registry YAML", () => {
+  const { filePath, dir } = writeTmpYaml("custom: true\n");
+  try {
+    ensureModelRegistryConfigFile(filePath, path.resolve("config/models.local.yaml.example"));
+
+    assert.equal(readFileSync(filePath, "utf-8"), "custom: true\n");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("GET /model-config works after startup seed", async () => {
+  const dir = path.join(os.tmpdir(), `model-registry-seeded-get-${Date.now()}`);
+  mkdirSync(dir);
+  try {
+    const filePath = path.join(dir, "models.local.yaml");
+    const config = loadConfig({ MODEL_CONFIG_PATH: filePath });
     const app = createApp({ config });
     const response = await app.request("/model-config");
-    assert.equal(response.status, 404);
+    assert.equal(response.status, 200);
+    const body = (await response.json()) as { content: string; validation_errors: unknown[] };
+    assert.ok(body.content.includes("version: 1"));
+    assert.equal(body.validation_errors.length, 0);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

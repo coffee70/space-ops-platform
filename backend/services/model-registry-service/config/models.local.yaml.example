@@ -2,7 +2,7 @@
 #
 #   cp models.local.yaml.example models.local.yaml
 #
-# The control-plane seeds the shared model-registry runtime file from this example.
+# model-registry-service seeds its persistent runtime file from this example.
 # API keys belong in environment variables (`OPENAI_API_KEY`, etc.) via `apiKeyEnv`.
 # model-registry-service reads the active file from `MODEL_CONFIG_PATH`.
 #

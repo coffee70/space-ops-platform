@@ -2,7 +2,9 @@ import { serve } from "@hono/node-server";
 import { Hono } from "hono";
 import type { ExecutionMode, ListAiEngineerModelsResponse, RuntimeConfig, ResolvedChatModel } from "./types.js";
 
-import { readFileSync, writeFileSync, existsSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 
 import { loadConfig } from "./config.js";
 import { ModelCatalogService } from "./ai/model-catalog.js";
@@ -22,6 +24,20 @@ function getRequiredConfigPath(config: RuntimeConfig): string {
   return config.modelsConfigPath;
 }
 
+function defaultSeedExamplePath(): string {
+  const here = dirname(fileURLToPath(import.meta.url));
+  return join(here, "..", "config", "models.local.yaml.example");
+}
+
+export function ensureModelRegistryConfigFile(configPath: string, seedExamplePath = defaultSeedExamplePath()): void {
+  mkdirSync(dirname(configPath), { recursive: true });
+  if (existsSync(configPath)) return;
+  if (!existsSync(seedExamplePath)) {
+    throw new Error(`Model registry seed example not found at ${seedExamplePath}`);
+  }
+  copyFileSync(seedExamplePath, configPath);
+}
+
 function createModelCatalog(config: RuntimeConfig): ModelCatalogService {
   // ModelCatalogService owns model selection + enrichment (openrouter metadata, etc).
   return new ModelCatalogService(config);
@@ -30,6 +46,7 @@ function createModelCatalog(config: RuntimeConfig): ModelCatalogService {
 export function createApp(overrides?: { config?: RuntimeConfig }) {
   const config = overrides?.config ?? loadConfig();
   const configPath = getRequiredConfigPath(config);
+  ensureModelRegistryConfigFile(configPath);
 
   let catalog: ModelCatalogService | null = null;
   const getCatalog = (): ModelCatalogService => {
