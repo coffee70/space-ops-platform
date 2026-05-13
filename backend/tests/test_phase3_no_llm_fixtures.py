@@ -317,6 +317,38 @@ async def test_phase3_fixture_document_upload_emits_lifecycle_events_and_searcha
 
 
 @pytest.mark.anyio
+async def test_document_worker_emits_traced_started_and_completed_events(monkeypatch) -> None:
+    monkeypatch.setattr(document_ingestion, "get_embedding_provider", lambda: _Provider())
+    monkeypatch.setattr(document_ingestion_worker, "get_db_context", lambda: _session_context(session))
+    session = _SessionDouble()
+
+    await document_knowledge.create_document(
+        file=UploadFile(filename="telemetry.md", file=BytesIO(b"battery voltage telemetry note")),
+        title=None,
+        document_type=None,
+        mission_id=None,
+        vehicle_id=None,
+        subsystem_id=None,
+        tags=None,
+        description=None,
+        conversation_id="11111111-1111-1111-1111-111111111111",
+        agent_run_id="22222222-2222-2222-2222-222222222222",
+        request_id="33333333-3333-3333-3333-333333333333",
+        db=session,
+    )
+
+    document_ingestion_worker.process_one_job()
+
+    assert session.documents[0].ingestion_status == "ready"
+    assert session.document_ingestion_jobs[0].status == "completed"
+    assert [event.event_type for event in session.events] == [
+        "document.uploaded",
+        "document.ingestion_started",
+        "document.ingestion_completed",
+    ]
+
+
+@pytest.mark.anyio
 async def test_document_search_hardening_ranking_filters_and_limits(monkeypatch) -> None:
     monkeypatch.setattr(document_knowledge, "get_embedding_provider", lambda: _Provider())
     monkeypatch.setattr(document_ingestion, "get_embedding_provider", lambda: _Provider())

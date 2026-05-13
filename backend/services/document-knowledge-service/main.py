@@ -2,6 +2,7 @@
 
 from contextlib import asynccontextmanager
 import logging
+import threading
 
 from fastapi import FastAPI
 
@@ -12,12 +13,17 @@ from app.routes import document_knowledge
 logger = logging.getLogger(__name__)
 
 
-@asynccontextmanager
-async def _lifespan(_: FastAPI):
+def _prewarm_embedding_provider() -> None:
     try:
         get_embedding_provider()
     except Exception:
         logger.exception("document knowledge embedding provider prewarm failed")
+
+
+@asynccontextmanager
+async def _lifespan(_: FastAPI):
+    thread = threading.Thread(target=_prewarm_embedding_provider, name="document-knowledge-prewarm", daemon=True)
+    thread.start()
     yield
 
 
