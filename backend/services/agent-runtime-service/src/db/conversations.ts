@@ -32,6 +32,21 @@ function mapMessage(row: Record<string, unknown>): ConversationMessageRecord {
   };
 }
 
+function mapEvent(row: Record<string, unknown>): PersistedEvent {
+  return {
+    id: String(row.id),
+    conversation_id: (row.conversation_id as string | null) ?? null,
+    agent_run_id: String(row.agent_run_id),
+    request_id: String(row.request_id),
+    tool_call_id: (row.tool_call_id as string | null) ?? null,
+    sequence: Number(row.sequence),
+    emitted_by: String(row.emitted_by),
+    event_type: String(row.event_type),
+    payload: (row.payload_json as Record<string, unknown>) ?? {},
+    created_at: new Date(String(row.created_at)).toISOString(),
+  };
+}
+
 export class PgConversationStore implements ConversationStore {
   readonly #pool: Pool;
 
@@ -78,6 +93,7 @@ export class PgConversationStore implements ConversationStore {
       return {
         ...mapConversation(conversationResult.rows[0]),
         messages: [mapMessage(messageResult.rows[0])],
+        events: [],
       };
     } catch (error) {
       await client.query("ROLLBACK");
@@ -110,9 +126,18 @@ export class PgConversationStore implements ConversationStore {
       [conversationId],
     );
 
+    const eventsResult = await this.#pool.query(
+      `SELECT id::text, conversation_id::text, agent_run_id::text, request_id::text, tool_call_id::text, sequence, emitted_by, event_type, payload_json, created_at
+       FROM ai_agent_events
+       WHERE conversation_id = $1::uuid
+       ORDER BY created_at ASC, sequence ASC`,
+      [conversationId],
+    );
+
     return {
       ...mapConversation(conversationResult.rows[0]),
       messages: messagesResult.rows.map((row) => mapMessage(row as Record<string, unknown>)),
+      events: eventsResult.rows.map((row) => mapEvent(row as Record<string, unknown>)),
     };
   }
 
@@ -157,18 +182,6 @@ export class PgConversationStore implements ConversationStore {
       ],
     );
 
-    const row = result.rows[0];
-    return {
-      id: String(row.id),
-      conversation_id: String(row.conversation_id),
-      agent_run_id: String(row.agent_run_id),
-      request_id: String(row.request_id),
-      tool_call_id: (row.tool_call_id as string | null) ?? null,
-      sequence: Number(row.sequence),
-      emitted_by: String(row.emitted_by),
-      event_type: String(row.event_type),
-      payload: (row.payload_json as Record<string, unknown>) ?? {},
-      created_at: new Date(String(row.created_at)).toISOString(),
-    };
+    return mapEvent(result.rows[0] as Record<string, unknown>);
   }
 }

@@ -131,7 +131,7 @@ export class MemoryConversationStore implements ConversationStore {
   async listConversations(): Promise<ConversationRecord[]> {
     return [...this.conversations.values()]
       .filter((conversation) => conversation.messages.length > 0)
-      .map(({ messages: _messages, ...conversation }) => conversation);
+      .map(({ messages: _messages, events: _events, ...conversation }) => conversation);
   }
 
   async createConversation(input: ConversationCreateBody): Promise<ConversationDetail> {
@@ -148,6 +148,7 @@ export class MemoryConversationStore implements ConversationStore {
       execution_mode: input.execution_mode ?? "read_only",
       created_at: now,
       updated_at: now,
+      events: [],
       messages: [
         {
           id: crypto.randomUUID(),
@@ -166,7 +167,14 @@ export class MemoryConversationStore implements ConversationStore {
 
   async getConversation(conversationId: string): Promise<ConversationDetail | null> {
     const conversation = this.conversations.get(conversationId);
-    return conversation && conversation.messages.length > 0 ? structuredClone(conversation) : null;
+    if (!conversation || conversation.messages.length === 0) return null;
+    const events = this.events
+      .filter((event) => event.conversation_id === conversationId)
+      .sort((left, right) => left.created_at.localeCompare(right.created_at) || left.sequence - right.sequence);
+    return structuredClone({
+      ...conversation,
+      events,
+    });
   }
 
   async appendMessage(input: {

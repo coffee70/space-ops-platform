@@ -58,6 +58,7 @@ export interface ConversationMessageRecord {
 
 export interface ConversationDetail extends ConversationRecord {
   messages: ConversationMessageRecord[];
+  events: PersistedEvent[];
 }
 
 export interface TraceEnvelope {
