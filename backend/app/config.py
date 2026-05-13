@@ -31,6 +31,8 @@ class Settings(BaseSettings):
     code_indexer_default_branch: str = "main"
     code_indexer_max_failed_file_preview: int = 10
     code_indexer_startup_enqueue_attempts: int = 60
+    document_ingestion_poll_interval_seconds: int = 2
+    document_ingestion_max_error_length: int = 2000
 
     def get_cors_origins_list(self) -> list[str]:
         """Return CORS origins as a list, stripping whitespace."""

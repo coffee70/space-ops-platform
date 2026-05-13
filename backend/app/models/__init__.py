@@ -21,6 +21,7 @@ from app.models.intelligence import (
     ConversationMessageRecord,
     Document,
     DocumentChunk,
+    DocumentIngestionJob,
     ToolCall,
     ToolDefinition,
 )
@@ -43,6 +44,7 @@ __all__ = [
     "AgentEvent",
     "Document",
     "DocumentChunk",
+    "DocumentIngestionJob",
     "CodeRepository",
     "CodeIndexJob",
     "CodeChunk",
