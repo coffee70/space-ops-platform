@@ -18,6 +18,7 @@ test("chat orchestration emits backend-owned run, context, tool, and completion 
   const conversation = await store.createConversation({
     title: "AI Engineer Session",
     execution_mode: "read_only",
+    initial_message: { role: "user", content: "Start AI Engineer session." },
   });
   const toolRegistry = new FakeToolRegistryClient([
     {
@@ -185,6 +186,7 @@ test("invalid downstream raw events become canonical error events", async () => 
   const conversation = await store.createConversation({
     title: "AI Engineer Session",
     execution_mode: "read_only",
+    initial_message: { role: "user", content: "Start AI Engineer session." },
   });
 
   const app = createApp({
@@ -243,6 +245,7 @@ test("missing execution mode preserves persisted conversation mode for prompt co
   const conversation = await store.createConversation({
     title: "AI Engineer Session",
     execution_mode: "execute",
+    initial_message: { role: "user", content: "Start AI Engineer session." },
   });
   let observedSystemPrompt = "";
 
@@ -295,6 +298,7 @@ test("explicit request execution mode overrides persisted conversation mode", as
   const conversation = await store.createConversation({
     title: "AI Engineer Session",
     execution_mode: "execute",
+    initial_message: { role: "user", content: "Start AI Engineer session." },
   });
   let observedSystemPrompt = "";
 
@@ -349,6 +353,7 @@ test("chat rejects unknown execution mode values", async () => {
   const conversation = await store.createConversation({
     title: "AI Engineer Session",
     execution_mode: "read_only",
+    initial_message: { role: "user", content: "Start AI Engineer session." },
   });
 
   const app = createApp({

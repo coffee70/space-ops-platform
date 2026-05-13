@@ -22,6 +22,7 @@ test("scripted_delete_cleanup routes managed unit cleanup through tool-execution
   const conversation = await store.createConversation({
     title: "AI Engineer Session",
     execution_mode: "execute",
+    initial_message: { role: "user", content: "Start AI Engineer session." },
   });
 
   const toolExecution = new FakeToolExecutionClient((input) => ({

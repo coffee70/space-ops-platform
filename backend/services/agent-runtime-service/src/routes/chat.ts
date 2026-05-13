@@ -11,7 +11,7 @@ import { RunSequencer } from "../events/sequencer.js";
 import { runFallback } from "../fallback.js";
 import { completeScriptedRun, resolveScriptedMode, runScriptedMode } from "../scripted.js";
 import { createTrace } from "../trace.js";
-import type { ChatInputMessage, ContextPacketResponse, ExecutionMode, RawEventFact, RunDependencies } from "../types.js";
+import type { ChatInputMessage, ContextPacketResponse, ConversationDetail, ExecutionMode, RawEventFact, RunDependencies } from "../types.js";
 
 const chatRequestSchema = z.object({
   conversation_id: z.string().uuid(),
@@ -19,6 +19,7 @@ const chatRequestSchema = z.object({
   mission_id: z.string().trim().min(1).optional().nullable(),
   vehicle_id: z.string().trim().min(1).optional().nullable(),
   model_id: z.string().trim().min(1).optional().nullable(),
+  persisted_user_message_id: z.string().uuid().optional().nullable(),
   client_context: z
     .object({
       current_application_id: z.string().trim().min(1).optional(),
@@ -136,6 +137,7 @@ export function registerChatRoutes(app: Hono, dependencies: RunDependencies): vo
       requestMessages: payload.messages,
       trace,
       modelId: payload.model_id,
+      persistedUserMessageId: payload.persisted_user_message_id,
     });
 
     return stream.response;
@@ -145,7 +147,7 @@ export function registerChatRoutes(app: Hono, dependencies: RunDependencies): vo
 async function orchestrateChat(input: {
   dependencies: RunDependencies;
   stream: AgentEventStream;
-  conversation: { id: string; mission_id: string | null; vehicle_id: string | null; messages: ChatInputMessage[] };
+  conversation: ConversationDetail;
   executionMode: ExecutionMode;
   missionId: string | null;
   vehicleId: string | null;
@@ -153,19 +155,32 @@ async function orchestrateChat(input: {
   requestMessages: ChatInputMessage[];
   trace: { conversation_id: string; agent_run_id: string; request_id: string };
   modelId: string | null | undefined;
+  persistedUserMessageId?: string | null;
 }): Promise<void> {
   const { dependencies, stream } = input;
 
   try {
-    const userMessage = await dependencies.store.appendMessage({
-      conversationId: input.trace.conversation_id,
-      role: "user",
-      content: input.latestUserMessage,
-      metadata: {
-        request_id: input.trace.request_id,
-        agent_run_id: input.trace.agent_run_id,
-      },
-    });
+    const persistedUserMessage = input.persistedUserMessageId
+      ? input.conversation.messages.find((message) => message.id === input.persistedUserMessageId)
+      : null;
+    if (input.persistedUserMessageId) {
+      if (!persistedUserMessage || persistedUserMessage.role !== "user" || persistedUserMessage.content.trim() !== input.latestUserMessage) {
+        await stream.fail(new Error("persisted user message does not match chat request"));
+        return;
+      }
+    }
+
+    const userMessage =
+      persistedUserMessage ??
+      (await dependencies.store.appendMessage({
+        conversationId: input.trace.conversation_id,
+        role: "user",
+        content: input.latestUserMessage,
+        metadata: {
+          request_id: input.trace.request_id,
+          agent_run_id: input.trace.agent_run_id,
+        },
+      }));
 
     await stream.emitEvent("run.started", {
       execution_mode: input.executionMode,
@@ -215,7 +230,9 @@ async function orchestrateChat(input: {
       },
     });
 
-    const modelMessages = [...input.conversation.messages, { role: "user", content: input.latestUserMessage }] as ChatInputMessage[];
+    const modelMessages = (
+      persistedUserMessage ? input.conversation.messages : [...input.conversation.messages, { role: "user", content: input.latestUserMessage }]
+    ) as ChatInputMessage[];
     const systemPrompt = buildSystemPrompt({
       executionMode: input.executionMode,
       retrievalPlan,

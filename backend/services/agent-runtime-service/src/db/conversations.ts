@@ -41,25 +41,60 @@ export class PgConversationStore implements ConversationStore {
 
   async listConversations(): Promise<ConversationRecord[]> {
     const result = await this.#pool.query(
-      "SELECT id::text, title, mission_id, vehicle_id, execution_mode, created_at, updated_at FROM ai_conversations ORDER BY created_at DESC LIMIT 100",
+      `SELECT c.id::text, c.title, c.mission_id, c.vehicle_id, c.execution_mode, c.created_at, c.updated_at
+       FROM ai_conversations c
+       WHERE EXISTS (
+         SELECT 1 FROM ai_conversation_messages m WHERE m.conversation_id = c.id
+       )
+       ORDER BY c.updated_at DESC
+       LIMIT 100`,
     );
     return result.rows.map((row) => mapConversation(row as Record<string, unknown>));
   }
 
-  async createConversation(input: ConversationCreateBody): Promise<ConversationRecord> {
+  async createConversation(input: ConversationCreateBody): Promise<ConversationDetail> {
+    const initialContent = input.initial_message.content.trim();
+    if (initialContent.length === 0) {
+      throw new Error("initial user message is required");
+    }
     const id = crypto.randomUUID();
-    const result = await this.#pool.query(
-      `INSERT INTO ai_conversations (id, title, created_by, mission_id, vehicle_id, execution_mode, created_at, updated_at)
-       VALUES ($1::uuid, $2, NULL, $3, $4, $5, now(), now())
-       RETURNING id::text, title, mission_id, vehicle_id, execution_mode, created_at, updated_at`,
-      [id, input.title ?? null, input.mission_id ?? null, input.vehicle_id ?? null, input.execution_mode ?? "read_only"],
-    );
-    return mapConversation(result.rows[0]);
+    const messageId = crypto.randomUUID();
+    const client = await this.#pool.connect();
+    try {
+      await client.query("BEGIN");
+      const conversationResult = await client.query(
+        `INSERT INTO ai_conversations (id, title, created_by, mission_id, vehicle_id, execution_mode, created_at, updated_at)
+         VALUES ($1::uuid, $2, NULL, $3, $4, $5, now(), now())
+         RETURNING id::text, title, mission_id, vehicle_id, execution_mode, created_at, updated_at`,
+        [id, input.title ?? null, input.mission_id ?? null, input.vehicle_id ?? null, input.execution_mode ?? "read_only"],
+      );
+      const messageResult = await client.query(
+        `INSERT INTO ai_conversation_messages (id, conversation_id, role, content, metadata_json, created_at)
+         VALUES ($1::uuid, $2::uuid, 'user', $3, $4::jsonb, now())
+         RETURNING id::text, conversation_id::text, role, content, metadata_json, created_at`,
+        [messageId, id, initialContent, JSON.stringify(input.initial_message.metadata ?? {})],
+      );
+      await client.query("COMMIT");
+      return {
+        ...mapConversation(conversationResult.rows[0]),
+        messages: [mapMessage(messageResult.rows[0])],
+      };
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
   }
 
   async getConversation(conversationId: string): Promise<ConversationDetail | null> {
     const conversationResult = await this.#pool.query(
-      "SELECT id::text, title, mission_id, vehicle_id, execution_mode, created_at, updated_at FROM ai_conversations WHERE id = $1::uuid",
+      `SELECT c.id::text, c.title, c.mission_id, c.vehicle_id, c.execution_mode, c.created_at, c.updated_at
+       FROM ai_conversations c
+       WHERE c.id = $1::uuid
+         AND EXISTS (
+           SELECT 1 FROM ai_conversation_messages m WHERE m.conversation_id = c.id
+         )`,
       [conversationId],
     );
 

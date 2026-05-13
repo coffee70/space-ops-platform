@@ -129,10 +129,16 @@ export class MemoryConversationStore implements ConversationStore {
   events: PersistedEvent[] = [];
 
   async listConversations(): Promise<ConversationRecord[]> {
-    return [...this.conversations.values()].map(({ messages: _messages, ...conversation }) => conversation);
+    return [...this.conversations.values()]
+      .filter((conversation) => conversation.messages.length > 0)
+      .map(({ messages: _messages, ...conversation }) => conversation);
   }
 
-  async createConversation(input: ConversationCreateBody): Promise<ConversationRecord> {
+  async createConversation(input: ConversationCreateBody): Promise<ConversationDetail> {
+    const initialContent = input.initial_message.content.trim();
+    if (initialContent.length === 0) {
+      throw new Error("initial user message is required");
+    }
     const now = new Date().toISOString();
     const conversation: ConversationDetail = {
       id: crypto.randomUUID(),
@@ -142,16 +148,25 @@ export class MemoryConversationStore implements ConversationStore {
       execution_mode: input.execution_mode ?? "read_only",
       created_at: now,
       updated_at: now,
-      messages: [],
+      messages: [
+        {
+          id: crypto.randomUUID(),
+          conversation_id: "",
+          role: "user",
+          content: initialContent,
+          metadata_json: input.initial_message.metadata ?? {},
+          created_at: now,
+        },
+      ],
     };
+    conversation.messages[0].conversation_id = conversation.id;
     this.conversations.set(conversation.id, conversation);
-    const { messages: _messages, ...record } = conversation;
-    return record;
+    return structuredClone(conversation);
   }
 
   async getConversation(conversationId: string): Promise<ConversationDetail | null> {
     const conversation = this.conversations.get(conversationId);
-    return conversation ? structuredClone(conversation) : null;
+    return conversation && conversation.messages.length > 0 ? structuredClone(conversation) : null;
   }
 
   async appendMessage(input: {

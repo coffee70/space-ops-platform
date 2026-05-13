@@ -64,6 +64,7 @@ test("scripted_write_deploy uses execute-only tools through tool-execution in or
   const conversation = await store.createConversation({
     title: "AI Engineer Session",
     execution_mode: "execute",
+    initial_message: { role: "user", content: "Start AI Engineer session." },
   });
 
   const toolExecution = new FakeToolExecutionClient((input) => toolResponse(input.tool_name, input.trace));
@@ -129,6 +130,7 @@ test("scripted_write_deploy fails before mutation when execution mode is read_on
   const conversation = await store.createConversation({
     title: "AI Engineer Session",
     execution_mode: "read_only",
+    initial_message: { role: "user", content: "Start AI Engineer session." },
   });
 
   const toolExecution = new FakeToolExecutionClient((input) => toolResponse(input.tool_name, input.trace));
