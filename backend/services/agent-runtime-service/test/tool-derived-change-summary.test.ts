@@ -192,6 +192,7 @@ test("real LLM-driven tool flow emits change.summary with structured base_commit
   const conversation = await store.createConversation({
     title: "AI Engineer Session",
     execution_mode: "execute",
+    initial_message: { role: "user", content: "Start AI Engineer session." },
   });
   const toolExecution = new FakeToolExecutionClient((input) => toolExecutionResponse(input.tool_name, input.trace));
   const app = createApp({

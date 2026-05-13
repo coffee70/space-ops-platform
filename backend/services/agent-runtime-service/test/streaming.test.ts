@@ -17,6 +17,7 @@ test("chat stream delivers message deltas before completion across multiple chun
   const conversation = await store.createConversation({
     title: "Streaming Session",
     execution_mode: "read_only",
+    initial_message: { role: "user", content: "Start AI Engineer session." },
   });
 
   const app = createApp({

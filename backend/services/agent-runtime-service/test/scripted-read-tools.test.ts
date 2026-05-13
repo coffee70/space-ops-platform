@@ -81,6 +81,7 @@ test("scripted_read_tools delegates every tool through tool-execution and stream
   const conversation = await store.createConversation({
     title: "AI Engineer Session",
     execution_mode: "read_only",
+    initial_message: { role: "user", content: "Start AI Engineer session." },
   });
 
   const toolRegistry = new FakeToolRegistryClient(READ_TOOL_DEFINITIONS);

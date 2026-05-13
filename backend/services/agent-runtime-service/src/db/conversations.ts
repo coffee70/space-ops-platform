@@ -32,6 +32,21 @@ function mapMessage(row: Record<string, unknown>): ConversationMessageRecord {
   };
 }
 
+function mapEvent(row: Record<string, unknown>): PersistedEvent {
+  return {
+    id: String(row.id),
+    conversation_id: (row.conversation_id as string | null) ?? null,
+    agent_run_id: String(row.agent_run_id),
+    request_id: String(row.request_id),
+    tool_call_id: (row.tool_call_id as string | null) ?? null,
+    sequence: Number(row.sequence),
+    emitted_by: String(row.emitted_by),
+    event_type: String(row.event_type),
+    payload: (row.payload_json as Record<string, unknown>) ?? {},
+    created_at: new Date(String(row.created_at)).toISOString(),
+  };
+}
+
 export class PgConversationStore implements ConversationStore {
   readonly #pool: Pool;
 
@@ -41,25 +56,61 @@ export class PgConversationStore implements ConversationStore {
 
   async listConversations(): Promise<ConversationRecord[]> {
     const result = await this.#pool.query(
-      "SELECT id::text, title, mission_id, vehicle_id, execution_mode, created_at, updated_at FROM ai_conversations ORDER BY created_at DESC LIMIT 100",
+      `SELECT c.id::text, c.title, c.mission_id, c.vehicle_id, c.execution_mode, c.created_at, c.updated_at
+       FROM ai_conversations c
+       WHERE EXISTS (
+         SELECT 1 FROM ai_conversation_messages m WHERE m.conversation_id = c.id
+       )
+       ORDER BY c.updated_at DESC
+       LIMIT 100`,
     );
     return result.rows.map((row) => mapConversation(row as Record<string, unknown>));
   }
 
-  async createConversation(input: ConversationCreateBody): Promise<ConversationRecord> {
+  async createConversation(input: ConversationCreateBody): Promise<ConversationDetail> {
+    const initialContent = input.initial_message.content.trim();
+    if (initialContent.length === 0) {
+      throw new Error("initial user message is required");
+    }
     const id = crypto.randomUUID();
-    const result = await this.#pool.query(
-      `INSERT INTO ai_conversations (id, title, created_by, mission_id, vehicle_id, execution_mode, created_at, updated_at)
-       VALUES ($1::uuid, $2, NULL, $3, $4, $5, now(), now())
-       RETURNING id::text, title, mission_id, vehicle_id, execution_mode, created_at, updated_at`,
-      [id, input.title ?? null, input.mission_id ?? null, input.vehicle_id ?? null, input.execution_mode ?? "read_only"],
-    );
-    return mapConversation(result.rows[0]);
+    const messageId = crypto.randomUUID();
+    const client = await this.#pool.connect();
+    try {
+      await client.query("BEGIN");
+      const conversationResult = await client.query(
+        `INSERT INTO ai_conversations (id, title, created_by, mission_id, vehicle_id, execution_mode, created_at, updated_at)
+         VALUES ($1::uuid, $2, NULL, $3, $4, $5, now(), now())
+         RETURNING id::text, title, mission_id, vehicle_id, execution_mode, created_at, updated_at`,
+        [id, input.title ?? null, input.mission_id ?? null, input.vehicle_id ?? null, input.execution_mode ?? "read_only"],
+      );
+      const messageResult = await client.query(
+        `INSERT INTO ai_conversation_messages (id, conversation_id, role, content, metadata_json, created_at)
+         VALUES ($1::uuid, $2::uuid, 'user', $3, $4::jsonb, now())
+         RETURNING id::text, conversation_id::text, role, content, metadata_json, created_at`,
+        [messageId, id, initialContent, JSON.stringify(input.initial_message.metadata ?? {})],
+      );
+      await client.query("COMMIT");
+      return {
+        ...mapConversation(conversationResult.rows[0]),
+        messages: [mapMessage(messageResult.rows[0])],
+        events: [],
+      };
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
   }
 
   async getConversation(conversationId: string): Promise<ConversationDetail | null> {
     const conversationResult = await this.#pool.query(
-      "SELECT id::text, title, mission_id, vehicle_id, execution_mode, created_at, updated_at FROM ai_conversations WHERE id = $1::uuid",
+      `SELECT c.id::text, c.title, c.mission_id, c.vehicle_id, c.execution_mode, c.created_at, c.updated_at
+       FROM ai_conversations c
+       WHERE c.id = $1::uuid
+         AND EXISTS (
+           SELECT 1 FROM ai_conversation_messages m WHERE m.conversation_id = c.id
+         )`,
       [conversationId],
     );
 
@@ -75,9 +126,18 @@ export class PgConversationStore implements ConversationStore {
       [conversationId],
     );
 
+    const eventsResult = await this.#pool.query(
+      `SELECT id::text, conversation_id::text, agent_run_id::text, request_id::text, tool_call_id::text, sequence, emitted_by, event_type, payload_json, created_at
+       FROM ai_agent_events
+       WHERE conversation_id = $1::uuid
+       ORDER BY created_at ASC, sequence ASC`,
+      [conversationId],
+    );
+
     return {
       ...mapConversation(conversationResult.rows[0]),
       messages: messagesResult.rows.map((row) => mapMessage(row as Record<string, unknown>)),
+      events: eventsResult.rows.map((row) => mapEvent(row as Record<string, unknown>)),
     };
   }
 
@@ -122,18 +182,6 @@ export class PgConversationStore implements ConversationStore {
       ],
     );
 
-    const row = result.rows[0];
-    return {
-      id: String(row.id),
-      conversation_id: String(row.conversation_id),
-      agent_run_id: String(row.agent_run_id),
-      request_id: String(row.request_id),
-      tool_call_id: (row.tool_call_id as string | null) ?? null,
-      sequence: Number(row.sequence),
-      emitted_by: String(row.emitted_by),
-      event_type: String(row.event_type),
-      payload: (row.payload_json as Record<string, unknown>) ?? {},
-      created_at: new Date(String(row.created_at)).toISOString(),
-    };
+    return mapEvent(result.rows[0] as Record<string, unknown>);
   }
 }

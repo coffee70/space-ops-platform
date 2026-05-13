@@ -9,6 +9,7 @@ test("scripted_error emits deterministic error and run.failed without invoking t
   const conversation = await store.createConversation({
     title: "AI Engineer Session",
     execution_mode: "read_only",
+    initial_message: { role: "user", content: "Start AI Engineer session." },
   });
 
   const app = createApp({

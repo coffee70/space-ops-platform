@@ -129,10 +129,16 @@ export class MemoryConversationStore implements ConversationStore {
   events: PersistedEvent[] = [];
 
   async listConversations(): Promise<ConversationRecord[]> {
-    return [...this.conversations.values()].map(({ messages: _messages, ...conversation }) => conversation);
+    return [...this.conversations.values()]
+      .filter((conversation) => conversation.messages.length > 0)
+      .map(({ messages: _messages, events: _events, ...conversation }) => conversation);
   }
 
-  async createConversation(input: ConversationCreateBody): Promise<ConversationRecord> {
+  async createConversation(input: ConversationCreateBody): Promise<ConversationDetail> {
+    const initialContent = input.initial_message.content.trim();
+    if (initialContent.length === 0) {
+      throw new Error("initial user message is required");
+    }
     const now = new Date().toISOString();
     const conversation: ConversationDetail = {
       id: crypto.randomUUID(),
@@ -142,16 +148,33 @@ export class MemoryConversationStore implements ConversationStore {
       execution_mode: input.execution_mode ?? "read_only",
       created_at: now,
       updated_at: now,
-      messages: [],
+      events: [],
+      messages: [
+        {
+          id: crypto.randomUUID(),
+          conversation_id: "",
+          role: "user",
+          content: initialContent,
+          metadata_json: input.initial_message.metadata ?? {},
+          created_at: now,
+        },
+      ],
     };
+    conversation.messages[0].conversation_id = conversation.id;
     this.conversations.set(conversation.id, conversation);
-    const { messages: _messages, ...record } = conversation;
-    return record;
+    return structuredClone(conversation);
   }
 
   async getConversation(conversationId: string): Promise<ConversationDetail | null> {
     const conversation = this.conversations.get(conversationId);
-    return conversation ? structuredClone(conversation) : null;
+    if (!conversation || conversation.messages.length === 0) return null;
+    const events = this.events
+      .filter((event) => event.conversation_id === conversationId)
+      .sort((left, right) => left.created_at.localeCompare(right.created_at) || left.sequence - right.sequence);
+    return structuredClone({
+      ...conversation,
+      events,
+    });
   }
 
   async appendMessage(input: {

@@ -18,8 +18,15 @@ export interface ChatRequestBody {
   model_id?: string | null;
   mission_id?: string | null;
   vehicle_id?: string | null;
+  persisted_user_message_id?: string | null;
   messages: ChatInputMessage[];
   client_context?: ClientContext;
+}
+
+export interface ConversationInitialMessageBody {
+  role: "user";
+  content: string;
+  metadata?: Record<string, unknown>;
 }
 
 export interface ConversationCreateBody {
@@ -27,6 +34,7 @@ export interface ConversationCreateBody {
   mission_id?: string | null;
   vehicle_id?: string | null;
   execution_mode?: ExecutionMode;
+  initial_message: ConversationInitialMessageBody;
 }
 
 export interface ConversationRecord {
@@ -50,6 +58,7 @@ export interface ConversationMessageRecord {
 
 export interface ConversationDetail extends ConversationRecord {
   messages: ConversationMessageRecord[];
+  events: PersistedEvent[];
 }
 
 export interface TraceEnvelope {
@@ -140,7 +149,7 @@ export interface ToolExecutionResponse {
 
 export interface ConversationStore {
   listConversations(): Promise<ConversationRecord[]>;
-  createConversation(input: ConversationCreateBody): Promise<ConversationRecord>;
+  createConversation(input: ConversationCreateBody): Promise<ConversationDetail>;
   getConversation(conversationId: string): Promise<ConversationDetail | null>;
   appendMessage(input: {
     conversationId: string;

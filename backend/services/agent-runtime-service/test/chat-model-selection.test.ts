@@ -20,6 +20,7 @@ test("chat rejects disabled registry model with run.failed", async () => {
   const conversation = await store.createConversation({
     title: "AI Engineer Session",
     execution_mode: "read_only",
+    initial_message: { role: "user", content: "Start AI Engineer session." },
   });
 
   const app = createApp({
@@ -72,6 +73,7 @@ test("selected OpenAI model id is passed to model runner", async () => {
   const conversation = await store.createConversation({
     title: "AI Engineer Session",
     execution_mode: "read_only",
+    initial_message: { role: "user", content: "Start AI Engineer session." },
   });
 
   let observedProviderModelId: string | null = null;
@@ -147,6 +149,7 @@ test("chat fails cleanly when selecting google provider model", async () => {
   const conversation = await store.createConversation({
     title: "AI Engineer Session",
     execution_mode: "read_only",
+    initial_message: { role: "user", content: "Start AI Engineer session." },
   });
 
   const app = createApp({
@@ -198,6 +201,7 @@ test("assistant message metadata includes selected stack model fields", async ()
   const conversation = await store.createConversation({
     title: "AI Engineer Session",
     execution_mode: "read_only",
+    initial_message: { role: "user", content: "Start AI Engineer session." },
   });
 
   const app = createApp({
