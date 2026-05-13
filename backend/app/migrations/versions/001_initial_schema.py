@@ -522,6 +522,7 @@ def upgrade() -> None:
         sa.Column("subsystem_id", sa.Text(), nullable=True),
         sa.Column("tags_json", JSONB(), nullable=False),
         sa.Column("description", sa.Text(), nullable=True),
+        sa.Column("raw_content", sa.Text(), nullable=False),
         sa.Column("content_hash", sa.Text(), nullable=False),
         sa.Column("ingestion_status", sa.Text(), nullable=False),
         sa.Column("ingestion_error", sa.Text(), nullable=True),
@@ -549,6 +550,27 @@ def upgrade() -> None:
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
     )
     op.create_index("ix_ai_document_chunks_document_chunk", "ai_document_chunks", ["document_id", "chunk_index"])
+
+    op.create_table(
+        "ai_document_ingestion_jobs",
+        sa.Column("id", UUID(as_uuid=True), primary_key=True, nullable=False),
+        sa.Column(
+            "document_id",
+            UUID(as_uuid=True),
+            sa.ForeignKey("ai_documents.id", ondelete="CASCADE"),
+            nullable=False,
+        ),
+        sa.Column("status", sa.Text(), nullable=False),
+        sa.Column("requested_at", sa.DateTime(timezone=True), nullable=False),
+        sa.Column("started_at", sa.DateTime(timezone=True), nullable=True),
+        sa.Column("completed_at", sa.DateTime(timezone=True), nullable=True),
+        sa.Column("error", sa.Text(), nullable=True),
+        sa.Column("conversation_id", UUID(as_uuid=True), nullable=True),
+        sa.Column("agent_run_id", UUID(as_uuid=True), nullable=True),
+        sa.Column("request_id", UUID(as_uuid=True), nullable=True),
+    )
+    op.create_index("ix_ai_document_ingestion_jobs_status_requested", "ai_document_ingestion_jobs", ["status", "requested_at"])
+    op.create_index("ix_ai_document_ingestion_jobs_document", "ai_document_ingestion_jobs", ["document_id"])
 
     op.create_table(
         "ai_code_repositories",
@@ -635,6 +657,10 @@ def downgrade() -> None:
     op.drop_table("ai_code_chunks")
 
     op.drop_table("ai_code_repositories")
+
+    op.drop_index("ix_ai_document_ingestion_jobs_document", table_name="ai_document_ingestion_jobs")
+    op.drop_index("ix_ai_document_ingestion_jobs_status_requested", table_name="ai_document_ingestion_jobs")
+    op.drop_table("ai_document_ingestion_jobs")
 
     op.drop_index("ix_ai_document_chunks_document_chunk", table_name="ai_document_chunks")
     op.drop_table("ai_document_chunks")
