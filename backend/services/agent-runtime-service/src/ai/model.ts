@@ -44,10 +44,22 @@ function createLanguageModel(model: ResolvedRuntimeModel) {
 
 function providerOptionsForModel(model: ResolvedRuntimeModel): Record<string, Record<string, unknown>> | undefined {
   const reasoning = model.reasoning;
-  if (!reasoning?.enabled || Object.keys(reasoning.providerOptions).length === 0) {
-    return undefined;
+  if (reasoning?.enabled && Object.keys(reasoning.providerOptions).length > 0) {
+    return reasoning.providerOptions as Record<string, Record<string, unknown>>;
   }
-  return reasoning.providerOptions as Record<string, Record<string, unknown>>;
+
+  // OpenAI reasoning models can already use/bill internal reasoning tokens.
+  // Requesting a reasoning summary is a visibility knob; it intentionally does
+  // not set reasoningEffort, so it does not ask OpenAI to reason harder.
+  if (model.providerType === "openai" && model.providerModelId.startsWith("gpt-5")) {
+    return {
+      openai: {
+        reasoningSummary: "auto",
+      },
+    };
+  }
+
+  return undefined;
 }
 
 function summarizeStreamPart(part: ModelStreamPart): Record<string, unknown> {
