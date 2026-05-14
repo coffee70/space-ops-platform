@@ -4,29 +4,50 @@ import test from "node:test";
 import { providerOptionsForModel } from "../src/ai/model.js";
 import type { ResolvedRuntimeModel } from "../src/types.js";
 
-function openAiGpt5Model(overrides: Partial<ResolvedRuntimeModel> = {}): ResolvedRuntimeModel {
+function openAiModel(providerModelId: string, overrides: Partial<ResolvedRuntimeModel> = {}): ResolvedRuntimeModel {
   return {
-    id: "openai-gpt-5-5",
+    id: `openai-${providerModelId}`,
     providerType: "openai",
-    providerModelId: "gpt-5.5",
+    providerModelId,
     apiKey: "test-key",
     baseUrl: null,
     ...overrides,
   };
 }
 
-test("OpenAI GPT-5 models default to auto reasoning summaries when reasoning is not explicitly configured", () => {
-  assert.deepEqual(providerOptionsForModel(openAiGpt5Model()), {
-    openai: {
-      reasoningSummary: "auto",
-    },
-  });
+test("OpenAI models do not request reasoning summaries without explicit reasoning enablement", () => {
+  assert.equal(providerOptionsForModel(openAiModel("gpt-5.5")), undefined);
+  assert.equal(providerOptionsForModel(openAiModel("o3")), undefined);
+  assert.equal(providerOptionsForModel(openAiModel("gpt-6")), undefined);
 });
 
-test("explicit reasoning.enabled=false suppresses OpenAI GPT-5 auto reasoning summaries", () => {
+test("explicit OpenAI reasoning enablement defaults to auto reasoning summaries regardless of model id", () => {
+  for (const providerModelId of ["gpt-5.5", "o3", "gpt-6"]) {
+    assert.deepEqual(
+      providerOptionsForModel(
+        openAiModel(providerModelId, {
+          reasoning: {
+            enabled: true,
+            representation: "reasoning_summary",
+            source: "provider_exposed",
+            providerOptions: {},
+          },
+        }),
+      ),
+      {
+        openai: {
+          reasoningSummary: "auto",
+        },
+      },
+      `expected reasoning summaries to default on for ${providerModelId}`,
+    );
+  }
+});
+
+test("explicit reasoning.enabled=false suppresses OpenAI reasoning summaries", () => {
   assert.equal(
     providerOptionsForModel(
-      openAiGpt5Model({
+      openAiModel("gpt-5.5", {
         reasoning: {
           enabled: false,
           representation: "reasoning_summary",
@@ -39,10 +60,10 @@ test("explicit reasoning.enabled=false suppresses OpenAI GPT-5 auto reasoning su
   );
 });
 
-test("explicit reasoning provider options take precedence over OpenAI GPT-5 auto reasoning summaries", () => {
+test("explicit OpenAI reasoning provider options take precedence over the auto summary default", () => {
   assert.deepEqual(
     providerOptionsForModel(
-      openAiGpt5Model({
+      openAiModel("gpt-6", {
         reasoning: {
           enabled: true,
           representation: "reasoning_summary",
@@ -60,5 +81,24 @@ test("explicit reasoning provider options take precedence over OpenAI GPT-5 auto
         reasoningSummary: "detailed",
       },
     },
+  );
+});
+
+test("non-OpenAI reasoning models still require explicit provider options", () => {
+  assert.equal(
+    providerOptionsForModel({
+      id: "anthropic-sonnet-4-6",
+      providerType: "anthropic",
+      providerModelId: "claude-sonnet-4-6",
+      apiKey: "test-key",
+      baseUrl: null,
+      reasoning: {
+        enabled: true,
+        representation: "thinking",
+        source: "provider_exposed",
+        providerOptions: {},
+      },
+    }),
+    undefined,
   );
 });
