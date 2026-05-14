@@ -141,6 +141,7 @@ export function registerChatRoutes(app: Hono, dependencies: RunDependencies): vo
       trace,
       sequencer: new RunSequencer(),
       now: dependencies.now,
+      logStreamWrites: dependencies.config.logModelStreamParts,
     });
 
     void orchestrateChat({
@@ -155,6 +156,11 @@ export function registerChatRoutes(app: Hono, dependencies: RunDependencies): vo
       trace,
       modelId: payload.model_id,
       persistedUserMessageId: payload.persisted_user_message_id,
+    }).catch((error) => {
+      console.error("[agent-runtime] unhandled chat orchestration error", error);
+      void stream.fail(error).catch((streamError) => {
+        console.error("[agent-runtime] failed to report chat orchestration error", streamError);
+      });
     });
 
     return stream.response;
