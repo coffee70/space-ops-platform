@@ -7,6 +7,32 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync, rmSync } from "node
 import { loadConfig } from "../src/config.js";
 import { createApp, ensureModelRegistryConfigFile } from "../src/server.js";
 
+const REASONING_VALID = `version: 1
+defaults:
+  chatModel: anthropic-thinking
+  codingModel: anthropic-thinking
+  fastModel: anthropic-thinking
+  restrictedModel: anthropic-thinking
+providers:
+  anthropic-main:
+    type: anthropic
+    displayName: Anthropic
+    apiKeyEnv: ANTHROPIC_API_KEY
+models:
+  - id: anthropic-thinking
+    providerRef: anthropic-main
+    providerModelId: claude-sonnet-4-6
+    enabled: true
+    defaultFor: [chat, coding, fast]
+    reasoning:
+      enabled: true
+      representation: thinking
+      providerOptions:
+        anthropic:
+          thinking:
+            type: adaptive
+`;
+
 const MIN_VALID = `version: 1
 defaults:
   chatModel: m1
@@ -128,6 +154,28 @@ test("POST /model-config/validate accepts valid content", async () => {
   }
 });
 
+test("POST /model-config/validate accepts reasoning config", async () => {
+  const dir = path.join(os.tmpdir(), `model-registry-reasoning-validate-${Date.now()}`);
+  mkdirSync(dir);
+  try {
+    const filePath = path.join(dir, "models.local.yaml");
+    writeFileSync(filePath, REASONING_VALID, { encoding: "utf-8" });
+    const config = loadConfig({ MODEL_CONFIG_PATH: filePath });
+    const app = createApp({ config });
+
+    const response = await app.request("/model-config/validate", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ content: REASONING_VALID }),
+    });
+    assert.equal(response.status, 200);
+    const body = (await response.json()) as { valid: boolean };
+    assert.equal(body.valid, true);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("PUT /model-config rejects invalid content and does not save", async () => {
   const before = MIN_VALID.replace("\n", "\r\n");
   const { filePath, dir } = writeTmpYaml(before);
@@ -204,6 +252,50 @@ test("POST /models/resolve-chat resolves default chat model", async () => {
     const body = (await response.json()) as { option: { id: string }; runtime: { providerModelId: string } };
     assert.equal(body.option.id, "m1");
     assert.equal(body.runtime.providerModelId, "gpt-4o-mini");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("POST /models/resolve-chat preserves reasoning config in runtime model", async () => {
+  const { filePath, dir } = writeTmpYaml(REASONING_VALID);
+  try {
+    const config = loadConfig({ MODEL_CONFIG_PATH: filePath });
+    const app = createApp({ config });
+    const response = await app.request("/models/resolve-chat", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ model_id: "anthropic-thinking", execution_mode: "read_only" }),
+    });
+    assert.equal(response.status, 200);
+    const body = (await response.json()) as {
+      option: { id: string };
+      runtime: {
+        providerType: string;
+        providerModelId: string;
+        reasoning?: {
+          enabled: boolean;
+          representation: string;
+          source: string;
+          providerOptions: Record<string, unknown>;
+        } | null;
+      };
+    };
+    assert.equal(body.option.id, "anthropic-thinking");
+    assert.equal(body.runtime.providerType, "anthropic");
+    assert.equal(body.runtime.providerModelId, "claude-sonnet-4-6");
+    assert.deepEqual(body.runtime.reasoning, {
+      enabled: true,
+      representation: "thinking",
+      source: "provider_exposed",
+      providerOptions: {
+        anthropic: {
+          thinking: {
+            type: "adaptive",
+          },
+        },
+      },
+    });
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
