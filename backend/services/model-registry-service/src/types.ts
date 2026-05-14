@@ -22,6 +22,21 @@ export type ModelCapability =
   | "web-search"
   | "code";
 
+export type ReasoningStreamRepresentation = "reasoning" | "reasoning_summary" | "thinking";
+
+export type RuntimeReasoningConfig = {
+  enabled: boolean;
+  representation: ReasoningStreamRepresentation;
+  source: "provider_exposed";
+  providerOptions: Record<string, unknown>;
+};
+
+export type ModelRegistryReasoningConfig = {
+  enabled: boolean;
+  representation: ReasoningStreamRepresentation;
+  providerOptions?: Record<string, unknown>;
+};
+
 export type ModelRegistryProvider = {
   id: string;
   type: ModelProviderType;
@@ -63,6 +78,7 @@ export type ModelRegistryEntry = {
     allowedModes?: ExecutionMode[];
     dataBoundary?: ModelDataBoundary;
   };
+  reasoning?: ModelRegistryReasoningConfig;
   metadataOverrides?: Partial<ModelMetadata> & {
     recommendedFor?: string[];
   };
@@ -106,6 +122,7 @@ export type ResolvedRuntimeModel = {
   providerModelId: string;
   apiKey: string | null;
   baseUrl: string | null;
+  reasoning?: RuntimeReasoningConfig | null;
 };
 
 export type ResolvedChatModel = {
