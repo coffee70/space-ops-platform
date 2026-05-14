@@ -24,6 +24,7 @@ const envSchema = z.object({
   OPENROUTER_API_KEY: z.preprocess(emptyStringToUndefined, z.string().min(1).optional()),
   OPENROUTER_BASE_URL: z.preprocess(emptyStringToUndefined, z.string().url().optional()),
   AGENT_RUNTIME_MODEL_METADATA_CACHE_TTL_SECONDS: z.preprocess(emptyStringToUndefined, z.coerce.number().int().nonnegative().optional()),
+  AGENT_RUNTIME_LOG_STREAM_PARTS: z.coerce.boolean().default(false),
   NODE_ENV: z.preprocess(emptyStringToUndefined, z.string().optional()),
 });
 
@@ -48,5 +49,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): RuntimeConfig 
     openRouterApiKey: parsed.OPENROUTER_API_KEY ?? null,
     openRouterBaseUrl: parsed.OPENROUTER_BASE_URL ?? null,
     modelMetadataCacheTtlSeconds: parsed.AGENT_RUNTIME_MODEL_METADATA_CACHE_TTL_SECONDS ?? null,
+    logModelStreamParts: parsed.AGENT_RUNTIME_LOG_STREAM_PARTS,
   };
 }

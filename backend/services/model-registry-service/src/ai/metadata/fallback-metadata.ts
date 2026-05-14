@@ -109,10 +109,22 @@ function humanizeOpenAiId(pm: string): string {
 }
 
 function humanizeAnthropicId(pm: string): string {
-  return pm
-    .split("-")
-    .map((segment) => segment.charAt(0).toUpperCase() + segment.slice(1))
-    .join(" ");
+  const words: string[] = [];
+  const segments = pm.split("-");
+  for (let index = 0; index < segments.length; index += 1) {
+    const segment = segments[index] ?? "";
+    if (/^\d+$/.test(segment)) {
+      const versionSegments = [segment];
+      while (/^\d+$/.test(segments[index + 1] ?? "")) {
+        index += 1;
+        versionSegments.push(segments[index]);
+      }
+      words.push(versionSegments.join("."));
+    } else {
+      words.push(segment.charAt(0).toUpperCase() + segment.slice(1));
+    }
+  }
+  return words.join(" ");
 }
 
 function humanizeGenericId(pm: string): string {

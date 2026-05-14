@@ -188,7 +188,9 @@ export interface ToolExecutionClient {
 
 export interface ModelStreamTextDelta {
   type: "text-delta";
-  textDelta: string;
+  delta?: string;
+  text?: string;
+  textDelta?: string;
 }
 
 export interface ModelStreamToolCall {
@@ -220,6 +222,7 @@ export type ModelStreamPart =
   | ModelStreamToolResult
   | ModelStreamStepFinish
   | ModelStreamFinish
+  | { type: "error"; error: unknown }
   | { type: string; [key: string]: unknown };
 
 export type ModelProviderType =
@@ -377,6 +380,7 @@ export interface RuntimeConfig {
   openRouterApiKey: string | null;
   openRouterBaseUrl: string | null;
   modelMetadataCacheTtlSeconds: number | null;
+  logModelStreamParts: boolean;
 }
 
 export interface RunDependencies {

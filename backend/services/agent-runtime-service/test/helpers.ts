@@ -41,6 +41,7 @@ export function baseRuntimeConfig(overrides: Partial<RuntimeConfig> = {}): Runti
     openRouterApiKey: null,
     openRouterBaseUrl: null,
     modelMetadataCacheTtlSeconds: null,
+    logModelStreamParts: false,
     ...overrides,
   };
 }

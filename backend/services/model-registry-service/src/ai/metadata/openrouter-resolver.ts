@@ -193,6 +193,11 @@ export function openRouterToMetadata(model: OpenRouterModel, providerDisplayName
   };
 }
 
+function normalizeOpenRouterDisplayName(provider: ModelRegistryProvider, displayName: string): string {
+  if (provider.type !== "openai") return displayName;
+  return displayName.replace(/^openai:\s*/i, "").trim();
+}
+
 export function resolveOpenRouterMetadata(input: {
   provider: ModelRegistryProvider;
   entry: ModelRegistryEntry;
@@ -215,5 +220,9 @@ export function resolveOpenRouterMetadata(input: {
 
   const or = pickCapability(modelsById as Map<string, OpenRouterModel>, candidates);
   if (!or) return null;
-  return openRouterToMetadata(or, provider.displayName);
+  const metadata = openRouterToMetadata(or, provider.displayName);
+  return {
+    ...metadata,
+    displayName: normalizeOpenRouterDisplayName(provider, metadata.displayName),
+  };
 }

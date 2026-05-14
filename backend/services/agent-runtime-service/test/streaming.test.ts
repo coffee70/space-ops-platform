@@ -109,3 +109,118 @@ test("chat stream delivers message deltas before completion across multiple chun
   assert.notEqual(runCompletedIndex, -1, "expected a run.completed event");
   assert.ok(firstDeltaIndex < runCompletedIndex, "expected message.delta before run.completed");
 });
+
+test("chat persists AI SDK v5 text-delta delta instead of falling back to no response", async () => {
+  const store = new MemoryConversationStore();
+  const conversation = await store.createConversation({
+    title: "Streaming Session",
+    execution_mode: "read_only",
+    initial_message: { role: "user", content: "Start AI Engineer session." },
+  });
+
+  const app = createApp({
+    config: baseRuntimeConfig({
+      openAiApiKey: "test-key",
+      maxSteps: 3,
+      requestTimeoutMs: 1000,
+      allowMissingKeyFallback: false,
+    }),
+    store,
+    contextClient: new FakeContextClient([contextResolvedEvent()]),
+    toolRegistryClient: new FakeToolRegistryClient([]),
+    toolExecutionClient: new FakeToolExecutionClient({
+      conversation_id: conversation.id,
+      agent_run_id: "ignored",
+      request_id: "ignored",
+      tool_call_id: "ignored",
+      status: "completed",
+      output: {},
+      raw_events: [],
+    }),
+    modelRunner: {
+      async *stream(input) {
+        void input.model;
+        yield { type: "text-start", id: "text-1" };
+        yield { type: "text-delta", id: "text-1", delta: "Visible " };
+        yield { type: "text-delta", id: "text-1", delta: "model output." };
+        yield { type: "text-end", id: "text-1" };
+        yield { type: "finish", finishReason: "stop" };
+      },
+    },
+    modelCatalog: new FakeModelCatalog(),
+  });
+
+  const response = await app.request("/chat", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      conversation_id: conversation.id,
+      execution_mode: "read_only",
+      messages: [{ role: "user", content: "Stream a response." }],
+    }),
+  });
+
+  assert.equal(response.status, 200);
+  await response.text();
+
+  const updatedConversation = await store.getConversation(conversation.id);
+  const assistantMessage = updatedConversation?.messages.findLast((message) => message.role === "assistant");
+  assert.equal(assistantMessage?.content, "Visible model output.");
+  assert.notEqual(assistantMessage?.content, "No response.");
+});
+
+test("chat fails provider stream errors instead of persisting no response", async () => {
+  const store = new MemoryConversationStore();
+  const conversation = await store.createConversation({
+    title: "Streaming Session",
+    execution_mode: "read_only",
+    initial_message: { role: "user", content: "Start AI Engineer session." },
+  });
+
+  const app = createApp({
+    config: baseRuntimeConfig({
+      openAiApiKey: "test-key",
+      maxSteps: 3,
+      requestTimeoutMs: 1000,
+      allowMissingKeyFallback: false,
+    }),
+    store,
+    contextClient: new FakeContextClient([contextResolvedEvent()]),
+    toolRegistryClient: new FakeToolRegistryClient([]),
+    toolExecutionClient: new FakeToolExecutionClient({
+      conversation_id: conversation.id,
+      agent_run_id: "ignored",
+      request_id: "ignored",
+      tool_call_id: "ignored",
+      status: "completed",
+      output: {},
+      raw_events: [],
+    }),
+    modelRunner: {
+      async *stream(input) {
+        void input.model;
+        yield { type: "error", error: new Error("provider stream failed") };
+      },
+    },
+    modelCatalog: new FakeModelCatalog(),
+  });
+
+  const response = await app.request("/chat", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      conversation_id: conversation.id,
+      execution_mode: "read_only",
+      messages: [{ role: "user", content: "Stream a response." }],
+    }),
+  });
+
+  assert.equal(response.status, 200);
+  const body = await response.text();
+  assert.match(body, /run.failed/);
+  assert.match(body, /provider stream failed/);
+
+  const updatedConversation = await store.getConversation(conversation.id);
+  const assistantMessage = updatedConversation?.messages.findLast((message) => message.role === "assistant");
+  assert.equal(assistantMessage, undefined);
+});

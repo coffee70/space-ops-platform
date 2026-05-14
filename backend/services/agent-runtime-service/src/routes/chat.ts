@@ -90,6 +90,23 @@ function contentPreview(content: string): string {
   return content.length > 300 ? `${content.slice(0, 300)}...<truncated>` : content;
 }
 
+function getTextDelta(part: { type: string }): string | null {
+  if (part.type !== "text-delta") {
+    return null;
+  }
+  const fields = part as Record<string, unknown>;
+  if (typeof fields.text === "string") {
+    return fields.text;
+  }
+  if (typeof fields.delta === "string") {
+    return fields.delta;
+  }
+  if (typeof fields.textDelta === "string") {
+    return fields.textDelta;
+  }
+  return null;
+}
+
 export function registerChatRoutes(app: Hono, dependencies: RunDependencies): void {
   app.post("/chat", async (c) => {
     const parsedBody = await c.req.json();
@@ -328,9 +345,15 @@ async function orchestrateChat(input: {
       maxSteps: dependencies.config.maxSteps,
       model: selection.runtime,
     })) {
-      if (part.type === "text-delta" && typeof part.textDelta === "string" && part.textDelta.length > 0) {
-        assistantText += part.textDelta;
-        await stream.emitMessageDelta(part.textDelta);
+      if (part.type === "error") {
+        const fields = part as Record<string, unknown>;
+        const error = fields.error;
+        throw error instanceof Error ? error : new Error(typeof error === "string" ? error : "Model stream failed");
+      }
+      const textDelta = getTextDelta(part);
+      if (textDelta && textDelta.length > 0) {
+        assistantText += textDelta;
+        await stream.emitMessageDelta(textDelta);
       }
     }
 
