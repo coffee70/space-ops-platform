@@ -216,12 +216,27 @@ export interface ModelStreamFinish {
   finishReason: string;
 }
 
+export interface ModelStreamReasoningDelta {
+  type: "reasoning";
+  delta?: string;
+  text?: string;
+  textDelta?: string;
+  providerMetadata?: unknown;
+}
+
+export interface ModelStreamReasoningFinish {
+  type: "reasoning-part-finish";
+  providerMetadata?: unknown;
+}
+
 export type ModelStreamPart =
   | ModelStreamTextDelta
   | ModelStreamToolCall
   | ModelStreamToolResult
   | ModelStreamStepFinish
   | ModelStreamFinish
+  | ModelStreamReasoningDelta
+  | ModelStreamReasoningFinish
   | { type: "error"; error: unknown }
   | { type: string; [key: string]: unknown };
 
@@ -246,6 +261,21 @@ export type ModelCapability =
   | "file-input"
   | "web-search"
   | "code";
+
+export type ReasoningStreamRepresentation = "reasoning" | "reasoning_summary" | "thinking";
+
+export type RuntimeReasoningConfig = {
+  enabled: boolean;
+  representation: ReasoningStreamRepresentation;
+  source: "provider_exposed";
+  providerOptions: Record<string, unknown>;
+};
+
+export type ModelRegistryReasoningConfig = {
+  enabled: boolean;
+  representation: ReasoningStreamRepresentation;
+  providerOptions?: Record<string, unknown>;
+};
 
 export type ModelRegistryProvider = {
   id: string;
@@ -288,6 +318,7 @@ export type ModelRegistryEntry = {
     allowedModes?: ExecutionMode[];
     dataBoundary?: ModelDataBoundary;
   };
+  reasoning?: ModelRegistryReasoningConfig;
   metadataOverrides?: Partial<ModelMetadata> & {
     recommendedFor?: string[];
   };
@@ -331,6 +362,7 @@ export type ResolvedRuntimeModel = {
   providerModelId: string;
   apiKey: string | null;
   baseUrl: string | null;
+  reasoning?: RuntimeReasoningConfig | null;
 };
 
 export type ResolvedChatModel = {
