@@ -38,7 +38,7 @@ function mergeMetadata(base: ModelMetadata, overlay: Partial<ModelMetadata>): Mo
     },
     inputModalities: overlay.inputModalities ?? base.inputModalities,
     outputModalities: overlay.outputModalities ?? base.outputModalities,
-    supportedParameters: overlay.supportedParameters ?? base.supportedParameters,
+    supportedParameters: overlay.supportParameters ?? base.supportedParameters,
     capabilities: overlay.capabilities ?? base.capabilities,
     metadataSources: [...new Set([...base.metadataSources, ...(overlay.metadataSources ?? [])])],
   };
@@ -69,6 +69,19 @@ function resolveProviderApiKey(provider: ModelRegistryProvider, runtime: Runtime
     apiKey = runtime.openAiApiKey;
   }
   return apiKey;
+}
+
+function resolveRuntimeReasoning(entry: ModelRegistryEntry): ResolvedRuntimeModel["reasoning"] {
+  if (!entry.reasoning) {
+    return null;
+  }
+
+  return {
+    enabled: entry.reasoning.enabled,
+    representation: entry.reasoning.representation,
+    source: "provider_exposed",
+    providerOptions: entry.reasoning.providerOptions ?? {},
+  };
 }
 
 export function sortModelsForPicker(models: AiEngineerModelOption[]): AiEngineerModelOption[] {
@@ -190,6 +203,7 @@ export class ModelCatalogService implements ModelCatalogPort {
       providerModelId: entry.providerModelId,
       apiKey,
       baseUrl,
+      reasoning: resolveRuntimeReasoning(entry),
     };
   }
 
