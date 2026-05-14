@@ -119,7 +119,7 @@ function getReasoningDelta(part: { type: string }): string | null {
   if (part.type !== "reasoning") {
     return null;
   }
-  return stringField(part as Record<string, unknown>, ["text", "delta", "textDelta"]);
+  return stringField(part as Record<string, unknown>, ["textDelta", "delta", "text"]);
 }
 
 function reasoningRepresentationForProvider(providerType: string): ReasoningStreamRepresentation {
