@@ -30,6 +30,7 @@ const providerTypeSchema = z.enum([
 const dataBoundarySchema = z.enum(["external_api", "private_cloud", "local_airgapped", "unknown"]) as z.ZodType<ModelDataBoundary>;
 
 const modelCapabilitySchema = z.enum(["text", "vision", "tool-use", "reasoning", "json", "file-input", "web-search", "code"]);
+const reasoningRepresentationSchema = z.enum(["reasoning", "reasoning_summary", "thinking"]);
 
 const metadataOverridesSchema = z
   .object({
@@ -57,6 +58,14 @@ const metadataOverridesSchema = z
   })
   .strict();
 
+const reasoningConfigSchema = z
+  .object({
+    enabled: z.boolean(),
+    representation: reasoningRepresentationSchema,
+    providerOptions: z.record(z.string(), z.unknown()).optional(),
+  })
+  .strict();
+
 const modelEntrySchema = z.object({
   id: z.string().min(1),
   providerRef: z.string().min(1),
@@ -70,6 +79,7 @@ const modelEntrySchema = z.object({
       dataBoundary: dataBoundarySchema.optional(),
     })
     .optional(),
+  reasoning: reasoningConfigSchema.optional(),
   metadataOverrides: metadataOverridesSchema.optional(),
 });
 
@@ -338,6 +348,7 @@ function buildLoadedRegistry(parsed: ModelRegistryConfigFile): LoadedModelRegist
     disabledReason: m.disabledReason,
     defaultFor: m.defaultFor,
     governance: m.governance as ModelRegistryEntry["governance"],
+    reasoning: m.reasoning as ModelRegistryEntry["reasoning"],
     metadataOverrides: m.metadataOverrides as ModelRegistryEntry["metadataOverrides"],
   }));
 
