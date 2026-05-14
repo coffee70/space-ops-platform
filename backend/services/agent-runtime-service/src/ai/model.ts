@@ -42,6 +42,14 @@ function createLanguageModel(model: ResolvedRuntimeModel) {
   throw new Error(`Unsupported provider type: ${model.providerType}`);
 }
 
+function providerOptionsForModel(model: ResolvedRuntimeModel): Record<string, Record<string, unknown>> | undefined {
+  const reasoning = model.reasoning;
+  if (!reasoning?.enabled || Object.keys(reasoning.providerOptions).length === 0) {
+    return undefined;
+  }
+  return reasoning.providerOptions as Record<string, Record<string, unknown>>;
+}
+
 function summarizeStreamPart(part: ModelStreamPart): Record<string, unknown> {
   const fields = part as Record<string, unknown>;
   return {
@@ -90,6 +98,7 @@ export function createModelRunner(config: RuntimeConfig): ModelRunner {
         messages: input.messages,
         tools: input.tools,
         stopWhen: stepCountIs(input.maxSteps),
+        providerOptions: providerOptionsForModel(model),
       });
 
       for await (const rawPart of result.fullStream) {
