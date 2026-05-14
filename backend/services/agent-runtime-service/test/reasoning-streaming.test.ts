@@ -11,6 +11,7 @@ import {
   FakeToolExecutionClient,
   FakeToolRegistryClient,
   MemoryConversationStore,
+  modelOption,
   parseNdjson,
 } from "./helpers.js";
 
@@ -122,6 +123,15 @@ test("chat orchestration normalizes AI SDK reasoning-start/delta/end parts", asy
     initial_message: { role: "user", content: "Start AI Engineer session." },
   });
 
+  const anthropicModel = modelOption({
+    id: "anthropic-sonnet-4-6",
+    providerRef: "anthropic-main",
+    providerType: "anthropic",
+    providerModelId: "claude-sonnet-4-6",
+    name: "Claude Sonnet 4.6",
+    provider: "Anthropic",
+  });
+
   const app = createApp({
     config: baseRuntimeConfig({
       openAiApiKey: "test-key",
@@ -150,9 +160,14 @@ test("chat orchestration normalizes AI SDK reasoning-start/delta/end parts", asy
       { type: "finish", finishReason: "stop" },
     ]),
     modelCatalog: new FakeModelCatalog({
-      providerType: "anthropic",
-      providerModelId: "claude-sonnet-4-6",
-      provider: "Anthropic",
+      default_model_id: anthropicModel.id,
+      models: [anthropicModel],
+      metadata: {
+        registrySource: "config",
+        metadataResolvers: ["test"],
+        cached: true,
+        updatedAt: new Date(0).toISOString(),
+      },
     }),
     createId: (() => {
       const ids = ["agent-run-1", "request-1"];
