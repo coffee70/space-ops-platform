@@ -38,7 +38,7 @@ function mergeMetadata(base: ModelMetadata, overlay: Partial<ModelMetadata>): Mo
     },
     inputModalities: overlay.inputModalities ?? base.inputModalities,
     outputModalities: overlay.outputModalities ?? base.outputModalities,
-    supportedParameters: overlay.supportParameters ?? base.supportedParameters,
+    supportedParameters: overlay.supportedParameters ?? base.supportedParameters,
     capabilities: overlay.capabilities ?? base.capabilities,
     metadataSources: [...new Set([...base.metadataSources, ...(overlay.metadataSources ?? [])])],
   };
