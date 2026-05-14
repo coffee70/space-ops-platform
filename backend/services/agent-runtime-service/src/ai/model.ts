@@ -6,6 +6,7 @@ import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
 import type { ModelRunner, ModelStreamPart, ResolvedRuntimeModel, RuntimeConfig } from "../types.js";
 
 const DEFAULT_OPENAI_BASE_URL = "https://api.openai.com/v1";
+type StreamTextProviderOptions = NonNullable<Parameters<typeof streamText>[0]["providerOptions"]>;
 
 function createLanguageModel(model: ResolvedRuntimeModel) {
   if (model.providerType === "openai") {
@@ -42,10 +43,10 @@ function createLanguageModel(model: ResolvedRuntimeModel) {
   throw new Error(`Unsupported provider type: ${model.providerType}`);
 }
 
-function providerOptionsForModel(model: ResolvedRuntimeModel): Record<string, Record<string, unknown>> | undefined {
+function providerOptionsForModel(model: ResolvedRuntimeModel): StreamTextProviderOptions | undefined {
   const reasoning = model.reasoning;
   if (reasoning?.enabled && Object.keys(reasoning.providerOptions).length > 0) {
-    return reasoning.providerOptions as Record<string, Record<string, unknown>>;
+    return reasoning.providerOptions as StreamTextProviderOptions;
   }
 
   // OpenAI reasoning models can already use/bill internal reasoning tokens.
