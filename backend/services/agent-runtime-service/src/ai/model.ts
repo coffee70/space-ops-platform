@@ -45,20 +45,18 @@ function createLanguageModel(model: ResolvedRuntimeModel) {
 
 export function providerOptionsForModel(model: ResolvedRuntimeModel): StreamTextProviderOptions | undefined {
   const reasoning = model.reasoning;
-  if (reasoning) {
-    if (!reasoning.enabled) {
-      return undefined;
-    }
-    if (Object.keys(reasoning.providerOptions).length > 0) {
-      return reasoning.providerOptions as StreamTextProviderOptions;
-    }
+  if (!reasoning?.enabled) {
+    return undefined;
   }
 
-  // OpenAI reasoning models can already use/bill internal reasoning tokens.
-  // Requesting a reasoning summary is a visibility knob; it intentionally does
-  // not set reasoningEffort, so it does not ask OpenAI to reason harder.
-  // Explicit registry reasoning.enabled=false above suppresses this default.
-  if (model.providerType === "openai" && model.providerModelId.startsWith("gpt-5")) {
+  if (Object.keys(reasoning.providerOptions).length > 0) {
+    return reasoning.providerOptions as StreamTextProviderOptions;
+  }
+
+  // For OpenAI models, reasoning.enabled=true means the registry has opted this
+  // model into visible reasoning summaries. The registry, not model-id naming,
+  // is the source of truth for whether this provider option should be added.
+  if (model.providerType === "openai") {
     return {
       openai: {
         reasoningSummary: "auto",
