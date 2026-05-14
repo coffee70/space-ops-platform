@@ -115,11 +115,19 @@ function getTextDelta(part: { type: string }): string | null {
   return stringField(part as Record<string, unknown>, ["text", "delta", "textDelta"]);
 }
 
+function isReasoningStart(part: { type: string }): boolean {
+  return part.type === "reasoning-start";
+}
+
 function getReasoningDelta(part: { type: string }): string | null {
-  if (part.type !== "reasoning") {
+  if (part.type !== "reasoning" && part.type !== "reasoning-delta") {
     return null;
   }
   return stringField(part as Record<string, unknown>, ["textDelta", "delta", "text"]);
+}
+
+function isReasoningEnd(part: { type: string }): boolean {
+  return part.type === "reasoning-part-finish" || part.type === "reasoning-end";
 }
 
 function reasoningRepresentationForProvider(providerType: string): ReasoningStreamRepresentation {
@@ -374,6 +382,19 @@ async function orchestrateChat(input: {
     let reasoningCompleted = false;
     const reasoningRepresentation = reasoningRepresentationForProvider(selection.runtime.providerType);
 
+    const emitReasoningStarted = async () => {
+      if (reasoningStarted) {
+        return;
+      }
+      reasoningStarted = true;
+      await stream.emitEvent("message.reasoning.started", {
+        provider_type: selection.runtime.providerType,
+        provider_model_id: selection.runtime.providerModelId,
+        representation: reasoningRepresentation,
+        source: "provider_exposed",
+      });
+    };
+
     for await (const part of dependencies.modelRunner.stream({
       system: systemPrompt,
       messages: modelMessages,
@@ -387,17 +408,14 @@ async function orchestrateChat(input: {
         throw error instanceof Error ? error : new Error(typeof error === "string" ? error : "Model stream failed");
       }
 
+      if (isReasoningStart(part)) {
+        await emitReasoningStarted();
+        continue;
+      }
+
       const reasoningDelta = getReasoningDelta(part);
       if (reasoningDelta && reasoningDelta.length > 0) {
-        if (!reasoningStarted) {
-          reasoningStarted = true;
-          await stream.emitEvent("message.reasoning.started", {
-            provider_type: selection.runtime.providerType,
-            provider_model_id: selection.runtime.providerModelId,
-            representation: reasoningRepresentation,
-            source: "provider_exposed",
-          });
-        }
+        await emitReasoningStarted();
         reasoningText += reasoningDelta;
         await stream.emitEvent("message.reasoning.delta", {
           text_delta: reasoningDelta,
@@ -405,7 +423,7 @@ async function orchestrateChat(input: {
         continue;
       }
 
-      if (part.type === "reasoning-part-finish" && reasoningStarted && !reasoningCompleted) {
+      if (isReasoningEnd(part) && reasoningStarted && !reasoningCompleted) {
         reasoningCompleted = true;
         await stream.emitEvent("message.reasoning.completed", {
           text_length: reasoningText.length,
