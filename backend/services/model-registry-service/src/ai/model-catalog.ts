@@ -22,6 +22,12 @@ import type {
   RuntimeConfig,
 } from "../types.js";
 
+const DEFAULT_OPENAI_BASE_URL = "https://api.openai.com/v1";
+
+type ProviderAvailability = {
+  availableModelIds: Set<string>;
+};
+
 function mergeMetadata(base: ModelMetadata, overlay: Partial<ModelMetadata>): ModelMetadata {
   return {
     ...base,
@@ -57,8 +63,19 @@ function extractGpt5Minor(pm: string): number | null {
   return Number.parseInt(m[1], 10);
 }
 
+function resolveProviderApiKey(provider: ModelRegistryProvider, runtime: RuntimeConfig): string | null {
+  let apiKey = provider.apiKeyEnv ? resolveProcessEnvKey(provider.apiKeyEnv) : null;
+  if (!apiKey && provider.type === "openai") {
+    apiKey = runtime.openAiApiKey;
+  }
+  return apiKey;
+}
+
 export function sortModelsForPicker(models: AiEngineerModelOption[]): AiEngineerModelOption[] {
   return [...models].sort((x, y) => {
+    const xSelectable = x.enabled && x.isAvailable;
+    const ySelectable = y.enabled && y.isAvailable;
+    if (xSelectable !== ySelectable) return xSelectable ? -1 : 1;
     if (x.enabled !== y.enabled) return x.enabled ? -1 : 1;
     if (x.isDefault !== y.isDefault) return x.isDefault ? -1 : 1;
     const xDemo = x.recommendedFor.includes("demo-safe") ? 1 : 0;
@@ -114,12 +131,12 @@ export class ModelCatalogService implements ModelCatalogPort {
       resolvedId = requested;
     } else {
       const defaultChat = this.registry.defaults.chatModel;
-      if (defaultChat && byId.get(defaultChat)?.enabled) {
+      if (defaultChat && byId.get(defaultChat)?.enabled && byId.get(defaultChat)?.isAvailable) {
         resolvedId = defaultChat;
-      } else if (this.runtime.modelId && byId.get(this.runtime.modelId)?.enabled) {
+      } else if (this.runtime.modelId && byId.get(this.runtime.modelId)?.enabled && byId.get(this.runtime.modelId)?.isAvailable) {
         resolvedId = this.runtime.modelId;
       } else {
-        resolvedId = [...byId.values()].find((m) => m.enabled)?.id ?? null;
+        resolvedId = [...byId.values()].find((m) => m.enabled && m.isAvailable)?.id ?? null;
       }
     }
 
@@ -160,10 +177,7 @@ export class ModelCatalogService implements ModelCatalogPort {
   }
 
   private resolveProviderRuntime(entry: ModelRegistryEntry, provider: ModelRegistryProvider): ResolvedRuntimeModel {
-    let apiKey = provider.apiKeyEnv ? resolveProcessEnvKey(provider.apiKeyEnv) : null;
-    if (!apiKey && provider.type === "openai") {
-      apiKey = this.runtime.openAiApiKey;
-    }
+    const apiKey = resolveProviderApiKey(provider, this.runtime);
 
     let baseUrl: string | null = provider.baseUrl ?? null;
     if (provider.type === "openai") {
@@ -181,12 +195,13 @@ export class ModelCatalogService implements ModelCatalogPort {
 
   private async buildEnriched(): Promise<{ payload: ListAiEngineerModelsResponse; byId: Map<string, AiEngineerModelOption> }> {
     const { modelsById, cached, updatedAt } = await ensureOpenRouterCatalog(this.registry, this.runtime);
+    const providerAvailability = await this.resolveProviderAvailability();
 
     const options: AiEngineerModelOption[] = [];
     for (const entry of this.registry.models) {
       const provider = this.registry.providersById.get(entry.providerRef);
       if (!provider) continue;
-      const option = this.enrichEntry(entry, provider, modelsById);
+      const option = this.enrichEntry(entry, provider, modelsById, providerAvailability.get(provider.id));
       options.push(option);
     }
 
@@ -212,10 +227,53 @@ export class ModelCatalogService implements ModelCatalogPort {
     return { payload, byId };
   }
 
+  private async resolveProviderAvailability(): Promise<Map<string, ProviderAvailability>> {
+    const availability = new Map<string, ProviderAvailability>();
+    const openAiProviders = [...this.registry.providersById.values()].filter((provider) => provider.type === "openai");
+
+    await Promise.all(
+      openAiProviders.map(async (provider) => {
+        const apiKey = resolveProviderApiKey(provider, this.runtime);
+        if (!apiKey) return;
+
+        const baseUrl = this.runtime.openAiBaseUrl ?? provider.baseUrl ?? DEFAULT_OPENAI_BASE_URL;
+        const normalizedBaseUrl = baseUrl.replace(/\/+$/, "");
+        try {
+          const response = await fetch(`${normalizedBaseUrl}/models`, {
+            headers: {
+              authorization: `Bearer ${apiKey}`,
+            },
+          });
+          if (!response.ok) {
+            console.warn(`[model-registry] failed to validate OpenAI models for provider ${provider.id}: HTTP ${response.status}`);
+            return;
+          }
+          const body = (await response.json()) as { data?: Array<{ id?: unknown }> };
+          const ids = new Set(
+            (body.data ?? [])
+              .map((model) => model.id)
+              .filter((id): id is string => typeof id === "string" && id.trim().length > 0),
+          );
+          if (ids.size > 0) {
+            availability.set(provider.id, { availableModelIds: ids });
+          }
+        } catch (error) {
+          console.warn(
+            `[model-registry] failed to validate OpenAI models for provider ${provider.id}`,
+            error instanceof Error ? error.message : error,
+          );
+        }
+      }),
+    );
+
+    return availability;
+  }
+
   private enrichEntry(
     entry: ModelRegistryEntry,
     provider: ModelRegistryProvider,
     modelsById: Map<string, unknown>,
+    availability?: ProviderAvailability,
   ): AiEngineerModelOption {
     const fallback = fallbackMetadataForEntry({ entry, provider });
     const orPartial =
@@ -238,6 +296,13 @@ export class ModelCatalogService implements ModelCatalogPort {
     const dataBoundary = defaultDataBoundary(entry);
 
     const isDefault = entry.id === this.registry.defaults.chatModel;
+    const providerModelAvailable = availability ? availability.availableModelIds.has(entry.providerModelId) : true;
+    const isAvailable = entry.enabled && providerModelAvailable;
+    const disabledReason = !entry.enabled
+      ? entry.disabledReason ?? "Model is disabled"
+      : !providerModelAvailable
+        ? `Provider model id '${entry.providerModelId}' is not available for provider ${provider.displayName}.`
+        : null;
 
     return {
       id: entry.id,
@@ -248,8 +313,8 @@ export class ModelCatalogService implements ModelCatalogPort {
       provider: merged.providerDisplayName,
       description: merged.description,
       enabled: entry.enabled,
-      isAvailable: entry.enabled,
-      disabledReason: entry.enabled ? null : entry.disabledReason ?? "Model is disabled",
+      isAvailable,
+      disabledReason,
       isDefault,
       defaultFor: entry.defaultFor ?? [],
       governance: {
