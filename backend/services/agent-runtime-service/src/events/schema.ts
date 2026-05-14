@@ -27,6 +27,9 @@ export const AGENT_EVENT_REQUIRED_PAYLOAD_FIELDS = {
     "risk_level",
     "validation_status",
   ],
+  "message.reasoning.started": ["provider_type", "provider_model_id", "representation", "source"],
+  "message.reasoning.delta": ["text_delta"],
+  "message.reasoning.completed": ["text_length", "representation"],
   "message.delta": ["text_delta"],
   "message.completed": ["message_id", "content_preview"],
   "model.selected": [
