@@ -11,12 +11,14 @@ export class AgentEventStream {
   readonly #trace: TraceEnvelope;
   readonly #sequencer: RunSequencer;
   readonly #now: () => Date;
+  readonly #logStreamWrites: boolean;
 
   constructor(input: {
     store: ConversationStore;
     trace: TraceEnvelope;
     sequencer: RunSequencer;
     now: () => Date;
+    logStreamWrites?: boolean;
   }) {
     const stream = new TransformStream<Uint8Array, Uint8Array>();
     this.#writer = stream.writable.getWriter();
@@ -24,6 +26,7 @@ export class AgentEventStream {
     this.#trace = input.trace;
     this.#sequencer = input.sequencer;
     this.#now = input.now;
+    this.#logStreamWrites = input.logStreamWrites ?? false;
 
     const init: ResponseInit = {
       headers: {
@@ -100,6 +103,18 @@ export class AgentEventStream {
   }
 
   async #write(chunk: StreamChunk): Promise<void> {
+    if (this.#logStreamWrites && chunk.kind === "event" && chunk.event.event_type === "message.delta") {
+      const delta = chunk.event.payload.text_delta;
+      console.debug(
+        "[agent-runtime] ndjson write message.delta",
+        JSON.stringify({
+          timestamp: new Date().toISOString(),
+          sequence: chunk.event.sequence,
+          deltaLength: typeof delta === "string" ? delta.length : 0,
+          preview: typeof delta === "string" ? delta.slice(0, 80) : "",
+        }),
+      );
+    }
     await this.#writer.write(encoder.encode(`${JSON.stringify(chunk)}\n`));
   }
 }

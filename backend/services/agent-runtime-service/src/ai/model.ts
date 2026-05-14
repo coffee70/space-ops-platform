@@ -58,6 +58,25 @@ function summarizeStreamPart(part: ModelStreamPart): Record<string, unknown> {
   };
 }
 
+function getTextDeltaPreview(part: ModelStreamPart): { length: number; preview: string } | null {
+  if (part.type !== "text-delta") {
+    return null;
+  }
+  const fields = part as Record<string, unknown>;
+  const text =
+    typeof fields.text === "string"
+      ? fields.text
+      : typeof fields.delta === "string"
+        ? fields.delta
+        : typeof fields.textDelta === "string"
+          ? fields.textDelta
+          : null;
+  if (text === null) {
+    return null;
+  }
+  return { length: text.length, preview: text.slice(0, 80) };
+}
+
 export function createModelRunner(config: RuntimeConfig): ModelRunner {
   return {
     async *stream(input): AsyncIterable<ModelStreamPart> {
@@ -76,9 +95,23 @@ export function createModelRunner(config: RuntimeConfig): ModelRunner {
       for await (const rawPart of result.fullStream) {
         const part = rawPart as ModelStreamPart;
         if (config.logModelStreamParts) {
+          const textDelta = getTextDeltaPreview(part);
+          if (textDelta) {
+            console.debug(
+              "[agent-runtime] model text-delta",
+              JSON.stringify({
+                timestamp: new Date().toISOString(),
+                providerType: model.providerType,
+                providerModelId: model.providerModelId,
+                deltaLength: textDelta.length,
+                preview: textDelta.preview,
+              }),
+            );
+          }
           console.debug(
             "[agent-runtime] model fullStream part",
             JSON.stringify({
+              timestamp: new Date().toISOString(),
               providerType: model.providerType,
               providerModelId: model.providerModelId,
               part: summarizeStreamPart(part),
