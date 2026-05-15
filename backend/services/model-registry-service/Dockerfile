@@ -1,9 +1,9 @@
-FROM node:20-alpine
+FROM node:20.19-alpine
 
 WORKDIR /app
 
-COPY package.json tsconfig.json ./
-RUN npm install
+COPY package.json package-lock.json tsconfig.json ./
+RUN npm ci
 
 COPY src ./src
 COPY config ./config
@@ -11,4 +11,3 @@ RUN npm run build
 
 EXPOSE 8080
 CMD ["node", "dist/server.js"]
-
