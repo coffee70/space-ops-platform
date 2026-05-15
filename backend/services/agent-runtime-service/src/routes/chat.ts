@@ -421,7 +421,8 @@ async function orchestrateChat(input: {
       capabilities: selection.option.capabilities,
     });
 
-    const reasoningRepresentation = reasoningRepresentationForProvider(selection.runtime.providerType);
+    const selectedRuntime = selection.runtime;
+    const reasoningRepresentation = reasoningRepresentationForProvider(selectedRuntime.providerType);
 
     const emitReasoningStarted = async () => {
       if (reasoningStarted) {
@@ -429,8 +430,8 @@ async function orchestrateChat(input: {
       }
       reasoningStarted = true;
       await stream.emitEvent("message.reasoning.started", {
-        provider_type: selection.runtime.providerType,
-        provider_model_id: selection.runtime.providerModelId,
+        provider_type: selectedRuntime.providerType,
+        provider_model_id: selectedRuntime.providerModelId,
         representation: reasoningRepresentation,
         source: "provider_exposed",
       });
