@@ -216,6 +216,10 @@ export interface ModelStreamFinish {
   finishReason: string;
 }
 
+export interface ModelStreamAbort {
+  type: "abort";
+}
+
 export interface ModelStreamReasoningDelta {
   type: "reasoning";
   delta?: string;
@@ -235,6 +239,7 @@ export type ModelStreamPart =
   | ModelStreamToolResult
   | ModelStreamStepFinish
   | ModelStreamFinish
+  | ModelStreamAbort
   | ModelStreamReasoningDelta
   | ModelStreamReasoningFinish
   | { type: "error"; error: unknown }
@@ -393,6 +398,7 @@ export interface ModelRunner {
     tools: ToolSet;
     maxSteps: number;
     model: ResolvedRuntimeModel;
+    abortSignal?: AbortSignal;
   }): AsyncIterable<ModelStreamPart>;
 }
 

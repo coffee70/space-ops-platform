@@ -116,6 +116,7 @@ export function createModelRunner(config: RuntimeConfig): ModelRunner {
         tools: input.tools,
         stopWhen: stepCountIs(input.maxSteps),
         providerOptions: providerOptionsForModel(model),
+        abortSignal: input.abortSignal,
       });
 
       for await (const rawPart of result.fullStream) {

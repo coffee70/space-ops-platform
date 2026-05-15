@@ -12,6 +12,7 @@ export class AgentEventStream {
   readonly #sequencer: RunSequencer;
   readonly #now: () => Date;
   readonly #logStreamWrites: boolean;
+  #transportClosed = false;
 
   constructor(input: {
     store: ConversationStore;
@@ -90,7 +91,15 @@ export class AgentEventStream {
   }
 
   async close(): Promise<void> {
-    await this.#writer.close();
+    if (this.#transportClosed) {
+      return;
+    }
+    this.#transportClosed = true;
+    try {
+      await this.#writer.close();
+    } catch {
+      // The downstream client may intentionally disconnect during cancellation.
+    }
   }
 
   async fail(error: unknown): Promise<void> {
@@ -103,6 +112,10 @@ export class AgentEventStream {
   }
 
   async #write(chunk: StreamChunk): Promise<void> {
+    if (this.#transportClosed) {
+      return;
+    }
+
     if (this.#logStreamWrites && chunk.kind === "event" && chunk.event.event_type === "message.delta") {
       const delta = chunk.event.payload.text_delta;
       console.debug(
@@ -115,6 +128,10 @@ export class AgentEventStream {
         }),
       );
     }
-    await this.#writer.write(encoder.encode(`${JSON.stringify(chunk)}\n`));
+    try {
+      await this.#writer.write(encoder.encode(`${JSON.stringify(chunk)}\n`));
+    } catch {
+      this.#transportClosed = true;
+    }
   }
 }
