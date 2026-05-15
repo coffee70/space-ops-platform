@@ -6,6 +6,7 @@ import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
 import type { ModelRunner, ModelStreamPart, ResolvedRuntimeModel, RuntimeConfig } from "../types.js";
 
 const DEFAULT_OPENAI_BASE_URL = "https://api.openai.com/v1";
+type StreamTextProviderOptions = NonNullable<Parameters<typeof streamText>[0]["providerOptions"]>;
 
 function createLanguageModel(model: ResolvedRuntimeModel) {
   if (model.providerType === "openai") {
@@ -40,6 +41,30 @@ function createLanguageModel(model: ResolvedRuntimeModel) {
   }
 
   throw new Error(`Unsupported provider type: ${model.providerType}`);
+}
+
+export function providerOptionsForModel(model: ResolvedRuntimeModel): StreamTextProviderOptions | undefined {
+  const reasoning = model.reasoning;
+  if (!reasoning?.enabled) {
+    return undefined;
+  }
+
+  if (Object.keys(reasoning.providerOptions).length > 0) {
+    return reasoning.providerOptions as StreamTextProviderOptions;
+  }
+
+  // For OpenAI models, reasoning.enabled=true means the registry has opted this
+  // model into visible reasoning summaries. The registry, not model-id naming,
+  // is the source of truth for whether this provider option should be added.
+  if (model.providerType === "openai") {
+    return {
+      openai: {
+        reasoningSummary: "auto",
+      },
+    };
+  }
+
+  return undefined;
 }
 
 function summarizeStreamPart(part: ModelStreamPart): Record<string, unknown> {
@@ -90,6 +115,7 @@ export function createModelRunner(config: RuntimeConfig): ModelRunner {
         messages: input.messages,
         tools: input.tools,
         stopWhen: stepCountIs(input.maxSteps),
+        providerOptions: providerOptionsForModel(model),
       });
 
       for await (const rawPart of result.fullStream) {

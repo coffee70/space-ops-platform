@@ -11,7 +11,15 @@ import { RunSequencer } from "../events/sequencer.js";
 import { runFallback } from "../fallback.js";
 import { completeScriptedRun, resolveScriptedMode, runScriptedMode } from "../scripted.js";
 import { createTrace } from "../trace.js";
-import type { ChatInputMessage, ContextPacketResponse, ConversationDetail, ExecutionMode, RawEventFact, RunDependencies } from "../types.js";
+import type {
+  ChatInputMessage,
+  ContextPacketResponse,
+  ConversationDetail,
+  ExecutionMode,
+  RawEventFact,
+  ReasoningStreamRepresentation,
+  RunDependencies,
+} from "../types.js";
 
 const chatRequestSchema = z.object({
   conversation_id: z.string().uuid(),
@@ -90,21 +98,46 @@ function contentPreview(content: string): string {
   return content.length > 300 ? `${content.slice(0, 300)}...<truncated>` : content;
 }
 
+function stringField(fields: Record<string, unknown>, names: string[]): string | null {
+  for (const name of names) {
+    const value = fields[name];
+    if (typeof value === "string") {
+      return value;
+    }
+  }
+  return null;
+}
+
 function getTextDelta(part: { type: string }): string | null {
   if (part.type !== "text-delta") {
     return null;
   }
-  const fields = part as Record<string, unknown>;
-  if (typeof fields.text === "string") {
-    return fields.text;
+  return stringField(part as Record<string, unknown>, ["text", "delta", "textDelta"]);
+}
+
+function isReasoningStart(part: { type: string }): boolean {
+  return part.type === "reasoning-start";
+}
+
+function getReasoningDelta(part: { type: string }): string | null {
+  if (part.type !== "reasoning" && part.type !== "reasoning-delta") {
+    return null;
   }
-  if (typeof fields.delta === "string") {
-    return fields.delta;
+  return stringField(part as Record<string, unknown>, ["textDelta", "delta", "text"]);
+}
+
+function isReasoningEnd(part: { type: string }): boolean {
+  return part.type === "reasoning-part-finish" || part.type === "reasoning-end";
+}
+
+function reasoningRepresentationForProvider(providerType: string): ReasoningStreamRepresentation {
+  if (providerType === "openai") {
+    return "reasoning_summary";
   }
-  if (typeof fields.textDelta === "string") {
-    return fields.textDelta;
+  if (providerType === "anthropic") {
+    return "thinking";
   }
-  return null;
+  return "reasoning";
 }
 
 export function registerChatRoutes(app: Hono, dependencies: RunDependencies): void {
@@ -344,6 +377,24 @@ async function orchestrateChat(input: {
     });
 
     let assistantText = "";
+    let reasoningText = "";
+    let reasoningStarted = false;
+    let reasoningCompleted = false;
+    const reasoningRepresentation = reasoningRepresentationForProvider(selection.runtime.providerType);
+
+    const emitReasoningStarted = async () => {
+      if (reasoningStarted) {
+        return;
+      }
+      reasoningStarted = true;
+      await stream.emitEvent("message.reasoning.started", {
+        provider_type: selection.runtime.providerType,
+        provider_model_id: selection.runtime.providerModelId,
+        representation: reasoningRepresentation,
+        source: "provider_exposed",
+      });
+    };
+
     for await (const part of dependencies.modelRunner.stream({
       system: systemPrompt,
       messages: modelMessages,
@@ -356,6 +407,31 @@ async function orchestrateChat(input: {
         const error = fields.error;
         throw error instanceof Error ? error : new Error(typeof error === "string" ? error : "Model stream failed");
       }
+
+      if (isReasoningStart(part)) {
+        await emitReasoningStarted();
+        continue;
+      }
+
+      const reasoningDelta = getReasoningDelta(part);
+      if (reasoningDelta && reasoningDelta.length > 0) {
+        await emitReasoningStarted();
+        reasoningText += reasoningDelta;
+        await stream.emitEvent("message.reasoning.delta", {
+          text_delta: reasoningDelta,
+        });
+        continue;
+      }
+
+      if (isReasoningEnd(part) && reasoningStarted && !reasoningCompleted) {
+        reasoningCompleted = true;
+        await stream.emitEvent("message.reasoning.completed", {
+          text_length: reasoningText.length,
+          representation: reasoningRepresentation,
+        });
+        continue;
+      }
+
       const textDelta = getTextDelta(part);
       if (textDelta && textDelta.length > 0) {
         assistantText += textDelta;
@@ -363,23 +439,42 @@ async function orchestrateChat(input: {
       }
     }
 
+    if (reasoningStarted && !reasoningCompleted) {
+      await stream.emitEvent("message.reasoning.completed", {
+        text_length: reasoningText.length,
+        representation: reasoningRepresentation,
+      });
+    }
+
     const finalAssistantText = assistantText.trim().length > 0 ? assistantText : "No response.";
     if (assistantText.trim().length === 0) {
       await stream.emitMessageDelta(finalAssistantText);
     }
+    const assistantMetadata: Record<string, unknown> = {
+      agent_run_id: input.trace.agent_run_id,
+      request_id: input.trace.request_id,
+      model_id: selection.option.id,
+      provider_type: selection.option.providerType,
+      provider_model_id: selection.option.providerModelId,
+      provider: selection.option.provider,
+      data_boundary: selection.option.governance.dataBoundary,
+    };
+    if (reasoningText.trim().length > 0) {
+      assistantMetadata.reasoning = {
+        text: reasoningText,
+        representation: reasoningRepresentation,
+        source: "provider_exposed",
+        provider_type: selection.runtime.providerType,
+        provider_model_id: selection.runtime.providerModelId,
+        streamed: true,
+      };
+    }
+
     const assistantMessage = await dependencies.store.appendMessage({
       conversationId: input.trace.conversation_id,
       role: "assistant",
       content: finalAssistantText,
-      metadata: {
-        agent_run_id: input.trace.agent_run_id,
-        request_id: input.trace.request_id,
-        model_id: selection.option.id,
-        provider_type: selection.option.providerType,
-        provider_model_id: selection.option.providerModelId,
-        provider: selection.option.provider,
-        data_boundary: selection.option.governance.dataBoundary,
-      },
+      metadata: assistantMetadata,
     });
     await stream.emitEvent("message.completed", {
       message_id: assistantMessage.id,
