@@ -181,6 +181,87 @@ test("chat orchestration emits backend-owned run, context, tool, and completion 
   assert.equal(toolExecution.calls[0]?.tool_name, "get_platform_service");
 });
 
+test("chat orchestration persists cancellation instead of normal completion when the model stream aborts", async () => {
+  const store = new MemoryConversationStore();
+  const conversation = await store.createConversation({
+    title: "AI Engineer Session",
+    execution_mode: "read_only",
+    initial_message: { role: "user", content: "Start AI Engineer session." },
+  });
+
+  const app = createApp({
+    config: baseRuntimeConfig({
+      openAiApiKey: "test-key",
+      maxSteps: 3,
+      requestTimeoutMs: 1000,
+      allowMissingKeyFallback: false,
+    }),
+    store,
+    contextClient: new FakeContextClient([contextResolvedEvent()]),
+    toolRegistryClient: new FakeToolRegistryClient([]),
+    toolExecutionClient: new FakeToolExecutionClient({
+      conversation_id: conversation.id,
+      agent_run_id: "ignored",
+      request_id: "ignored",
+      tool_call_id: "ignored",
+      status: "completed",
+      output: {},
+      raw_events: [],
+    }),
+    modelRunner: {
+      async *stream(input) {
+        assert.ok(input.abortSignal);
+        yield { type: "reasoning-start" };
+        yield { type: "reasoning-delta", textDelta: "checking telemetry" };
+        yield { type: "text-delta", textDelta: "Partial answer" };
+        yield { type: "abort" };
+      },
+    },
+    modelCatalog: new FakeModelCatalog(),
+  });
+
+  const response = await app.request("/chat", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      conversation_id: conversation.id,
+      execution_mode: "read_only",
+      messages: [{ role: "user", content: "Inspect cancellation behavior." }],
+    }),
+  });
+
+  assert.equal(response.status, 200);
+  const chunks = parseNdjson(await response.text());
+  const events = chunks.filter((chunk) => chunk.kind === "event") as Array<{
+    event: { event_type: string; payload: Record<string, unknown> };
+  }>;
+
+  const eventTypes = events.map((event) => event.event.event_type);
+  assert.ok(eventTypes.includes("run.started"));
+  assert.ok(eventTypes.includes("context.requested"));
+  assert.ok(eventTypes.includes("context.resolved"));
+  assert.ok(eventTypes.includes("model.selected"));
+  assert.ok(eventTypes.includes("message.reasoning.started"));
+  assert.ok(eventTypes.includes("message.reasoning.delta"));
+  assert.ok(eventTypes.includes("message.delta"));
+  assert.ok(eventTypes.includes("run.cancelled"));
+  assert.equal(eventTypes.includes("message.completed"), false);
+  assert.equal(eventTypes.includes("run.completed"), false);
+  assert.equal(eventTypes.includes("run.failed"), false);
+
+  const cancelled = events.find((event) => event.event.event_type === "run.cancelled")?.event;
+  assert.equal(cancelled?.payload.reason, "model_stream_aborted");
+  assert.equal(cancelled?.payload.assistant_text_length, "Partial answer".length);
+  assert.equal(cancelled?.payload.reasoning_text_length, "checking telemetry".length);
+  assert.equal(cancelled?.payload.tool_call_count, 0);
+
+  const persisted = await store.getConversation(conversation.id);
+  const assistantMessages = persisted?.messages.filter((message) => message.role === "assistant") ?? [];
+  assert.equal(assistantMessages.length, 1);
+  assert.equal(assistantMessages[0]?.content, "Partial answer");
+  assert.equal(assistantMessages[0]?.metadata_json.completion_status, "cancelled");
+});
+
 test("invalid downstream raw events become canonical error events", async () => {
   const store = new MemoryConversationStore();
   const conversation = await store.createConversation({

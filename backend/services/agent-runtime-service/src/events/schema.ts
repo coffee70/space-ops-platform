@@ -4,6 +4,7 @@ export const AGENT_EVENT_REQUIRED_PAYLOAD_FIELDS = {
   "run.started": ["execution_mode", "message_id", "user_message_preview"],
   "run.completed": ["assistant_message_id", "tool_call_count"],
   "run.failed": ["error_code", "message"],
+  "run.cancelled": ["reason", "assistant_text_length", "reasoning_text_length", "tool_call_count"],
   "context.requested": ["retrieval_plan", "limits"],
   "context.resolved": ["context_packet_id", "document_chunk_count", "code_chunk_count", "platform_metadata_bytes", "tool_definition_count", "truncated"],
   "context.failed": ["error_code", "message"],

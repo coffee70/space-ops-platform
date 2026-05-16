@@ -18,6 +18,7 @@ import type {
   ExecutionMode,
   RawEventFact,
   ReasoningStreamRepresentation,
+  ResolvedChatModel,
   RunDependencies,
 } from "../types.js";
 
@@ -140,6 +141,36 @@ function reasoningRepresentationForProvider(providerType: string): ReasoningStre
   return "reasoning";
 }
 
+type ChatCancellationReason = "user_requested_stop" | "model_stream_aborted";
+
+class ChatRunCancelledError extends Error {
+  readonly reason: ChatCancellationReason;
+
+  constructor(reason: ChatCancellationReason) {
+    super(reason === "user_requested_stop" ? "Chat run cancelled by the user." : "Model stream aborted.");
+    this.name = "ChatRunCancelledError";
+    this.reason = reason;
+  }
+}
+
+function cancellationReasonForSignal(signal?: AbortSignal): ChatCancellationReason {
+  return signal?.aborted ? "user_requested_stop" : "model_stream_aborted";
+}
+
+function throwIfRunCancelled(signal?: AbortSignal): void {
+  if (signal?.aborted) {
+    throw new ChatRunCancelledError("user_requested_stop");
+  }
+}
+
+function isRunCancelled(error: unknown, signal?: AbortSignal): boolean {
+  return Boolean(
+    signal?.aborted ||
+      error instanceof ChatRunCancelledError ||
+      (error instanceof Error && error.name === "AbortError"),
+  );
+}
+
 export function registerChatRoutes(app: Hono, dependencies: RunDependencies): void {
   app.post("/chat", async (c) => {
     const parsedBody = await c.req.json();
@@ -189,6 +220,7 @@ export function registerChatRoutes(app: Hono, dependencies: RunDependencies): vo
       trace,
       modelId: payload.model_id,
       persistedUserMessageId: payload.persisted_user_message_id,
+      abortSignal: c.req.raw.signal,
     }).catch((error) => {
       console.error("[agent-runtime] unhandled chat orchestration error", error);
       void stream.fail(error).catch((streamError) => {
@@ -212,8 +244,17 @@ async function orchestrateChat(input: {
   trace: { conversation_id: string; agent_run_id: string; request_id: string };
   modelId: string | null | undefined;
   persistedUserMessageId?: string | null;
+  abortSignal?: AbortSignal;
 }): Promise<void> {
   const { dependencies, stream } = input;
+
+  let toolCallCount = 0;
+  let assistantText = "";
+  let reasoningText = "";
+  let reasoningStarted = false;
+  let reasoningCompleted = false;
+  let contextPacketId: string | null = null;
+  let selection: ResolvedChatModel | null = null;
 
   try {
     const persistedUserMessage = input.persistedUserMessageId
@@ -260,10 +301,10 @@ async function orchestrateChat(input: {
       retrievalPlan,
     });
     await stream.emitRawEvents(context.raw_events);
+    contextPacketId = context.context_packet_id;
 
     const toolDefinitions = await dependencies.toolRegistryClient.listTools(input.trace);
     const toolsForMode = filterToolDefinitionsForExecutionMode(toolDefinitions, input.executionMode);
-    let toolCallCount = 0;
     const changeSummaryAggregator = new ChangeSummaryAggregator({
       stream,
       registryClient:
@@ -297,6 +338,7 @@ async function orchestrateChat(input: {
       messages: modelMessages,
     });
 
+    throwIfRunCancelled(input.abortSignal);
     const scriptedMode = resolveScriptedMode(dependencies.config.scriptedMode, input.latestUserMessage);
     if (scriptedMode) {
       if (!dependencies.config.allowMissingKeyFallback) {
@@ -323,7 +365,6 @@ async function orchestrateChat(input: {
       return;
     }
 
-    let selection;
     try {
       selection = await dependencies.modelCatalog.resolveForChat(input.modelId, input.executionMode);
     } catch (error) {
@@ -332,6 +373,10 @@ async function orchestrateChat(input: {
         return;
       }
       throw error;
+    }
+
+    if (!selection) {
+      throw new Error("Model selection did not resolve.");
     }
 
     const requiresStrictApiKey =
@@ -376,11 +421,8 @@ async function orchestrateChat(input: {
       capabilities: selection.option.capabilities,
     });
 
-    let assistantText = "";
-    let reasoningText = "";
-    let reasoningStarted = false;
-    let reasoningCompleted = false;
-    const reasoningRepresentation = reasoningRepresentationForProvider(selection.runtime.providerType);
+    const selectedRuntime = selection.runtime;
+    const reasoningRepresentation = reasoningRepresentationForProvider(selectedRuntime.providerType);
 
     const emitReasoningStarted = async () => {
       if (reasoningStarted) {
@@ -388,20 +430,28 @@ async function orchestrateChat(input: {
       }
       reasoningStarted = true;
       await stream.emitEvent("message.reasoning.started", {
-        provider_type: selection.runtime.providerType,
-        provider_model_id: selection.runtime.providerModelId,
+        provider_type: selectedRuntime.providerType,
+        provider_model_id: selectedRuntime.providerModelId,
         representation: reasoningRepresentation,
         source: "provider_exposed",
       });
     };
 
+    throwIfRunCancelled(input.abortSignal);
     for await (const part of dependencies.modelRunner.stream({
       system: systemPrompt,
       messages: modelMessages,
       tools,
       maxSteps: dependencies.config.maxSteps,
       model: selection.runtime,
+      abortSignal: input.abortSignal,
     })) {
+      if (part.type === "abort") {
+        throw new ChatRunCancelledError(cancellationReasonForSignal(input.abortSignal));
+      }
+
+      throwIfRunCancelled(input.abortSignal);
+
       if (part.type === "error") {
         const fields = part as Record<string, unknown>;
         const error = fields.error;
@@ -487,6 +537,63 @@ async function orchestrateChat(input: {
     });
     await stream.close();
   } catch (error) {
+    if (isRunCancelled(error, input.abortSignal)) {
+      const assistantMetadata: Record<string, unknown> = {
+        agent_run_id: input.trace.agent_run_id,
+        request_id: input.trace.request_id,
+        completion_status: "cancelled",
+      };
+
+      if (selection) {
+        assistantMetadata.model_id = selection.option.id;
+        assistantMetadata.provider_type = selection.option.providerType;
+        assistantMetadata.provider_model_id = selection.option.providerModelId;
+        assistantMetadata.provider = selection.option.provider;
+        assistantMetadata.data_boundary = selection.option.governance.dataBoundary;
+      }
+
+      if (reasoningText.trim().length > 0 && selection) {
+        assistantMetadata.reasoning = {
+          text: reasoningText,
+          representation: reasoningRepresentationForProvider(selection.runtime.providerType),
+          source: "provider_exposed",
+          provider_type: selection.runtime.providerType,
+          provider_model_id: selection.runtime.providerModelId,
+          streamed: true,
+          completion_status: "cancelled",
+        };
+      }
+
+      let partialAssistantMessageId: string | null = null;
+      if (assistantText.trim().length > 0 || reasoningText.trim().length > 0) {
+        const partialAssistantMessage = await dependencies.store.appendMessage({
+          conversationId: input.trace.conversation_id,
+          role: "assistant",
+          content: assistantText,
+          metadata: assistantMetadata,
+        });
+        partialAssistantMessageId = partialAssistantMessage.id;
+      }
+
+      const payload: Record<string, unknown> = {
+        reason: error instanceof ChatRunCancelledError ? error.reason : cancellationReasonForSignal(input.abortSignal),
+        assistant_text_length: assistantText.length,
+        reasoning_text_length: reasoningText.length,
+        tool_call_count: toolCallCount,
+      };
+
+      if (partialAssistantMessageId) {
+        payload.partial_assistant_message_id = partialAssistantMessageId;
+      }
+      if (contextPacketId) {
+        payload.context_packet_id = contextPacketId;
+      }
+
+      await stream.emitEvent("run.cancelled", payload);
+      await stream.close();
+      return;
+    }
+
     await stream.fail(error);
   }
 }
