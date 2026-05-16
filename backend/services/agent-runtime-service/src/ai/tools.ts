@@ -39,6 +39,24 @@ type JsonSchema = {
   maximum?: number;
 };
 
+const JsonSchemaSchema: z.ZodType<JsonSchema> = z.lazy(() =>
+  z
+    .object({
+      type: z.string().optional(),
+      properties: z.record(JsonSchemaSchema).optional(),
+      required: z.array(z.string()).optional(),
+      additionalProperties: z.boolean().optional(),
+      items: JsonSchemaSchema.optional(),
+      enum: z.array(z.union([z.string(), z.number(), z.boolean()])).optional(),
+      description: z.string().optional(),
+      minLength: z.number().optional(),
+      maxLength: z.number().optional(),
+      minimum: z.number().optional(),
+      maximum: z.number().optional(),
+    })
+    .passthrough(),
+);
+
 function applyCommonConstraints(schema: JsonSchema, field: ZodTypeAny): ZodTypeAny {
   let constrained = field;
   if (schema.description) constrained = constrained.describe(schema.description);
@@ -90,14 +108,11 @@ function schemaNodeToZod(schema: JsonSchema): ZodTypeAny {
 }
 
 export function schemaToZod(schema: unknown): ZodTypeAny {
-  if (!schema || typeof schema !== "object") {
+  const parsed = JsonSchemaSchema.safeParse(schema);
+  if (!parsed.success || parsed.data.type !== "object") {
     return z.object({}).strict();
   }
-  const typedSchema = schema as JsonSchema;
-  if (typedSchema.type !== "object") {
-    return z.object({}).strict();
-  }
-  return schemaNodeToZod(typedSchema);
+  return schemaNodeToZod(parsed.data);
 }
 
 export function createToolSet(input: {
@@ -116,13 +131,19 @@ export function createToolSet(input: {
   emitRawToolEvents: (events: RawEventFact[] | undefined) => Promise<void>;
 }): ToolSet {
   const toolEntries = filterToolDefinitionsForExecutionMode(input.toolDefinitions, input.executionMode)
-    .map((definition) => [
-      definition.name,
-      tool({
+    .map((definition) => {
+      const inputSchema = schemaToZod(definition.input_schema_json);
+      return [
+        definition.name,
+        tool({
         description: definition.description,
-        inputSchema: schemaToZod(definition.input_schema_json),
+        inputSchema,
         execute: async (args: unknown, options: { toolCallId?: string }) => {
-          const normalizedArgs = typeof args === "object" && args !== null ? (args as Record<string, unknown>) : {};
+          const parsedArgs = inputSchema.safeParse(args);
+          const normalizedArgs =
+            parsedArgs.success && typeof parsedArgs.data === "object" && parsedArgs.data !== null
+              ? (parsedArgs.data as Record<string, unknown>)
+              : {};
           const toolCallId = options.toolCallId ?? crypto.randomUUID();
 
           await input.onToolCallRequested?.(definition, toolCallId, normalizedArgs);
@@ -139,7 +160,8 @@ export function createToolSet(input: {
           return response.output;
         },
       }),
-    ]);
+      ];
+    });
 
   return Object.fromEntries(toolEntries);
 }

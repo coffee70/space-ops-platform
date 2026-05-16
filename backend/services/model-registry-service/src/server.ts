@@ -1,6 +1,7 @@
 import { serve } from "@hono/node-server";
 import { Hono } from "hono";
 import type { ExecutionMode, ListAiEngineerModelsResponse, RuntimeConfig, ResolvedChatModel } from "./types.js";
+import { z } from "zod";
 
 import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -11,6 +12,17 @@ import { ModelCatalogService } from "./ai/model-catalog.js";
 import { ModelSelectionError } from "./ai/model-errors.js";
 import { invalidateOpenRouterResolverCache } from "./ai/metadata/openrouter-resolver.js";
 import { validateModelRegistryConfigContent } from "./ai/model-registry-config.js";
+
+const executionModeSchema = z.enum(["read_only", "suggest", "execute", "governed_execute"]);
+
+const ModelConfigContentRequestSchema = z.object({
+  content: z.string(),
+});
+
+const ResolveChatRequestSchema = z.object({
+  model_id: z.string().nullable().optional(),
+  execution_mode: executionModeSchema,
+});
 
 function normalizeLineEndings(content: string): string {
   return content.replace("\r\n", "\n").replace("\r", "\n");
@@ -77,14 +89,22 @@ export function createApp(overrides?: { config?: RuntimeConfig }) {
   });
 
   app.post("/model-config/validate", async (c) => {
-    const body = await c.req.json<{ content?: unknown }>();
-    const content = typeof body?.content === "string" ? body.content : "";
+    const raw = await c.req.json().catch(() => null);
+    const parsed = ModelConfigContentRequestSchema.safeParse(raw);
+    if (!parsed.success) {
+      return c.json({ detail: { message: "content is required", issues: parsed.error.issues } }, 400);
+    }
+    const content = parsed.data.content;
     return c.json(validateModelRegistryConfigContent(content));
   });
 
   app.put("/model-config", async (c) => {
-    const body = await c.req.json<{ content?: unknown }>();
-    const content = typeof body?.content === "string" ? body.content : "";
+    const raw = await c.req.json().catch(() => null);
+    const parsed = ModelConfigContentRequestSchema.safeParse(raw);
+    if (!parsed.success) {
+      return c.json({ detail: { message: "content is required", issues: parsed.error.issues } }, 400);
+    }
+    const content = parsed.data.content;
     const validation = validateModelRegistryConfigContent(content);
     if (!validation.valid || !validation.parsed) {
       return c.json(
@@ -121,12 +141,13 @@ export function createApp(overrides?: { config?: RuntimeConfig }) {
   });
 
   app.post("/models/resolve-chat", async (c) => {
-    const body = await c.req.json<{ model_id?: unknown; execution_mode?: unknown }>();
-    const modelId = typeof body?.model_id === "string" ? body.model_id : null;
-    const executionMode = body?.execution_mode as ExecutionMode | undefined;
-    if (!executionMode) {
-      return c.json({ detail: { message: "execution_mode is required" } }, 400);
+    const raw = await c.req.json().catch(() => null);
+    const parsed = ResolveChatRequestSchema.safeParse(raw);
+    if (!parsed.success) {
+      return c.json({ detail: { message: "invalid resolve-chat payload", issues: parsed.error.issues } }, 400);
     }
+    const modelId = parsed.data.model_id ?? null;
+    const executionMode: ExecutionMode = parsed.data.execution_mode;
 
     try {
       const resolved: ResolvedChatModel = await getCatalog().resolveForChat(modelId, executionMode);

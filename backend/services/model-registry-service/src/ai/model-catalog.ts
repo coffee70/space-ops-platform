@@ -8,6 +8,7 @@ import {
 } from "./model-registry-config.js";
 import { fallbackMetadataForEntry } from "./metadata/fallback-metadata.js";
 import { ensureOpenRouterCatalog, resolveOpenRouterMetadata } from "./metadata/openrouter-resolver.js";
+import { z } from "zod";
 import type {
   AiEngineerModelOption,
   ExecutionMode,
@@ -23,6 +24,10 @@ import type {
 } from "../types.js";
 
 const DEFAULT_OPENAI_BASE_URL = "https://api.openai.com/v1";
+
+const OpenAiModelsResponseSchema = z.object({
+  data: z.array(z.object({ id: z.string().min(1) }).passthrough()).optional(),
+});
 
 type ProviderAvailability = {
   availableModelIds: Set<string>;
@@ -262,12 +267,12 @@ export class ModelCatalogService implements ModelCatalogPort {
             console.warn(`[model-registry] failed to validate OpenAI models for provider ${provider.id}: HTTP ${response.status}`);
             return;
           }
-          const body = (await response.json()) as { data?: Array<{ id?: unknown }> };
-          const ids = new Set(
-            (body.data ?? [])
-              .map((model) => model.id)
-              .filter((id): id is string => typeof id === "string" && id.trim().length > 0),
-          );
+          const parsed = OpenAiModelsResponseSchema.safeParse(await response.json());
+          if (!parsed.success) {
+            console.warn(`[model-registry] invalid OpenAI models response for provider ${provider.id}`);
+            return;
+          }
+          const ids = new Set(parsed.data.data?.map((model) => model.id) ?? []);
           if (ids.size > 0) {
             availability.set(provider.id, { availableModelIds: ids });
           }
@@ -303,7 +308,8 @@ export class ModelCatalogService implements ModelCatalogPort {
     if (overrides) {
       const { recommendedFor: _r, ...metaParts } = overrides as Record<string, unknown>;
       merged = mergeMetadata(merged, metaParts as Partial<ModelMetadata>);
-      if (Array.isArray(_r)) recommendedFor = _r as string[];
+      const parsedRecommendedFor = z.array(z.string()).safeParse(_r);
+      if (parsedRecommendedFor.success) recommendedFor = parsedRecommendedFor.data;
     }
 
     const allowedModes = defaultAllowedModes(entry);

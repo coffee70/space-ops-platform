@@ -14,6 +14,7 @@
  */
 
 import type { AgentEventStream } from "./events/stream.js";
+import { z } from "zod";
 
 export interface ChangeSummaryRegistryUnit {
   unit_id: string;
@@ -40,31 +41,46 @@ interface BranchContext {
   emittedCommitSha: string | null;
 }
 
-function asString(value: unknown): string | undefined {
-  return typeof value === "string" && value.length > 0 ? value : undefined;
-}
+const ToolEnvelopeSchema = z
+  .object({
+    branch: z.string().min(1).optional(),
+    commit_sha: z.string().min(1).optional(),
+    changed_files: z.array(z.string()).optional(),
+    data: z.record(z.unknown()).optional(),
+  })
+  .passthrough();
 
-function asBoolean(value: unknown): boolean | undefined {
-  return typeof value === "boolean" ? value : undefined;
-}
+const CreateWorkingBranchArgsSchema = z
+  .object({
+    branch: z.string().min(1).optional(),
+    from_branch: z.string().min(1).optional(),
+  })
+  .passthrough();
 
-function readEnvelope(output: unknown): {
-  branch?: string;
-  commit_sha?: string;
-  changed_files?: string[];
-  data?: Record<string, unknown>;
-} {
-  if (!output || typeof output !== "object") return {};
-  const record = output as Record<string, unknown>;
-  const changedFiles = Array.isArray(record.changed_files)
-    ? record.changed_files.filter((entry): entry is string => typeof entry === "string")
-    : undefined;
-  return {
-    branch: asString(record.branch),
-    commit_sha: asString(record.commit_sha),
-    changed_files: changedFiles,
-    data: record.data && typeof record.data === "object" ? (record.data as Record<string, unknown>) : undefined,
-  };
+const WriteSourceFileArgsSchema = z
+  .object({
+    branch: z.string().min(1).optional(),
+    path: z.string().min(1).optional(),
+  })
+  .passthrough();
+
+const CreateCommitArgsSchema = z
+  .object({
+    branch: z.string().min(1).optional(),
+  })
+  .passthrough();
+
+const CreateBranchEnvelopeDataSchema = z
+  .object({
+    base_branch: z.string().min(1).optional(),
+    base_commit_sha: z.string().min(1).optional(),
+    branch_existed_before: z.boolean().optional(),
+  })
+  .passthrough();
+
+function readEnvelope(output: unknown): z.infer<typeof ToolEnvelopeSchema> {
+  const parsed = ToolEnvelopeSchema.safeParse(output);
+  return parsed.success ? parsed.data : {};
 }
 
 function isManagedFilePath(path: string): boolean {
@@ -175,22 +191,24 @@ export class ChangeSummaryAggregator {
   }
 
   private observeCreateBranch(args: Record<string, unknown>, output: unknown): void {
-    const branch = asString(args.branch);
-    const fromBranchArg = asString(args.from_branch);
+    const argsParsed = CreateWorkingBranchArgsSchema.safeParse(args);
+    const branch = argsParsed.success ? argsParsed.data.branch : undefined;
+    const fromBranchArg = argsParsed.success ? argsParsed.data.from_branch : undefined;
     const envelope = readEnvelope(output);
     const branchName = envelope.branch ?? branch;
     if (!branchName) return;
     const context = this.getOrCreateContext(branchName);
     if (envelope.data) {
-      const baseBranch = asString(envelope.data.base_branch);
-      const baseCommitSha = asString(envelope.data.base_commit_sha);
-      if (baseBranch) context.baseBranch = baseBranch;
-      if (baseCommitSha) context.baseCommitSha = baseCommitSha;
-      const branchExistedBefore = asBoolean(envelope.data.branch_existed_before);
-      if (branchExistedBefore && envelope.commit_sha) {
-        // If we attached to an existing branch, treat the current head as the
-        // baseline so revert restores something sensible.
-        context.baseCommitSha = context.baseCommitSha ?? envelope.commit_sha;
+      const dataParsed = CreateBranchEnvelopeDataSchema.safeParse(envelope.data);
+      if (dataParsed.success) {
+        const { base_branch, base_commit_sha, branch_existed_before } = dataParsed.data;
+        if (base_branch) context.baseBranch = base_branch;
+        if (base_commit_sha) context.baseCommitSha = base_commit_sha;
+        if (branch_existed_before && envelope.commit_sha) {
+          // If we attached to an existing branch, treat the current head as the
+          // baseline so revert restores something sensible.
+          context.baseCommitSha = context.baseCommitSha ?? envelope.commit_sha;
+        }
       }
     }
     if (!context.baseCommitSha && envelope.commit_sha) {
@@ -202,8 +220,9 @@ export class ChangeSummaryAggregator {
   }
 
   private observeWriteFile(args: Record<string, unknown>, output: unknown): void {
-    const branch = asString(args.branch);
-    const path = asString(args.path);
+    const argsParsed = WriteSourceFileArgsSchema.safeParse(args);
+    const branch = argsParsed.success ? argsParsed.data.branch : undefined;
+    const path = argsParsed.success ? argsParsed.data.path : undefined;
     const envelope = readEnvelope(output);
     const branchName = envelope.branch ?? branch;
     if (!branchName) return;
@@ -215,7 +234,8 @@ export class ChangeSummaryAggregator {
   }
 
   private async observeCreateCommit(args: Record<string, unknown>, output: unknown): Promise<void> {
-    const branch = asString(args.branch);
+    const argsParsed = CreateCommitArgsSchema.safeParse(args);
+    const branch = argsParsed.success ? argsParsed.data.branch : undefined;
     const envelope = readEnvelope(output);
     const branchName = envelope.branch ?? branch;
     if (!branchName) return;

@@ -6,6 +6,30 @@ function serviceUrl(config: RuntimeConfig, serviceSlug: string, path: string): s
   return `${config.controlPlaneUrl.replace(/\/$/, "")}/internal/runtime-services/${serviceSlug}/${path.replace(/^\//, "")}`;
 }
 
+const ToolExecutionResponseSchema: z.ZodType<ToolExecutionResponse, z.ZodTypeDef, unknown> = z
+  .object({
+  conversation_id: z.string().nullable(),
+  agent_run_id: z.string(),
+  request_id: z.string(),
+  tool_call_id: z.string(),
+  status: z.enum(["completed", "failed", "confirmation_required"]),
+  output: z.any(),
+  raw_events: z
+    .array(
+      z
+        .object({
+          event_type: z.string(),
+          emitted_by: z.string(),
+          payload: z.record(z.unknown()),
+          tool_call_id: z.string().nullable().optional(),
+          created_at: z.string().optional(),
+        })
+        .passthrough(),
+    )
+    .optional(),
+  })
+  .transform((value) => ({ ...value, output: value.output }));
+
 export class HttpToolExecutionClient implements ToolExecutionClient {
   readonly #config: RuntimeConfig;
 
@@ -46,18 +70,6 @@ export class HttpToolExecutionClient implements ToolExecutionClient {
       throw new Error(detail || "Tool execution failed");
     }
 
-    const payload = await response.json();
-    const parsed = z
-      .object({
-        conversation_id: z.string().nullable(),
-        agent_run_id: z.string(),
-        request_id: z.string(),
-        tool_call_id: z.string(),
-        status: z.enum(["completed", "failed", "confirmation_required"]),
-        output: z.unknown().default({}),
-        raw_events: z.array(z.record(z.unknown())).optional(),
-      })
-      .parse(payload);
-    return parsed as ToolExecutionResponse;
+    return ToolExecutionResponseSchema.parse(await response.json());
   }
 }
