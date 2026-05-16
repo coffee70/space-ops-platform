@@ -6,29 +6,38 @@ function serviceUrl(config: RuntimeConfig, serviceSlug: string, path: string): s
   return `${config.controlPlaneUrl.replace(/\/$/, "")}/internal/runtime-services/${serviceSlug}/${path.replace(/^\//, "")}`;
 }
 
-const ToolExecutionResponseSchema: z.ZodType<ToolExecutionResponse, z.ZodTypeDef, unknown> = z
+const ToolExecutionResponseSchema = z
   .object({
-  conversation_id: z.string().nullable(),
-  agent_run_id: z.string(),
-  request_id: z.string(),
-  tool_call_id: z.string(),
-  status: z.enum(["completed", "failed", "confirmation_required"]),
-  output: z.any(),
-  raw_events: z
-    .array(
-      z
-        .object({
-          event_type: z.string(),
-          emitted_by: z.string(),
-          payload: z.record(z.unknown()),
-          tool_call_id: z.string().nullable().optional(),
-          created_at: z.string().optional(),
-        })
-        .passthrough(),
-    )
-    .optional(),
+    conversation_id: z.string().nullable(),
+    agent_run_id: z.string(),
+    request_id: z.string(),
+    tool_call_id: z.string(),
+    status: z.enum(["completed", "failed", "confirmation_required"]),
+    output: z.unknown(),
+    raw_events: z
+      .array(
+        z
+          .object({
+            event_type: z.string(),
+            emitted_by: z.string(),
+            payload: z.record(z.unknown()),
+            tool_call_id: z.string().nullable().optional(),
+            created_at: z.string().optional(),
+          })
+          .passthrough(),
+      )
+      .optional(),
   })
-  .transform((value) => ({ ...value, output: value.output }));
+  .passthrough()
+  .superRefine((value, ctx) => {
+    if (!Object.hasOwn(value, "output")) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["output"],
+        message: "Required",
+      });
+    }
+  });
 
 export class HttpToolExecutionClient implements ToolExecutionClient {
   readonly #config: RuntimeConfig;
@@ -70,6 +79,15 @@ export class HttpToolExecutionClient implements ToolExecutionClient {
       throw new Error(detail || "Tool execution failed");
     }
 
-    return ToolExecutionResponseSchema.parse(await response.json());
+    const parsed = ToolExecutionResponseSchema.parse(await response.json());
+    return {
+      conversation_id: parsed.conversation_id,
+      agent_run_id: parsed.agent_run_id,
+      request_id: parsed.request_id,
+      tool_call_id: parsed.tool_call_id,
+      status: parsed.status,
+      output: parsed.output,
+      raw_events: parsed.raw_events,
+    };
   }
 }

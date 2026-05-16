@@ -19,6 +19,14 @@ const ModelRegistryErrorResponseSchema = z.object({
     .optional(),
 });
 
+const ModelSelectionErrorCodeSchema = z.enum([
+  "unknown_model",
+  "model_disabled",
+  "model_not_allowed_for_mode",
+  "provider_not_implemented",
+  "provider_api_key_missing",
+]);
+
 async function jsonRequest<T>(url: string, init: RequestInit, timeoutMs: number, schema: z.ZodSchema<T>): Promise<T> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
@@ -36,7 +44,10 @@ async function jsonRequest<T>(url: string, init: RequestInit, timeoutMs: number,
             message = body.detail;
           } else if (body.detail && typeof body.detail.message === "string") {
             message = body.detail.message;
-            if (typeof body.detail.code === "string") code = body.detail.code as ModelSelectionErrorCode;
+            const parsedCode = ModelSelectionErrorCodeSchema.safeParse(body.detail.code);
+            if (parsedCode.success) {
+              code = parsedCode.data;
+            }
           }
         }
       } catch {

@@ -306,10 +306,13 @@ export class ModelCatalogService implements ModelCatalogPort {
     let recommendedFor: string[] = overrides?.recommendedFor ?? [];
 
     if (overrides) {
-      const { recommendedFor: _r, ...metaParts } = overrides as Record<string, unknown>;
-      merged = mergeMetadata(merged, metaParts as Partial<ModelMetadata>);
-      const parsedRecommendedFor = z.array(z.string()).safeParse(_r);
-      if (parsedRecommendedFor.success) recommendedFor = parsedRecommendedFor.data;
+      const { recommendedFor: recommendedForOverride, ...metaParts } = overrides;
+      merged = mergeMetadata(merged, metaParts);
+
+      const parsedRecommendedFor = z.array(z.string()).safeParse(recommendedForOverride);
+      if (parsedRecommendedFor.success) {
+        recommendedFor = parsedRecommendedFor.data;
+      }
     }
 
     const allowedModes = defaultAllowedModes(entry);

@@ -32,7 +32,7 @@ test("tool execution client posts through tool-execution-service only", async ()
   }) as typeof fetch;
 
   try {
-    await client.execute({
+    const response = await client.execute({
       trace: {
         conversation_id: "conversation-1",
         agent_run_id: "agent-run-1",
@@ -43,6 +43,7 @@ test("tool execution client posts through tool-execution-service only", async ()
       input: { service_slug: "agent-runtime-service" },
       execution_mode: "read_only",
     });
+    assert.deepEqual(response.output, { ok: true });
   } finally {
     globalThis.fetch = originalFetch;
   }
@@ -102,4 +103,45 @@ test("tool execution client forwards top-level confirmation token", async () => 
   const requestBody = JSON.parse(String(calls[0]?.init?.body ?? "{}")) as Record<string, unknown>;
   assert.equal(requestBody.confirmation_token, "confirmed");
   assert.deepEqual(requestBody.input, {});
+});
+
+test("tool execution client rejects malformed response payloads", async () => {
+  const client = new HttpToolExecutionClient(baseRuntimeConfig({ allowMissingKeyFallback: false }));
+
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async () =>
+    new Response(
+      JSON.stringify({
+        conversation_id: "conversation-1",
+        agent_run_id: "agent-run-1",
+        request_id: "request-1",
+        status: "completed",
+        output: { ok: true },
+        raw_events: [],
+      }),
+      {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      },
+    )) as typeof fetch;
+
+  try {
+    await assert.rejects(
+      () =>
+        client.execute({
+          trace: {
+            conversation_id: "conversation-1",
+            agent_run_id: "agent-run-1",
+            request_id: "request-1",
+            tool_call_id: "tool-call-1",
+          },
+          tool_name: "get_platform_service",
+          input: { service_slug: "agent-runtime-service" },
+          execution_mode: "read_only",
+        }),
+      /tool_call_id/,
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 });
