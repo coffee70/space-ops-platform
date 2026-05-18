@@ -1,5 +1,6 @@
 import type { LoadedModelRegistry } from "../model-registry-config.js";
 import type { ModelCapability, ModelMetadata, ModelRegistryEntry, ModelRegistryProvider } from "../../types.js";
+import { z } from "zod";
 
 const OPENROUTER_FETCH_TIMEOUT_MS = 5000;
 
@@ -34,6 +35,48 @@ type CacheEntry = {
   fetchedAt: number;
   modelsById: Map<string, OpenRouterModel>;
 };
+
+const OpenRouterModelSchema = z
+  .object({
+    id: z.string(),
+    name: z.string().optional(),
+    description: z.string().nullable().optional(),
+    context_length: z.number().nullable().optional(),
+    architecture: z
+      .object({
+        input_modalities: z.array(z.string()).optional(),
+        output_modalities: z.array(z.string()).optional(),
+        modality: z.string().nullable().optional(),
+        tokenizer: z.string().nullable().optional(),
+        instruct_type: z.string().nullable().optional(),
+      })
+      .passthrough()
+      .optional(),
+    top_provider: z
+      .object({
+        context_length: z.number().nullable().optional(),
+        max_completion_tokens: z.number().nullable().optional(),
+      })
+      .passthrough()
+      .optional(),
+    supported_parameters: z.array(z.string()).optional(),
+    pricing: z
+      .object({
+        prompt: z.union([z.string(), z.number()]).nullable().optional(),
+        completion: z.union([z.string(), z.number()]).nullable().optional(),
+        web_search: z.union([z.string(), z.number()]).nullable().optional(),
+        internal_reasoning: z.union([z.string(), z.number()]).nullable().optional(),
+        image: z.union([z.string(), z.number()]).nullable().optional(),
+        request: z.union([z.string(), z.number()]).nullable().optional(),
+      })
+      .passthrough()
+      .optional(),
+  })
+  .passthrough();
+
+const OpenRouterModelsResponseSchema = z.object({
+  data: z.array(OpenRouterModelSchema).optional(),
+});
 
 /** Keyed by resolver endpoint + auth presence (never stores secrets). */
 const cacheByKey = new Map<string, CacheEntry>();
@@ -105,7 +148,16 @@ export async function ensureOpenRouterCatalog(
         updatedAt: new Date(stale?.fetchedAt ?? 0).toISOString(),
       };
     }
-    const body = (await response.json()) as { data?: OpenRouterModel[] };
+    const parsed = OpenRouterModelsResponseSchema.safeParse(await response.json());
+    if (!parsed.success) {
+      const stale = cacheByKey.get(cacheKey);
+      return {
+        modelsById: stale?.modelsById ?? new Map(),
+        cached: Boolean(stale),
+        updatedAt: new Date(stale?.fetchedAt ?? 0).toISOString(),
+      };
+    }
+    const body = parsed.data;
     const modelsById = new Map<string, OpenRouterModel>();
     for (const model of body.data ?? []) {
       modelsById.set(model.id, model);
@@ -218,7 +270,12 @@ export function resolveOpenRouterMetadata(input: {
     candidates.push(`${provider.id}/${pm}`, pm);
   }
 
-  const or = pickCapability(modelsById as Map<string, OpenRouterModel>, candidates);
+  const parsedModels = new Map<string, OpenRouterModel>();
+  for (const [id, value] of modelsById.entries()) {
+    const parsed = OpenRouterModelSchema.safeParse(value);
+    if (parsed.success) parsedModels.set(id, parsed.data);
+  }
+  const or = pickCapability(parsedModels, candidates);
   if (!or) return null;
   const metadata = openRouterToMetadata(or, provider.displayName);
   return {

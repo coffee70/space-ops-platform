@@ -1,11 +1,33 @@
 import type { ExecutionMode, ListAiEngineerModelsResponse, ModelCatalogPort, ResolvedChatModel, RuntimeConfig } from "../types.js";
 import { ModelSelectionError, type ModelSelectionErrorCode } from "../ai/model-errors.js";
+import { ListAiEngineerModelsResponseSchema, ResolvedChatModelSchema } from "../model-schemas.js";
+import { z } from "zod";
 
 function normalizeBaseUrl(baseUrl: string): string {
   return baseUrl.trim().replace(/\/$/, "");
 }
 
-async function jsonRequest<T>(url: string, init: RequestInit, timeoutMs: number): Promise<T> {
+const ModelRegistryErrorResponseSchema = z.object({
+  detail: z
+    .union([
+      z.string(),
+      z.object({
+        message: z.unknown().optional(),
+        code: z.unknown().optional(),
+      }),
+    ])
+    .optional(),
+});
+
+const ModelSelectionErrorCodeSchema = z.enum([
+  "unknown_model",
+  "model_disabled",
+  "model_not_allowed_for_mode",
+  "provider_not_implemented",
+  "provider_api_key_missing",
+]);
+
+async function jsonRequest<T>(url: string, init: RequestInit, timeoutMs: number, schema: z.ZodSchema<T>): Promise<T> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
   try {
@@ -15,19 +37,25 @@ async function jsonRequest<T>(url: string, init: RequestInit, timeoutMs: number)
       let code: ModelSelectionErrorCode = "unknown_model";
       const text = await response.text().catch(() => "");
       try {
-        const body = JSON.parse(text) as { detail?: { message?: unknown; code?: unknown } | string };
-        if (typeof body.detail === "string") {
-          message = body.detail;
-        } else if (body.detail && typeof body.detail.message === "string") {
-          message = body.detail.message;
-          if (typeof body.detail.code === "string") code = body.detail.code as ModelSelectionErrorCode;
+        const parsed = ModelRegistryErrorResponseSchema.safeParse(JSON.parse(text));
+        if (parsed.success) {
+          const body = parsed.data;
+          if (typeof body.detail === "string") {
+            message = body.detail;
+          } else if (body.detail && typeof body.detail.message === "string") {
+            message = body.detail.message;
+            const parsedCode = ModelSelectionErrorCodeSchema.safeParse(body.detail.code);
+            if (parsedCode.success) {
+              code = parsedCode.data;
+            }
+          }
         }
       } catch {
         if (text.trim().length > 0) message = `${message} ${text}`.trim();
       }
       throw new ModelSelectionError(code, message);
     }
-    return (await response.json()) as T;
+    return schema.parse(await response.json());
   } finally {
     clearTimeout(timeout);
   }
@@ -50,6 +78,7 @@ export class HttpModelRegistryClient implements ModelCatalogPort {
       `${this.baseUrl}/models`,
       { method: "GET" },
       this.timeoutMs,
+      ListAiEngineerModelsResponseSchema,
     );
   }
 
@@ -62,6 +91,7 @@ export class HttpModelRegistryClient implements ModelCatalogPort {
         body: JSON.stringify({ model_id: modelId ?? null, execution_mode: executionMode }),
       },
       this.timeoutMs,
+      ResolvedChatModelSchema,
     );
   }
 }

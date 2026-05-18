@@ -1,25 +1,25 @@
 import type { ChangeSummaryRegistryClient, ChangeSummaryRegistryUnit } from "../change-summary.js";
 import type { RuntimeConfig } from "../types.js";
+import { z } from "zod";
 
-interface RegistryUnitWire {
-  unit_id?: string;
-  unitId?: string;
-  source_path?: string;
-  sourcePath?: string;
-  service_slug?: string | null;
-  serviceSlug?: string | null;
-  application_id?: string | null;
-  applicationId?: string | null;
-  runtime_kind?: string | null;
-  runtimeKind?: string | null;
-  category?: string | null;
-  capabilities?: unknown;
-}
+const RegistryUnitWireSchema = z
+  .object({
+    unit_id: z.string().optional(),
+    unitId: z.string().optional(),
+    source_path: z.string().optional(),
+    sourcePath: z.string().optional(),
+    service_slug: z.string().nullable().optional(),
+    serviceSlug: z.string().nullable().optional(),
+    application_id: z.string().nullable().optional(),
+    applicationId: z.string().nullable().optional(),
+    runtime_kind: z.string().nullable().optional(),
+    runtimeKind: z.string().nullable().optional(),
+    category: z.string().nullable().optional(),
+    capabilities: z.array(z.string()).optional().default([]),
+  })
+  .passthrough();
 
-function pickStringArray(value: unknown): string[] {
-  if (!Array.isArray(value)) return [];
-  return value.filter((entry): entry is string => typeof entry === "string");
-}
+const RegistryUnitsWireSchema = z.array(RegistryUnitWireSchema);
 
 function pickString(value: unknown): string | undefined {
   return typeof value === "string" && value.length > 0 ? value : undefined;
@@ -50,8 +50,11 @@ export class HttpChangeSummaryRegistryClient implements ChangeSummaryRegistryCli
     if (!response.ok) {
       throw new Error(`registry units lookup failed: ${response.status}`);
     }
-    const payload = (await response.json()) as RegistryUnitWire[];
-    if (!Array.isArray(payload)) return [];
+    const parsed = RegistryUnitsWireSchema.safeParse(await response.json());
+    if (!parsed.success) {
+      throw new Error("registry units lookup returned invalid payload");
+    }
+    const payload = parsed.data;
     const units: ChangeSummaryRegistryUnit[] = [];
     for (const entry of payload) {
       const unitId = pickString(entry.unit_id) ?? pickString(entry.unitId);
@@ -65,7 +68,7 @@ export class HttpChangeSummaryRegistryClient implements ChangeSummaryRegistryCli
         service_slug: pickString(entry.service_slug) ?? pickString(entry.serviceSlug) ?? null,
         application_id: pickString(entry.application_id) ?? pickString(entry.applicationId) ?? null,
         runtime_kind: runtimeKind ?? null,
-        capabilities: pickStringArray(entry.capabilities),
+        capabilities: entry.capabilities,
         category: pickString(entry.category) ?? null,
       });
     }
