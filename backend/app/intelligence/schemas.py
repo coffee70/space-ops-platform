@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from typing import Any, Literal
+from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -18,15 +19,14 @@ class TraceEnvelope(BaseModel):
 class ToolExecutionRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    conversation_id: str | None = None
-    agent_run_id: str
-    request_id: str
-    tool_call_id: str
+    conversation_id: UUID | None = None
+    agent_run_id: UUID
+    request_id: UUID
+    tool_call_id: UUID
     tool_name: str
     input: dict[str, Any] = Field(default_factory=dict)
     confirmation_token: str | None = None
     execution_mode: Literal["read_only", "suggest", "execute", "governed_execute"] = "read_only"
-    message_id: str | None = None
 
 
 class ToolExecutionResponse(BaseModel):

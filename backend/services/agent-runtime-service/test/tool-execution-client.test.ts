@@ -16,10 +16,10 @@ test("tool execution client posts through tool-execution-service only", async ()
     });
     return new Response(
       JSON.stringify({
-        conversation_id: "conversation-1",
-        agent_run_id: "agent-run-1",
-        request_id: "request-1",
-        tool_call_id: "tool-call-1",
+        conversation_id: "11111111-1111-4111-8111-111111111111",
+        agent_run_id: "22222222-2222-4222-8222-222222222222",
+        request_id: "33333333-3333-4333-8333-333333333333",
+        tool_call_id: "44444444-4444-4444-8444-444444444444",
         status: "completed",
         output: { ok: true },
         raw_events: [],
@@ -34,10 +34,10 @@ test("tool execution client posts through tool-execution-service only", async ()
   try {
     const response = await client.execute({
       trace: {
-        conversation_id: "conversation-1",
-        agent_run_id: "agent-run-1",
-        request_id: "request-1",
-        tool_call_id: "tool-call-1",
+        conversation_id: "11111111-1111-4111-8111-111111111111",
+        agent_run_id: "22222222-2222-4222-8222-222222222222",
+        request_id: "33333333-3333-4333-8333-333333333333",
+        tool_call_id: "44444444-4444-4444-8444-444444444444",
       },
       tool_name: "get_platform_service",
       input: { service_slug: "agent-runtime-service" },
@@ -67,10 +67,10 @@ test("tool execution client forwards top-level confirmation token", async () => 
     });
     return new Response(
       JSON.stringify({
-        conversation_id: "conversation-1",
-        agent_run_id: "agent-run-1",
-        request_id: "request-1",
-        tool_call_id: "tool-call-1",
+        conversation_id: "11111111-1111-4111-8111-111111111111",
+        agent_run_id: "22222222-2222-4222-8222-222222222222",
+        request_id: "33333333-3333-4333-8333-333333333333",
+        tool_call_id: "44444444-4444-4444-8444-444444444444",
         status: "completed",
         output: { ok: true },
         raw_events: [],
@@ -85,10 +85,10 @@ test("tool execution client forwards top-level confirmation token", async () => 
   try {
     await client.execute({
       trace: {
-        conversation_id: "conversation-1",
-        agent_run_id: "agent-run-1",
-        request_id: "request-1",
-        tool_call_id: "tool-call-1",
+        conversation_id: "11111111-1111-4111-8111-111111111111",
+        agent_run_id: "22222222-2222-4222-8222-222222222222",
+        request_id: "33333333-3333-4333-8333-333333333333",
+        tool_call_id: "44444444-4444-4444-8444-444444444444",
       },
       tool_name: "create_working_branch",
       input: {},
@@ -112,9 +112,9 @@ test("tool execution client rejects malformed response payloads", async () => {
   globalThis.fetch = (async () =>
     new Response(
       JSON.stringify({
-        conversation_id: "conversation-1",
-        agent_run_id: "agent-run-1",
-        request_id: "request-1",
+        conversation_id: "11111111-1111-4111-8111-111111111111",
+        agent_run_id: "22222222-2222-4222-8222-222222222222",
+        request_id: "33333333-3333-4333-8333-333333333333",
         status: "completed",
         output: { ok: true },
         raw_events: [],
@@ -130,10 +130,10 @@ test("tool execution client rejects malformed response payloads", async () => {
       () =>
         client.execute({
           trace: {
-            conversation_id: "conversation-1",
-            agent_run_id: "agent-run-1",
-            request_id: "request-1",
-            tool_call_id: "tool-call-1",
+            conversation_id: "11111111-1111-4111-8111-111111111111",
+            agent_run_id: "22222222-2222-4222-8222-222222222222",
+            request_id: "33333333-3333-4333-8333-333333333333",
+            tool_call_id: "44444444-4444-4444-8444-444444444444",
           },
           tool_name: "get_platform_service",
           input: { service_slug: "agent-runtime-service" },

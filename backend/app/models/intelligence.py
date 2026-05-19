@@ -69,7 +69,6 @@ class ToolCall(Base):
     agent_run_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
     request_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
     tool_call_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False, unique=True)
-    message_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("ai_conversation_messages.id", ondelete="SET NULL"), nullable=True)
     tool_name: Mapped[str] = mapped_column(Text, nullable=False)
     input_json: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
     redacted_input_json: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)

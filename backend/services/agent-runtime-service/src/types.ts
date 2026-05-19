@@ -181,7 +181,6 @@ export interface ToolExecutionClient {
     tool_name: string;
     input: Record<string, unknown>;
     execution_mode: ExecutionMode;
-    message_id?: string | null;
     confirmation_token?: string | null;
   }): Promise<ToolExecutionResponse>;
 }

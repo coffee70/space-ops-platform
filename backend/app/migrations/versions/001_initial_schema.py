@@ -471,12 +471,6 @@ def upgrade() -> None:
         sa.Column("agent_run_id", UUID(as_uuid=True), nullable=False),
         sa.Column("request_id", UUID(as_uuid=True), nullable=False),
         sa.Column("tool_call_id", UUID(as_uuid=True), nullable=False),
-        sa.Column(
-            "message_id",
-            UUID(as_uuid=True),
-            sa.ForeignKey("ai_conversation_messages.id", ondelete="SET NULL"),
-            nullable=True,
-        ),
         sa.Column("tool_name", sa.Text(), nullable=False),
         sa.Column("input_json", JSONB(), nullable=False),
         sa.Column("redacted_input_json", JSONB(), nullable=False),
