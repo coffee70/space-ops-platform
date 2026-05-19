@@ -138,13 +138,13 @@ export function createToolSet(input: {
         tool({
         description: definition.description,
         inputSchema,
-        execute: async (args: unknown, options: { toolCallId?: string }) => {
+        execute: async (args: unknown, _options: { toolCallId?: string }) => {
           const parsedArgs = inputSchema.safeParse(args);
           const normalizedArgs =
             parsedArgs.success && typeof parsedArgs.data === "object" && parsedArgs.data !== null
               ? (parsedArgs.data as Record<string, unknown>)
               : {};
-          const toolCallId = options.toolCallId ?? crypto.randomUUID();
+          const toolCallId = crypto.randomUUID();
 
           await input.onToolCallRequested?.(definition, toolCallId, normalizedArgs);
           const response = await input.toolExecutionClient.execute({

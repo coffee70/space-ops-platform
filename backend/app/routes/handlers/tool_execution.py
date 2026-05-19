@@ -23,6 +23,33 @@ from platform_common.service_proxy import build_service_proxy_url
 EXECUTION_MODE_RANK = {"read_only": 0, "suggest": 1, "execute": 2, "governed_execute": 3}
 
 
+def _trace_identifier_text(body_value: object | None, fallback: str | None) -> str | None:
+    return str(body_value) if body_value is not None else fallback
+
+
+def _uuid_for_storage(value: str | None, field_name: str, *, required: bool = False) -> uuid.UUID | None:
+    if not value:
+        if required:
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "error_code": "invalid_tool_execution_trace_id",
+                    "message": f"{field_name} is required and must be a valid UUID.",
+                },
+            )
+        return None
+    try:
+        return uuid.UUID(value)
+    except (AttributeError, TypeError, ValueError) as exc:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "error_code": "invalid_tool_execution_trace_id",
+                "message": f"{field_name} must be a valid UUID.",
+            },
+        ) from exc
+
+
 def _detail_from_http_response(resp: httpx.Response) -> str | dict:
     """Prefer JSON `detail` object from downstream FastAPI services for structured errors (e.g. 503 index)."""
     try:
@@ -284,12 +311,16 @@ async def _execute_mapped_tool(name: str, tool_input: dict, *, db: Session, trac
 
 async def execute_tool(body: ToolExecutionRequest, request: Request, db: Session = Depends(get_db)):
     trace = extract_trace(request, require_run=True, require_conversation=False)
-    conversation_id = body.conversation_id or trace.get("conversation_id")
-    agent_run_id = body.agent_run_id or trace["agent_run_id"]
-    request_id = body.request_id or trace["request_id"]
-    tool_call_id = body.tool_call_id or trace.get("tool_call_id")
+    conversation_id = _trace_identifier_text(body.conversation_id, trace.get("conversation_id"))
+    agent_run_id = _trace_identifier_text(body.agent_run_id, trace["agent_run_id"])
+    request_id = _trace_identifier_text(body.request_id, trace["request_id"])
+    tool_call_id = _trace_identifier_text(body.tool_call_id, trace.get("tool_call_id"))
     if not tool_call_id:
         raise HTTPException(status_code=400, detail="tool_call_id is required")
+    conversation_uuid = _uuid_for_storage(conversation_id, "conversation_id")
+    agent_run_uuid = _uuid_for_storage(agent_run_id, "agent_run_id", required=True)
+    request_uuid = _uuid_for_storage(request_id, "request_id", required=True)
+    tool_call_uuid = _uuid_for_storage(tool_call_id, "tool_call_id", required=True)
     tool = db.query(ToolDefinition).filter(ToolDefinition.name == body.tool_name).one_or_none()
     if not tool:
         raise HTTPException(status_code=404, detail='tool not found')
@@ -336,11 +367,10 @@ async def execute_tool(body: ToolExecutionRequest, request: Request, db: Session
         ) from exc
 
     call = ToolCall(
-        conversation_id=uuid.UUID(conversation_id) if conversation_id else None,
-        agent_run_id=uuid.UUID(agent_run_id),
-        request_id=uuid.UUID(request_id),
-        tool_call_id=uuid.UUID(tool_call_id),
-        message_id=uuid.UUID(body.message_id) if body.message_id else None,
+        conversation_id=conversation_uuid,
+        agent_run_id=agent_run_uuid,
+        request_id=request_uuid,
+        tool_call_id=tool_call_uuid,
         tool_name=body.tool_name,
         input_json=body.input,
         redacted_input_json=redact(body.input),
