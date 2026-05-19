@@ -8,7 +8,6 @@ from fastapi import Depends, File, Form, HTTPException, UploadFile
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.intelligence.embedding import get_embedding_provider
 from app.intelligence.events import emit_event
 from app.intelligence.hashing import sha256_text
 from app.models.intelligence import Document, DocumentChunk, DocumentIngestionJob
@@ -294,8 +293,6 @@ def search_documents(body: dict, db: Session = Depends(get_db)):
     if not query:
         raise HTTPException(status_code=400, detail="query is required")
     limit = min(max(int(body.get("limit", 6)), 1), 8)
-    provider = get_embedding_provider()
-    _ = provider.embed(query)
 
     docs = db.query(DocumentChunk, Document).join(Document, Document.id == DocumentChunk.document_id).filter(Document.ingestion_status == "ready").all()
     scored: list[dict] = []
@@ -306,7 +303,7 @@ def search_documents(body: dict, db: Session = Depends(get_db)):
             continue
         if body.get("subsystem_id") and document.subsystem_id != body["subsystem_id"]:
             continue
-        if not chunk.embedding:
+        if chunk.embedding is None:
             continue
         score, ranking_signals = _score_document_chunk(query, chunk, document)
         if score <= 0:
