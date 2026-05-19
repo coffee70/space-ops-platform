@@ -38,6 +38,11 @@ class _Provider:
         return [float(len(text))]
 
 
+class _TruthyUnsafeEmbedding:
+    def __bool__(self) -> bool:
+        raise AssertionError("embedding truthiness should not be evaluated")
+
+
 class _TupleQuery:
     def __init__(self, rows):
         self._rows = rows
@@ -264,7 +269,6 @@ async def _upload_document(
 
 @pytest.mark.anyio
 async def test_phase3_fixture_document_upload_emits_lifecycle_events_and_searchable_chunks(monkeypatch) -> None:
-    monkeypatch.setattr(document_knowledge, "get_embedding_provider", lambda: _Provider())
     monkeypatch.setattr(document_ingestion, "get_embedding_provider", lambda: _Provider())
     session = _SessionDouble()
     fixture_path = FIXTURES_ROOT / "phase3_documents" / "battery_efficiency_notes.md"
@@ -350,7 +354,6 @@ async def test_document_worker_emits_traced_started_and_completed_events(monkeyp
 
 @pytest.mark.anyio
 async def test_document_search_hardening_ranking_filters_and_limits(monkeypatch) -> None:
-    monkeypatch.setattr(document_knowledge, "get_embedding_provider", lambda: _Provider())
     monkeypatch.setattr(document_ingestion, "get_embedding_provider", lambda: _Provider())
     session = _SessionDouble()
 
@@ -429,8 +432,31 @@ The spacecraft has general operations procedures and scheduling notes.
 
 
 @pytest.mark.anyio
+async def test_document_search_accepts_non_none_embedding_objects_without_bool_coercion(monkeypatch) -> None:
+    monkeypatch.setattr(document_ingestion, "get_embedding_provider", lambda: _Provider())
+    session = _SessionDouble()
+
+    await _upload_document(
+        session,
+        filename="battery-note.md",
+        content="battery efficiency note for the auxiliary thermal loop",
+    )
+    document = session.documents[0]
+    document_ingestion.ingest_document_now(db=session, document=document)
+    session.document_chunks[0].embedding = _TruthyUnsafeEmbedding()
+
+    results = document_knowledge.search_documents(
+        {"query": "battery efficiency", "limit": 2},
+        db=session,
+    )
+
+    assert results
+    assert results[0]["title"] == "battery-note.md"
+    assert "battery efficiency" in results[0]["content"].lower()
+
+
+@pytest.mark.anyio
 async def test_document_reingest_queues_job_and_replaces_chunks(monkeypatch) -> None:
-    monkeypatch.setattr(document_knowledge, "get_embedding_provider", lambda: _Provider())
     monkeypatch.setattr(document_ingestion, "get_embedding_provider", lambda: _Provider())
     monkeypatch.setattr(document_ingestion_worker, "get_db_context", lambda: _session_context(session))
     session = _SessionDouble()
