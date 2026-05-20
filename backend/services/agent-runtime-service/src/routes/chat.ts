@@ -52,7 +52,25 @@ const CONTEXT_LIMITS = {
   tool_definitions: 20,
 };
 
-function buildRetrievalPlan(message: string): {
+const CODE_INTENT_PATTERN =
+  /\b(code|codebase|source|service|route|component|file|repo|repository|runtime|deploy|deployment|index|indexed|search|implementation|endpoint)\b|code_index_not_ready|search_codebase/;
+const DOCUMENT_INTENT_PATTERN = /\b(document|mission|vehicle|telemetry|analysis|plan|design)\b/;
+const RETRY_INTENT_PATTERN =
+  /\b(try again|retry|rerun|run it again|again|reattempt|re-attempt|hit the index|hit index|hit the search|search again|recheck|check again)\b/;
+
+function hasCodeIntent(message: string): boolean {
+  return CODE_INTENT_PATTERN.test(message.toLowerCase());
+}
+
+function hasRetryIntent(message: string): boolean {
+  return RETRY_INTENT_PATTERN.test(message.toLowerCase());
+}
+
+function recentConversationHasCodeIntent(messages: ChatInputMessage[]): boolean {
+  return messages.slice(-8).some((message) => hasCodeIntent(message.content));
+}
+
+function buildRetrievalPlan(message: string, recentMessages: ChatInputMessage[] = []): {
   documents: boolean;
   code: boolean;
   platform: boolean;
@@ -60,8 +78,8 @@ function buildRetrievalPlan(message: string): {
   summary: string;
 } {
   const normalized = message.toLowerCase();
-  const code = /(code|service|route|component|file|repo|runtime|deploy|deployment)/.test(normalized);
-  const documents = /(document|mission|vehicle|telemetry|analysis|plan|design)/.test(normalized) || !code;
+  const code = hasCodeIntent(normalized) || (hasRetryIntent(normalized) && recentConversationHasCodeIntent(recentMessages));
+  const documents = DOCUMENT_INTENT_PATTERN.test(normalized) || !code;
 
   return {
     documents,
@@ -292,7 +310,7 @@ async function orchestrateChat(input: {
       user_message_preview: contentPreview(input.latestUserMessage),
     });
 
-    const retrievalPlan = buildRetrievalPlan(input.latestUserMessage);
+    const retrievalPlan = buildRetrievalPlan(input.latestUserMessage, input.conversation.messages as ChatInputMessage[]);
     await stream.emitEvent("context.requested", {
       retrieval_plan: retrievalPlan,
       limits: CONTEXT_LIMITS,

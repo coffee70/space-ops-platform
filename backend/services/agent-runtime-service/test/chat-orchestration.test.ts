@@ -181,6 +181,145 @@ test("chat orchestration emits backend-owned run, context, tool, and completion 
   assert.equal(toolExecution.calls[0]?.tool_name, "get_platform_service");
 });
 
+test("retry after code index failure requests fresh code retrieval from recent context", async () => {
+  const store = new MemoryConversationStore();
+  const conversation = await store.createConversation({
+    title: "AI Engineer Session",
+    execution_mode: "read_only",
+    initial_message: { role: "user", content: "Search the codebase for the metadata endpoint." },
+  });
+  await store.appendMessage({
+    conversationId: conversation.id,
+    role: "assistant",
+    content: "The code search failed because the backend returned code_index_not_ready.",
+  });
+  const contextClient = new FakeContextClient([contextResolvedEvent()]);
+  let observedSystemPrompt = "";
+
+  const app = createApp({
+    config: baseRuntimeConfig({
+      openAiApiKey: "test-key",
+      maxSteps: 3,
+      requestTimeoutMs: 1000,
+      allowMissingKeyFallback: false,
+    }),
+    store,
+    contextClient,
+    toolRegistryClient: new FakeToolRegistryClient([
+      {
+        name: "search_codebase",
+        description: "Search managed source repositories.",
+        category: "source",
+        layer_target: "layer2",
+        read_write_classification: "read",
+        required_execution_mode: "read_only",
+        enabled: true,
+        requires_confirmation: false,
+        input_schema_json: {
+          type: "object",
+          properties: {
+            query: { type: "string" },
+          },
+          required: ["query"],
+        },
+      },
+    ]),
+    toolExecutionClient: new FakeToolExecutionClient({
+      conversation_id: conversation.id,
+      agent_run_id: "ignored",
+      request_id: "ignored",
+      tool_call_id: "ignored",
+      status: "completed",
+      output: {},
+      raw_events: [],
+    }),
+    modelRunner: {
+      async *stream(input) {
+        void input.model;
+        observedSystemPrompt = input.system;
+        yield { type: "text-delta", textDelta: "I will retry against the current code index." };
+        yield { type: "finish", finishReason: "stop" };
+      },
+    },
+    modelCatalog: new FakeModelCatalog(),
+  });
+
+  const response = await app.request("/chat", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      conversation_id: conversation.id,
+      execution_mode: "read_only",
+      messages: [{ role: "user", content: "try again" }],
+    }),
+  });
+
+  assert.equal(response.status, 200);
+  await response.text();
+
+  assert.equal(contextClient.calls.length, 1);
+  assert.equal(contextClient.calls[0]?.message, "try again");
+  assert.equal(contextClient.calls[0]?.retrieval_plan.code, true);
+  assert.equal(contextClient.calls[0]?.retrieval_plan.documents, false);
+  assert.match(observedSystemPrompt, /Retrieval plan: documents=false, code=true, platform=false, tools=true/);
+  assert.match(observedSystemPrompt, /prior failure as historical only/);
+});
+
+test("explicit index retry language requests code retrieval without prior context", async () => {
+  const store = new MemoryConversationStore();
+  const conversation = await store.createConversation({
+    title: "AI Engineer Session",
+    execution_mode: "read_only",
+    initial_message: { role: "user", content: "Start AI Engineer session." },
+  });
+  const contextClient = new FakeContextClient([contextResolvedEvent()]);
+
+  const app = createApp({
+    config: baseRuntimeConfig({
+      openAiApiKey: "test-key",
+      maxSteps: 3,
+      requestTimeoutMs: 1000,
+      allowMissingKeyFallback: false,
+    }),
+    store,
+    contextClient,
+    toolRegistryClient: new FakeToolRegistryClient([]),
+    toolExecutionClient: new FakeToolExecutionClient({
+      conversation_id: conversation.id,
+      agent_run_id: "ignored",
+      request_id: "ignored",
+      tool_call_id: "ignored",
+      status: "completed",
+      output: {},
+      raw_events: [],
+    }),
+    modelRunner: {
+      async *stream(input) {
+        void input.model;
+        yield { type: "text-delta", textDelta: "Checking the index again." };
+        yield { type: "finish", finishReason: "stop" };
+      },
+    },
+    modelCatalog: new FakeModelCatalog(),
+  });
+
+  const response = await app.request("/chat", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      conversation_id: conversation.id,
+      execution_mode: "read_only",
+      messages: [{ role: "user", content: "hit the index again" }],
+    }),
+  });
+
+  assert.equal(response.status, 200);
+  await response.text();
+
+  assert.equal(contextClient.calls.length, 1);
+  assert.equal(contextClient.calls[0]?.retrieval_plan.code, true);
+});
+
 test("chat orchestration reports step limit when max steps are exhausted before assistant text", async () => {
   const store = new MemoryConversationStore();
   const conversation = await store.createConversation({

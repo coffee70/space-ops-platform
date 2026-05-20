@@ -86,6 +86,7 @@ export function buildAiEngineerSystemPrompt(input: AiEngineerSystemPromptInput):
     "Tool-use discipline:",
     "- Use meaningful registered tools by capability; do not construct raw internal REST calls yourself.",
     "- Do not claim a tool succeeded unless the tool result or action event says it succeeded.",
+    "- If the user asks to retry, recheck, or try again after a prior tool or retrieval failure, treat the prior failure as historical only and attempt fresh available retrieval or tool use before restating the failure.",
     "- If a tool is unavailable, disabled, or blocked by execution mode, explain that limitation and provide the safest next step.",
     "",
     "Managed-source change workflow:",

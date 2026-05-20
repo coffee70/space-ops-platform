@@ -213,6 +213,14 @@ export class MemoryConversationStore implements ConversationStore {
 }
 
 export class FakeContextClient implements ContextRetrievalClient {
+  calls: Array<{
+    message: string;
+    mission_id?: string | null;
+    vehicle_id?: string | null;
+    execution_mode: ExecutionMode;
+    retrieval_plan: RetrievalPlan;
+  }> = [];
+
   constructor(private readonly rawEvents: RawEventFact[] = []) {}
 
   async resolve(input: {
@@ -223,6 +231,14 @@ export class FakeContextClient implements ContextRetrievalClient {
     execution_mode: ExecutionMode;
     retrieval_plan: RetrievalPlan;
   }): Promise<ContextPacketResponse> {
+    this.calls.push({
+      message: input.message,
+      mission_id: input.mission_id,
+      vehicle_id: input.vehicle_id,
+      execution_mode: input.execution_mode,
+      retrieval_plan: input.retrieval_plan,
+    });
+
     return {
       conversation_id: input.trace.conversation_id,
       agent_run_id: input.trace.agent_run_id,
