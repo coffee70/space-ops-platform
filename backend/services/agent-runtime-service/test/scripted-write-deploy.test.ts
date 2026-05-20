@@ -17,7 +17,7 @@ const WRITE_TOOL_DEFINITIONS: ToolDefinition[] = [
   category: "phase3-test",
   layer_target: "layer1",
   read_write_classification: "write",
-  required_execution_mode: "execute",
+  required_execution_mode: name === "deploy_service_or_application" ? "governed_execute" : "execute",
   enabled: true,
   requires_confirmation: false,
   input_schema_json: { type: "object", properties: {}, additionalProperties: true },
@@ -59,11 +59,11 @@ function toolResponse(toolName: string, trace: { conversation_id: string; agent_
   };
 }
 
-test("scripted_write_deploy uses execute-only tools through tool-execution in order", async () => {
+test("scripted_write_deploy requires governed execute for direct deployment", async () => {
   const store = new MemoryConversationStore();
   const conversation = await store.createConversation({
     title: "AI Engineer Session",
-    execution_mode: "execute",
+    execution_mode: "governed_execute",
     initial_message: { role: "user", content: "Start AI Engineer session." },
   });
 
@@ -91,7 +91,7 @@ test("scripted_write_deploy uses execute-only tools through tool-execution in or
     headers: { "content-type": "application/json" },
     body: JSON.stringify({
       conversation_id: conversation.id,
-      execution_mode: "execute",
+      execution_mode: "governed_execute",
       messages: [{ role: "user", content: "Deploy the deterministic Phase 3 fixture." }],
     }),
   });
@@ -119,7 +119,7 @@ test("scripted_write_deploy uses execute-only tools through tool-execution in or
     "create_commit",
     "deploy_service_or_application",
   ]);
-  assert.ok(toolExecution.calls.every((call) => call.execution_mode === "execute"));
+  assert.ok(toolExecution.calls.every((call) => call.execution_mode === "governed_execute"));
   assert.deepEqual(toolExecution.calls[0]?.input, { branch: "feature/phase3-no-llm", from_branch: "main" });
   assert.equal(toolExecution.calls[1]?.input.unit_id, "phase3-test-fixture-service");
   assert.equal(toolExecution.calls[5]?.input.unit_id, "phase3-test-fixture-service");

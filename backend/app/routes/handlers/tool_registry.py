@@ -374,7 +374,8 @@ def seed_tools(db: Session = Depends(get_db)):
     ]
     for name, description, cat, lt, bk in writes:
         read_write = 'destructive_write' if name == 'delete_managed_resources' else 'write'
-        upsert(name=name, description=description, category=cat, layer_target=lt, read_write=read_write, execution_mode='execute', backing_service=bk[0], backing_api=bk[1])
+        execution_mode = 'governed_execute' if name in {'deploy_service_or_application', 'delete_managed_resources'} else 'execute'
+        upsert(name=name, description=description, category=cat, layer_target=lt, read_write=read_write, execution_mode=execution_mode, backing_service=bk[0], backing_api=bk[1])
 
     stale_removed = _delete_stale_tool_definitions(db)
     db.flush()

@@ -33,8 +33,16 @@ test("AI Engineer system prompt includes required durable constraints", () => {
   assert.match(prompt, /In `read_only`, inspect and explain only/);
   assert.match(prompt, /In `suggest`, inspect and propose changes only/);
   assert.match(prompt, /In `execute`, perform only enabled write tools/);
-  assert.match(prompt, /In `governed_execute`, follow approval and governance requirements/);
-  assert.match(prompt, /Do not deploy unless the user explicitly asks and deployment tools are enabled/);
+  assert.match(prompt, /inspect relevant docs and source/);
+  assert.match(prompt, /use an isolated branch or worktree when available/);
+  assert.match(prompt, /write only the scoped requested changes/);
+  assert.match(prompt, /create a commit/);
+  assert.match(prompt, /stop after preparing the preview change/);
+  assert.match(prompt, /use the generated preview controls to deploy or revert/);
+  assert.match(prompt, /In `execute`, do not deploy directly, revert directly, delete managed resources, or promote runtime changes directly/);
+  assert.match(prompt, /In `governed_execute`, more privileged direct operational actions may be available/);
+  assert.match(prompt, /direct deploy, direct delete/);
+  assert.match(prompt, /Do not deploy, revert, delete managed resources, or promote runtime changes unless/);
   assert.match(prompt, /Use scaffolding, broad refactors, or new capabilities only when explicitly requested/);
   assert.match(prompt, /Do not guess\. State uncertainty clearly\./);
 });
