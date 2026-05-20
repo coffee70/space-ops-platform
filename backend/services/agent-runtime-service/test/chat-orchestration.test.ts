@@ -181,6 +181,88 @@ test("chat orchestration emits backend-owned run, context, tool, and completion 
   assert.equal(toolExecution.calls[0]?.tool_name, "get_platform_service");
 });
 
+test("chat orchestration reports step limit when max steps are exhausted before assistant text", async () => {
+  const store = new MemoryConversationStore();
+  const conversation = await store.createConversation({
+    title: "AI Engineer Session",
+    execution_mode: "read_only",
+    initial_message: { role: "user", content: "Start AI Engineer session." },
+  });
+  const maxSteps = 3;
+  const expectedMessage =
+    "I reached the configured agent work limit before I could produce a final response. This run used the maximum of 3 agent steps. Increase PLATFORM_AGENT_RUNTIME_MAX_STEPS if this workflow should be allowed to continue longer.";
+
+  const app = createApp({
+    config: baseRuntimeConfig({
+      openAiApiKey: "test-key",
+      maxSteps,
+      requestTimeoutMs: 1000,
+      allowMissingKeyFallback: false,
+    }),
+    store,
+    contextClient: new FakeContextClient([contextResolvedEvent()]),
+    toolRegistryClient: new FakeToolRegistryClient([]),
+    toolExecutionClient: new FakeToolExecutionClient({
+      conversation_id: conversation.id,
+      agent_run_id: "ignored",
+      request_id: "ignored",
+      tool_call_id: "ignored",
+      status: "completed",
+      output: {},
+      raw_events: [],
+    }),
+    modelRunner: {
+      async *stream(input) {
+        void input.model;
+        for (let step = 1; step <= maxSteps; step += 1) {
+          yield { type: "step-finish", finishReason: "tool-calls", messageId: `message-${step}` };
+        }
+        yield { type: "finish", finishReason: "stop" };
+      },
+    },
+    modelCatalog: new FakeModelCatalog(),
+  });
+
+  const response = await app.request("/chat", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      conversation_id: conversation.id,
+      execution_mode: "read_only",
+      messages: [{ role: "user", content: "Inspect the runtime service." }],
+    }),
+  });
+
+  assert.equal(response.status, 200);
+  const chunks = parseNdjson(await response.text());
+  const events = chunks.filter((chunk) => chunk.kind === "event") as Array<{
+    event: { event_type: string; payload: Record<string, unknown> };
+  }>;
+
+  const delta = events.find((chunk) => chunk.event.event_type === "message.delta")?.event;
+  assert.equal(delta?.payload.text_delta, expectedMessage);
+
+  const messageCompleted = events.find((chunk) => chunk.event.event_type === "message.completed")?.event;
+  assert.equal(messageCompleted?.payload.content_preview, expectedMessage);
+
+  const runCompleted = events.find((chunk) => chunk.event.event_type === "run.completed")?.event;
+  assert.equal(runCompleted?.payload.completion_status, "step_limit_reached");
+  assert.equal(runCompleted?.payload.max_steps, maxSteps);
+  assert.equal(runCompleted?.payload.observed_step_count, maxSteps);
+  assert.equal(runCompleted?.payload.tool_call_count, 0);
+
+  assert.equal(events.some((chunk) => chunk.event.event_type === "run.failed"), false);
+
+  const persisted = await store.getConversation(conversation.id);
+  const assistantMessages = persisted?.messages.filter((message) => message.role === "assistant") ?? [];
+  assert.equal(assistantMessages.length, 1);
+  assert.equal(assistantMessages[0]?.content, expectedMessage);
+  assert.equal(assistantMessages[0]?.metadata_json.completion_status, "step_limit_reached");
+  assert.equal(assistantMessages[0]?.metadata_json.max_steps, maxSteps);
+  assert.equal(assistantMessages[0]?.metadata_json.observed_step_count, maxSteps);
+  assert.equal(assistantMessages[0]?.metadata_json.tool_call_count, 0);
+});
+
 test("chat orchestration persists cancellation instead of normal completion when the model stream aborts", async () => {
   const store = new MemoryConversationStore();
   const conversation = await store.createConversation({

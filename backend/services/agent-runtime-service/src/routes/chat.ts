@@ -141,6 +141,10 @@ function reasoningRepresentationForProvider(providerType: string): ReasoningStre
   return "reasoning";
 }
 
+function stepLimitReachedMessage(maxSteps: number): string {
+  return `I reached the configured agent work limit before I could produce a final response. This run used the maximum of ${maxSteps} agent steps. Increase PLATFORM_AGENT_RUNTIME_MAX_STEPS if this workflow should be allowed to continue longer.`;
+}
+
 type ChatCancellationReason = "user_requested_stop" | "model_stream_aborted";
 
 class ChatRunCancelledError extends Error {
@@ -255,6 +259,9 @@ async function orchestrateChat(input: {
   let reasoningCompleted = false;
   let contextPacketId: string | null = null;
   let selection: ResolvedChatModel | null = null;
+  let observedStepCount = 0;
+  let latestStepFinishReason: string | null = null;
+  let finalFinishReason: string | null = null;
 
   try {
     const persistedUserMessage = input.persistedUserMessageId
@@ -458,6 +465,17 @@ async function orchestrateChat(input: {
         throw error instanceof Error ? error : new Error(typeof error === "string" ? error : "Model stream failed");
       }
 
+      if (part.type === "step-finish") {
+        observedStepCount += 1;
+        latestStepFinishReason = typeof part.finishReason === "string" ? part.finishReason : null;
+        continue;
+      }
+
+      if (part.type === "finish") {
+        finalFinishReason = typeof part.finishReason === "string" ? part.finishReason : null;
+        continue;
+      }
+
       if (isReasoningStart(part)) {
         await emitReasoningStarted();
         continue;
@@ -496,7 +514,13 @@ async function orchestrateChat(input: {
       });
     }
 
-    const finalAssistantText = assistantText.trim().length > 0 ? assistantText : "No response.";
+    const usedStepLimitFallback = assistantText.trim().length === 0 && observedStepCount >= dependencies.config.maxSteps;
+    const finalAssistantText =
+      assistantText.trim().length > 0
+        ? assistantText
+        : usedStepLimitFallback
+          ? stepLimitReachedMessage(dependencies.config.maxSteps)
+          : "No response.";
     if (assistantText.trim().length === 0) {
       await stream.emitMessageDelta(finalAssistantText);
     }
@@ -509,6 +533,18 @@ async function orchestrateChat(input: {
       provider: selection.option.provider,
       data_boundary: selection.option.governance.dataBoundary,
     };
+    if (usedStepLimitFallback) {
+      assistantMetadata.completion_status = "step_limit_reached";
+      assistantMetadata.max_steps = dependencies.config.maxSteps;
+      assistantMetadata.observed_step_count = observedStepCount;
+      assistantMetadata.tool_call_count = toolCallCount;
+      if (latestStepFinishReason) {
+        assistantMetadata.latest_step_finish_reason = latestStepFinishReason;
+      }
+      if (finalFinishReason) {
+        assistantMetadata.final_finish_reason = finalFinishReason;
+      }
+    }
     if (reasoningText.trim().length > 0) {
       assistantMetadata.reasoning = {
         text: reasoningText,
@@ -534,6 +570,15 @@ async function orchestrateChat(input: {
       assistant_message_id: assistantMessage.id,
       tool_call_count: toolCallCount,
       context_packet_id: context.context_packet_id,
+      ...(usedStepLimitFallback
+        ? {
+            completion_status: "step_limit_reached",
+            max_steps: dependencies.config.maxSteps,
+            observed_step_count: observedStepCount,
+            latest_step_finish_reason: latestStepFinishReason,
+            final_finish_reason: finalFinishReason,
+          }
+        : {}),
     });
     await stream.close();
   } catch (error) {
