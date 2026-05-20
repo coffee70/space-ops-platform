@@ -26,9 +26,9 @@ def test_supported_registry_has_exactly_twenty_five_tools() -> None:
     assert len(tool_registry.SUPPORTED_TOOL_NAMES) == 25
 
 
-def test_write_classification_tools_are_execute_only() -> None:
-    executes = {"trigger_document_reingestion", "create_working_branch", "scaffold_service", "write_source_file", "create_commit", "deploy_service_or_application", "delete_managed_resources"}
-    assert executes.issubset(tool_registry.SUPPORTED_TOOL_NAMES)
+def test_write_classification_tools_are_supported() -> None:
+    write_tools = {"trigger_document_reingestion", "create_working_branch", "scaffold_service", "write_source_file", "create_commit", "deploy_service_or_application", "delete_managed_resources"}
+    assert write_tools.issubset(tool_registry.SUPPORTED_TOOL_NAMES)
 
 
 def test_write_tools_have_strict_non_empty_schemas_where_applicable() -> None:
@@ -118,6 +118,11 @@ def test_phase3_write_deploy_delete_tools_remain_metadata_only_and_discoverable(
     assert seeded["create_working_branch"].backing_service == "control-plane"
     assert seeded["deploy_service_or_application"].backing_api == "POST /deployments"
     assert seeded["delete_managed_resources"].read_write_classification == "destructive_write"
+    assert seeded["create_working_branch"].required_execution_mode == "execute"
+    assert seeded["write_source_file"].required_execution_mode == "execute"
+    assert seeded["create_commit"].required_execution_mode == "execute"
+    assert seeded["deploy_service_or_application"].required_execution_mode == "governed_execute"
+    assert seeded["delete_managed_resources"].required_execution_mode == "governed_execute"
     assert all(seeded[name].enabled is True for name in (
         "create_working_branch",
         "scaffold_service",

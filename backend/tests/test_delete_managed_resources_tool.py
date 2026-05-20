@@ -89,7 +89,7 @@ async def test_delete_managed_resources_execute_tool_records_call_and_events(mon
         category="resource_delete",
         read_write_classification="destructive_write",
         requires_confirmation=False,
-        required_execution_mode="execute",
+        required_execution_mode="governed_execute",
         input_schema_json=tool_registry.TOOL_INPUT_SCHEMAS["delete_managed_resources"],
     )
 
@@ -101,7 +101,7 @@ async def test_delete_managed_resources_execute_tool_records_call_and_events(mon
             tool_call_id="44444444-4444-4444-4444-444444444444",
             tool_name="delete_managed_resources",
             input={"mode": "managed_unit", "unit_id": "sample-service"},
-            execution_mode="execute",
+            execution_mode="governed_execute",
         ),
         request=_request(
             {
@@ -151,7 +151,7 @@ async def test_execute_tool_rejects_schema_invalid_input_before_mapping(monkeypa
         category="resource_delete",
         read_write_classification="destructive_write",
         requires_confirmation=False,
-        required_execution_mode="execute",
+        required_execution_mode="governed_execute",
         input_schema_json=tool_registry.TOOL_INPUT_SCHEMAS["delete_managed_resources"],
     )
 
@@ -164,7 +164,7 @@ async def test_execute_tool_rejects_schema_invalid_input_before_mapping(monkeypa
                 tool_call_id="44444444-4444-4444-4444-444444444444",
                 tool_name="delete_managed_resources",
                 input={"mode": "managed_unit"},
-                execution_mode="execute",
+                execution_mode="governed_execute",
             ),
             request=_request(
                 {

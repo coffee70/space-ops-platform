@@ -11,17 +11,17 @@ const DELETE_TOOL: ToolDefinition = {
   category: "resource_delete",
   layer_target: "layer1",
   read_write_classification: "destructive_write",
-  required_execution_mode: "execute",
+  required_execution_mode: "governed_execute",
   enabled: true,
   requires_confirmation: false,
   input_schema_json: { type: "object", properties: {}, additionalProperties: true },
 };
 
-test("scripted_delete_cleanup routes managed unit cleanup through tool-execution", async () => {
+test("scripted_delete_cleanup requires governed execute for managed unit cleanup", async () => {
   const store = new MemoryConversationStore();
   const conversation = await store.createConversation({
     title: "AI Engineer Session",
-    execution_mode: "execute",
+    execution_mode: "governed_execute",
     initial_message: { role: "user", content: "Start AI Engineer session." },
   });
 
@@ -81,7 +81,7 @@ test("scripted_delete_cleanup routes managed unit cleanup through tool-execution
     headers: { "content-type": "application/json" },
     body: JSON.stringify({
       conversation_id: conversation.id,
-      execution_mode: "execute",
+      execution_mode: "governed_execute",
       messages: [{ role: "user", content: "Clean up the deterministic fixture." }],
     }),
   });
