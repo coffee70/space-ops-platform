@@ -168,8 +168,7 @@ export function createToolSet(input: {
             const output = response.output && typeof response.output === "object" ? (response.output as Record<string, unknown>) : {};
             const permissionRequestId =
               typeof output.permission_request_id === "string" ? output.permission_request_id : null;
-            const approvalToken = typeof output.approval_token === "string" ? output.approval_token : null;
-            if (!permissionRequestId || !approvalToken || !input.toolPermissionClient) {
+            if (!permissionRequestId || !input.toolPermissionClient) {
               return response.output;
             }
 
@@ -193,7 +192,7 @@ export function createToolSet(input: {
               tool_name: definition.name,
               input: normalizedArgs,
               execution_mode: input.executionMode,
-              approval_token: approvalToken,
+              permission_request_id: permissionRequestId,
             });
             await input.emitRawToolEvents(approvedResponse.raw_events);
             if (approvedResponse.status === "completed") {

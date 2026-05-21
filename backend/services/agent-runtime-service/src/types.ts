@@ -194,7 +194,7 @@ export interface ToolExecutionClient {
     input: Record<string, unknown>;
     execution_mode: ExecutionMode;
     confirmation_token?: string | null;
-    approval_token?: string | null;
+    permission_request_id?: string | null;
   }): Promise<ToolExecutionResponse>;
 }
 

@@ -15,7 +15,6 @@ export const AGENT_EVENT_REQUIRED_PAYLOAD_FIELDS = {
     "tool_name",
     "tool_call_id",
     "permission_request_id",
-    "approval_token",
     "execution_mode",
     "prompt",
   ],

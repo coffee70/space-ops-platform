@@ -30,7 +30,6 @@ test("permission tool events validate required payloads and event-level tool_cal
         tool_name: "deploy_preview_change",
         tool_call_id: "tool-call-1",
         permission_request_id: "permission-1",
-        approval_token: "approval-token",
         execution_mode: "execute",
         prompt: { title: "Deploy preview changes?" },
       },
@@ -73,13 +72,12 @@ test("permission tool events still reject missing fields, missing tool_call_id, 
         {
           tool_name: "deploy_preview_change",
           tool_call_id: "tool-call-1",
-          permission_request_id: "permission-1",
           execution_mode: "execute",
           prompt: { title: "Deploy preview changes?" },
         },
         "tool-call-1",
       ),
-    /missing required payload.*approval_token/,
+    /missing required payload.*permission_request_id/,
   );
   assert.throws(
     () => validateAgentEventPayload("tool.permission_denied", validPayload("tool.permission_denied"), null),

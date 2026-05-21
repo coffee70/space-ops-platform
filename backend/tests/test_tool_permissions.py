@@ -208,7 +208,9 @@ async def test_permission_required_tool_does_not_execute_before_approval(monkeyp
     assert response["status"] == "permission_required"
     assert response["raw_events"][0]["event_type"] == "tool.permission_required"
     assert response["output"]["permission_request_id"]
-    assert response["output"]["approval_token"]
+    removed_token_key = "approval" + "_token"
+    assert removed_token_key not in response["output"]
+    assert removed_token_key not in response["raw_events"][0]["payload"]
     assert mapped_called is False
     assert [type(item) for item in db.added] == [ToolCall, ToolPermissionRequest]
     assert db.added[0].status == "permission_required"
@@ -229,13 +231,12 @@ def test_approve_permission_marks_request_approved_and_emits_event() -> None:
         prompt_json={},
         mode_policy_json={},
         execution_mode="execute",
-        approval_token="token",
     )
     db = _Db(permission=permission)
 
     response = tool_execution.approve_tool_permission(
         "55555555-5555-4555-8555-555555555555",
-        tool_execution.ToolPermissionApproveRequest(approval_token="token"),
+        tool_execution.ToolPermissionApproveRequest(),
         db=db,  # type: ignore[arg-type]
     )
 
@@ -243,6 +244,47 @@ def test_approve_permission_marks_request_approved_and_emits_event() -> None:
     assert response["raw_events"][0]["event_type"] == "tool.permission_approved"
     assert permission.status == "approved"
     assert db.flush_count == 1
+
+
+def test_approve_unknown_permission_returns_404() -> None:
+    db = _Db(permission=None)
+
+    with pytest.raises(tool_execution.HTTPException) as exc_info:
+        tool_execution.approve_tool_permission(
+            "55555555-5555-4555-8555-555555555555",
+            tool_execution.ToolPermissionApproveRequest(),
+            db=db,  # type: ignore[arg-type]
+        )
+
+    assert exc_info.value.status_code == 404
+
+
+@pytest.mark.parametrize("status", ["executed", "failed"])
+def test_approve_resolved_permission_returns_409(status: str) -> None:
+    permission = ToolPermissionRequest(
+        id=uuid.UUID("55555555-5555-4555-8555-555555555555"),
+        conversation_id=None,
+        agent_run_id=uuid.UUID("22222222-2222-2222-2222-222222222222"),
+        request_id=uuid.UUID("33333333-3333-3333-3333-333333333333"),
+        tool_call_id=uuid.UUID("44444444-4444-4444-4444-444444444444"),
+        tool_name="deploy_preview_change",
+        input_json={},
+        redacted_input_json={},
+        status=status,
+        prompt_json={},
+        mode_policy_json={},
+        execution_mode="execute",
+    )
+    db = _Db(permission=permission)
+
+    with pytest.raises(tool_execution.HTTPException) as exc_info:
+        tool_execution.approve_tool_permission(
+            "55555555-5555-4555-8555-555555555555",
+            tool_execution.ToolPermissionApproveRequest(),
+            db=db,  # type: ignore[arg-type]
+        )
+
+    assert exc_info.value.status_code == 409
 
 
 def test_deny_permission_marks_request_denied_and_emits_event() -> None:
@@ -259,13 +301,12 @@ def test_deny_permission_marks_request_denied_and_emits_event() -> None:
         prompt_json={},
         mode_policy_json={},
         execution_mode="execute",
-        approval_token="token",
     )
     db = _Db(permission=permission)
 
     response = tool_execution.deny_tool_permission(
         "55555555-5555-4555-8555-555555555555",
-        tool_execution.ToolPermissionDenyRequest(approval_token="token"),
+        tool_execution.ToolPermissionDenyRequest(),
         db=db,  # type: ignore[arg-type]
     )
 
@@ -273,3 +314,128 @@ def test_deny_permission_marks_request_denied_and_emits_event() -> None:
     assert response["raw_events"][0]["event_type"] == "tool.permission_denied"
     assert permission.response_json["status"] == "permission_denied"
     assert db.flush_count == 1
+
+
+def test_deny_unknown_permission_returns_404() -> None:
+    db = _Db(permission=None)
+
+    with pytest.raises(tool_execution.HTTPException) as exc_info:
+        tool_execution.deny_tool_permission(
+            "55555555-5555-4555-8555-555555555555",
+            tool_execution.ToolPermissionDenyRequest(),
+            db=db,  # type: ignore[arg-type]
+        )
+
+    assert exc_info.value.status_code == 404
+
+
+@pytest.mark.anyio
+async def test_permission_required_tool_executes_after_approval_with_permission_request_id(monkeypatch) -> None:
+    mapped_called = False
+
+    async def fake_mapped(*_args, **_kwargs):
+        nonlocal mapped_called
+        mapped_called = True
+        return {"deployment_id": "preview-1"}
+
+    monkeypatch.setattr(tool_execution, "_execute_mapped_tool", fake_mapped)
+    permission = ToolPermissionRequest(
+        id=uuid.UUID("55555555-5555-4555-8555-555555555555"),
+        conversation_id=None,
+        agent_run_id=uuid.UUID("22222222-2222-2222-2222-222222222222"),
+        request_id=uuid.UUID("33333333-3333-3333-3333-333333333333"),
+        tool_call_id=uuid.UUID("44444444-4444-4444-4444-444444444444"),
+        tool_name="deploy_preview_change",
+        input_json={},
+        redacted_input_json={},
+        status="approved",
+        prompt_json={},
+        mode_policy_json={},
+        execution_mode="execute",
+    )
+    db = _Db(tool=_tool(), permission=permission)
+
+    response = await tool_execution.execute_tool(
+        tool_execution.ToolExecutionRequest(
+            conversation_id="11111111-1111-1111-1111-111111111111",
+            agent_run_id="22222222-2222-2222-2222-222222222222",
+            request_id="33333333-3333-3333-3333-333333333333",
+            tool_call_id="44444444-4444-4444-4444-444444444444",
+            tool_name="deploy_preview_change",
+            input={"branch": "preview/test", "target_unit_id": "mission-control-frontend-shell"},
+            execution_mode="execute",
+            permission_request_id="55555555-5555-4555-8555-555555555555",
+        ),
+        request=_request(
+            {
+                "x-agent-run-id": "22222222-2222-2222-2222-222222222222",
+                "x-request-id": "33333333-3333-3333-3333-333333333333",
+                "x-tool-call-id": "44444444-4444-4444-4444-444444444444",
+            }
+        ),
+        db=db,  # type: ignore[arg-type]
+    )
+
+    assert mapped_called is True
+    assert response["status"] == "completed"
+    assert response["output"] == {"deployment_id": "preview-1"}
+    assert permission.status == "executed"
+    assert response["raw_events"][0]["event_type"] == "tool.permission_approved"
+
+
+@pytest.mark.anyio
+async def test_permission_required_tool_does_not_execute_denied_permission(monkeypatch) -> None:
+    mapped_called = False
+
+    async def fake_mapped(*_args, **_kwargs):
+        nonlocal mapped_called
+        mapped_called = True
+        return {}
+
+    monkeypatch.setattr(tool_execution, "_execute_mapped_tool", fake_mapped)
+    permission = ToolPermissionRequest(
+        id=uuid.UUID("55555555-5555-4555-8555-555555555555"),
+        conversation_id=None,
+        agent_run_id=uuid.UUID("22222222-2222-2222-2222-222222222222"),
+        request_id=uuid.UUID("33333333-3333-3333-3333-333333333333"),
+        tool_call_id=uuid.UUID("44444444-4444-4444-4444-444444444444"),
+        tool_name="deploy_preview_change",
+        input_json={},
+        redacted_input_json={},
+        status="denied",
+        prompt_json={},
+        mode_policy_json={},
+        execution_mode="execute",
+        response_json={
+            "status": "permission_denied",
+            "reason": "user_denied",
+            "message": "The user denied this tool call. No action was taken.",
+        },
+    )
+    db = _Db(tool=_tool(), permission=permission)
+
+    response = await tool_execution.execute_tool(
+        tool_execution.ToolExecutionRequest(
+            conversation_id="11111111-1111-1111-1111-111111111111",
+            agent_run_id="22222222-2222-2222-2222-222222222222",
+            request_id="33333333-3333-3333-3333-333333333333",
+            tool_call_id="44444444-4444-4444-4444-444444444444",
+            tool_name="deploy_preview_change",
+            input={"branch": "preview/test", "target_unit_id": "mission-control-frontend-shell"},
+            execution_mode="execute",
+            permission_request_id="55555555-5555-4555-8555-555555555555",
+        ),
+        request=_request(
+            {
+                "x-agent-run-id": "22222222-2222-2222-2222-222222222222",
+                "x-request-id": "33333333-3333-3333-3333-333333333333",
+                "x-tool-call-id": "44444444-4444-4444-4444-444444444444",
+            }
+        ),
+        db=db,  # type: ignore[arg-type]
+    )
+
+    assert mapped_called is False
+    assert response["status"] == "permission_denied"
+    assert response["output"]["status"] == "permission_denied"
+    assert response["raw_events"][0]["event_type"] == "tool.permission_denied"

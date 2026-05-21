@@ -22,7 +22,7 @@ REQUIRED_PAYLOAD_FIELDS = {
     "tool.started": {"tool_name", "category", "read_write_classification", "input_preview"},
     "tool.completed": {"tool_name", "status", "result_preview", "duration_ms"},
     "tool.failed": {"tool_name", "error_code", "message", "duration_ms"},
-    "tool.permission_required": {"tool_name", "tool_call_id", "permission_request_id", "approval_token", "execution_mode", "prompt"},
+    "tool.permission_required": {"tool_name", "tool_call_id", "permission_request_id", "execution_mode", "prompt"},
     "tool.permission_approved": {"tool_name", "tool_call_id", "permission_request_id"},
     "tool.permission_denied": {"tool_name", "tool_call_id", "permission_request_id", "reason"},
     "document.uploaded": {"document_id", "title", "document_type", "content_hash"},

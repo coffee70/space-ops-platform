@@ -188,7 +188,7 @@ test("filterToolDefinitionsForExecutionMode exposes permission-required tools", 
   ]);
 });
 
-test("permission-required tool waits, re-executes with approval token, and returns final output", async () => {
+test("permission-required tool waits, re-executes with permission request id, and returns final output", async () => {
   const definition: ToolDefinition = {
     name: "deploy_preview_change",
     description: "Deploy preview",
@@ -206,7 +206,7 @@ test("permission-required tool waits, re-executes with approval token, and retur
     },
     input_schema_json: { type: "object", properties: {}, additionalProperties: false },
   };
-  const executionCalls: Array<{ approval_token?: string | null }> = [];
+  const executionCalls: Array<{ permission_request_id?: string | null }> = [];
   const emittedEvents: string[] = [];
   const tools = createToolSet({
     toolDefinitions: [definition],
@@ -219,8 +219,8 @@ test("permission-required tool waits, re-executes with approval token, and retur
     },
     toolExecutionClient: {
       async execute(input) {
-        executionCalls.push({ approval_token: input.approval_token });
-        if (!input.approval_token) {
+        executionCalls.push({ permission_request_id: input.permission_request_id });
+        if (!input.permission_request_id) {
           return {
             conversation_id: CONVERSATION_ID,
             agent_run_id: AGENT_RUN_ID,
@@ -229,7 +229,6 @@ test("permission-required tool waits, re-executes with approval token, and retur
             status: "permission_required",
             output: {
               permission_request_id: "permission-1",
-              approval_token: "approval-token",
             },
             raw_events: [{ event_type: "tool.permission_required", emitted_by: "test", payload: {}, tool_call_id: input.trace.tool_call_id }],
           };
@@ -262,7 +261,7 @@ test("permission-required tool waits, re-executes with approval token, and retur
   const output = await runtimeTool.execute({}, { toolCallId: "call_provider_non_uuid" });
 
   assert.deepEqual(output, { deployment_id: "deployment-1" });
-  assert.deepEqual(executionCalls.map((call) => call.approval_token ?? null), [null, "approval-token"]);
+  assert.deepEqual(executionCalls.map((call) => call.permission_request_id ?? null), [null, "permission-1"]);
   assert.deepEqual(emittedEvents, ["tool.permission_required", "tool.completed"]);
 });
 
@@ -305,7 +304,6 @@ test("permission-required tool returns denial result without executing approved 
           status: "permission_required",
           output: {
             permission_request_id: "permission-2",
-            approval_token: "approval-token",
           },
           raw_events: [],
         };

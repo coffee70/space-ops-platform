@@ -300,6 +300,7 @@ export class FakeToolExecutionClient implements ToolExecutionClient {
           input: Record<string, unknown>;
           execution_mode: ExecutionMode;
           confirmation_token?: string | null;
+          permission_request_id?: string | null;
         }) => Promise<ToolExecutionResponse> | ToolExecutionResponse),
   ) {}
 
@@ -309,6 +310,7 @@ export class FakeToolExecutionClient implements ToolExecutionClient {
     input: Record<string, unknown>;
     execution_mode: ExecutionMode;
     confirmation_token?: string | null;
+    permission_request_id?: string | null;
   }): Promise<ToolExecutionResponse> {
     this.calls.push({
       tool_name: input.tool_name,

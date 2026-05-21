@@ -29,7 +29,7 @@ class ToolExecutionRequest(BaseModel):
     tool_name: str
     input: dict[str, Any] = Field(default_factory=dict)
     confirmation_token: str | None = None
-    approval_token: str | None = None
+    permission_request_id: UUID | None = None
     execution_mode: Literal["read_only", "suggest", "execute", "governed_execute"] = "read_only"
 
 
@@ -85,11 +85,12 @@ class ToolDefinitionSummary(BaseModel):
 
 
 class ToolPermissionApproveRequest(BaseModel):
-    approval_token: str
+    model_config = ConfigDict(extra="forbid")
 
 
 class ToolPermissionDenyRequest(BaseModel):
-    approval_token: str
+    model_config = ConfigDict(extra="forbid")
+
     reason: str | None = None
 
 

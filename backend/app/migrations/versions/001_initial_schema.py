@@ -505,7 +505,6 @@ def upgrade() -> None:
         sa.Column("prompt_json", JSONB(), nullable=False),
         sa.Column("mode_policy_json", JSONB(), nullable=False),
         sa.Column("execution_mode", sa.Text(), nullable=False),
-        sa.Column("approval_token", sa.Text(), nullable=False),
         sa.Column("response_json", JSONB(), nullable=True),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("resolved_at", sa.DateTime(timezone=True), nullable=True),
@@ -524,12 +523,6 @@ def upgrade() -> None:
         "ix_ai_tool_permission_requests_tool_call_id",
         "ai_tool_permission_requests",
         ["tool_call_id"],
-        unique=True,
-    )
-    op.create_index(
-        "ix_ai_tool_permission_requests_approval_token",
-        "ai_tool_permission_requests",
-        ["approval_token"],
         unique=True,
     )
 
@@ -721,7 +714,6 @@ def downgrade() -> None:
     op.drop_index("ix_ai_tool_calls_conversation_started", table_name="ai_tool_calls")
     op.drop_table("ai_tool_calls")
 
-    op.drop_index("ix_ai_tool_permission_requests_approval_token", table_name="ai_tool_permission_requests")
     op.drop_index("ix_ai_tool_permission_requests_tool_call_id", table_name="ai_tool_permission_requests")
     op.drop_index("ix_ai_tool_permission_requests_status_created", table_name="ai_tool_permission_requests")
     op.drop_index("ix_ai_tool_permission_requests_agent_run_created", table_name="ai_tool_permission_requests")

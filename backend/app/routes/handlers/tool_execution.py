@@ -386,12 +386,50 @@ async def execute_tool(body: ToolExecutionRequest, request: Request, db: Session
             detail={'error_code': 'invalid_tool_schema', 'message': str(exc)},
         ) from exc
 
-    approval_token = body.approval_token or body.confirmation_token
     permission_request: ToolPermissionRequest | None = None
     if mode_policy == "requires_permission":
-        if approval_token:
-            permission_request = db.query(ToolPermissionRequest).filter(ToolPermissionRequest.approval_token == approval_token).one_or_none()
-            if not permission_request or str(permission_request.tool_call_id) != tool_call_id or permission_request.status not in {"approved", "executing"}:
+        if body.permission_request_id:
+            permission_request = db.query(ToolPermissionRequest).filter(ToolPermissionRequest.id == body.permission_request_id).one_or_none()
+            if (
+                not permission_request
+                or str(permission_request.tool_call_id) != tool_call_id
+                or permission_request.tool_name != body.tool_name
+            ):
+                raise HTTPException(
+                    status_code=403,
+                    detail={
+                        "error_code": "tool_permission_not_approved",
+                        "message": "tool permission request has not been approved",
+                    },
+                )
+            if permission_request.status == "denied":
+                return {
+                    "conversation_id": conversation_id,
+                    "agent_run_id": agent_run_id,
+                    "request_id": request_id,
+                    "tool_call_id": tool_call_id,
+                    "status": "permission_denied",
+                    "output": permission_request.response_json
+                    or {
+                        "status": "permission_denied",
+                        "reason": "user_denied",
+                        "message": "The user denied this tool call. No action was taken.",
+                    },
+                    "raw_events": [
+                        raw_event(
+                            event_type="tool.permission_denied",
+                            payload={
+                                "tool_name": body.tool_name,
+                                "tool_call_id": tool_call_id,
+                                "permission_request_id": str(permission_request.id),
+                                "reason": (permission_request.response_json or {}).get("reason") or "user_denied",
+                            },
+                            emitted_by="tool-execution-service",
+                            tool_call_id=tool_call_id,
+                        )
+                    ],
+                }
+            if permission_request.status not in {"approved", "executing"}:
                 raise HTTPException(
                     status_code=403,
                     detail={
@@ -416,7 +454,6 @@ async def execute_tool(body: ToolExecutionRequest, request: Request, db: Session
                 prompt_json=prompt,
                 mode_policy_json=getattr(tool, "mode_policy_json", {}) or {},
                 execution_mode=body.execution_mode,
-                approval_token=uuid.uuid4().hex,
                 created_at=datetime.now(timezone.utc),
             )
             call = ToolCall(
@@ -439,7 +476,6 @@ async def execute_tool(body: ToolExecutionRequest, request: Request, db: Session
                     "tool_name": tool.name,
                     "tool_call_id": tool_call_id,
                     "permission_request_id": str(permission_request.id),
-                    "approval_token": permission_request.approval_token,
                     "execution_mode": body.execution_mode,
                     "prompt": prompt,
                 },
@@ -454,7 +490,6 @@ async def execute_tool(body: ToolExecutionRequest, request: Request, db: Session
                 "status": "permission_required",
                 "output": {
                     "permission_request_id": str(permission_request.id),
-                    "approval_token": permission_request.approval_token,
                     "tool_name": tool.name,
                     "prompt": prompt,
                 },
@@ -636,7 +671,7 @@ def get_tool_permission_status(permission_request_id: str, db: Session = Depends
     return _permission_status_response(permission, raw_events)
 
 
-def approve_tool_permission(permission_request_id: str, body: ToolPermissionApproveRequest, db: Session = Depends(get_db)):
+def approve_tool_permission(permission_request_id: str, body: ToolPermissionApproveRequest = ToolPermissionApproveRequest(), db: Session = Depends(get_db)):
     try:
         permission_uuid = uuid.UUID(permission_request_id)
     except ValueError as exc:
@@ -644,8 +679,6 @@ def approve_tool_permission(permission_request_id: str, body: ToolPermissionAppr
     permission = db.query(ToolPermissionRequest).filter(ToolPermissionRequest.id == permission_uuid).one_or_none()
     if not permission:
         raise HTTPException(status_code=404, detail="permission request not found")
-    if permission.approval_token != body.approval_token:
-        raise HTTPException(status_code=403, detail="invalid approval token")
     if permission.status not in {"pending", "approved"}:
         raise HTTPException(status_code=409, detail=f"permission request is {permission.status}")
     permission.status = "approved"
@@ -664,7 +697,7 @@ def approve_tool_permission(permission_request_id: str, body: ToolPermissionAppr
     return _permission_status_response(permission, [event])
 
 
-def deny_tool_permission(permission_request_id: str, body: ToolPermissionDenyRequest, db: Session = Depends(get_db)):
+def deny_tool_permission(permission_request_id: str, body: ToolPermissionDenyRequest = ToolPermissionDenyRequest(), db: Session = Depends(get_db)):
     try:
         permission_uuid = uuid.UUID(permission_request_id)
     except ValueError as exc:
@@ -672,8 +705,6 @@ def deny_tool_permission(permission_request_id: str, body: ToolPermissionDenyReq
     permission = db.query(ToolPermissionRequest).filter(ToolPermissionRequest.id == permission_uuid).one_or_none()
     if not permission:
         raise HTTPException(status_code=404, detail="permission request not found")
-    if permission.approval_token != body.approval_token:
-        raise HTTPException(status_code=403, detail="invalid approval token")
     if permission.status not in {"pending", "denied"}:
         raise HTTPException(status_code=409, detail=f"permission request is {permission.status}")
     permission.status = "denied"
