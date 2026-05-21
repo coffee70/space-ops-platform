@@ -185,18 +185,14 @@ async def _execute_mapped_tool(name: str, tool_input: dict, *, db: Session, trac
 
     if name == 'deploy_preview_change':
         payload = {
-            'unit_id': tool_input['target_unit_id'],
             'branch': tool_input['branch'],
+            'target_unit_id': tool_input['target_unit_id'],
             'conversation_id': trace_payload.get('conversation_id'),
             'agent_run_id': trace_payload.get('agent_run_id'),
-            'request_id': trace_payload.get('request_id'),
-            'tool_call_id': trace_payload.get('tool_call_id'),
         }
         for source_key, target_key in (
             ('commit_sha', 'commit_sha'),
-            ('target_application_id', 'application_id'),
-            ('changed_files', 'changed_files'),
-            ('summary', 'summary'),
+            ('target_application_id', 'target_application_id'),
         ):
             if tool_input.get(source_key) is not None:
                 payload[target_key] = tool_input[source_key]
@@ -205,18 +201,15 @@ async def _execute_mapped_tool(name: str, tool_input: dict, *, db: Session, trac
 
     if name == 'revert_preview_change':
         payload = {
-            'unit_id': tool_input['target_unit_id'],
+            'target_unit_id': tool_input['target_unit_id'],
             'conversation_id': trace_payload.get('conversation_id'),
             'agent_run_id': trace_payload.get('agent_run_id'),
-            'request_id': trace_payload.get('request_id'),
-            'tool_call_id': trace_payload.get('tool_call_id'),
         }
         for source_key, target_key in (
-            ('target_application_id', 'application_id'),
+            ('target_application_id', 'target_application_id'),
             ('baseline_branch', 'baseline_branch'),
             ('baseline_commit_sha', 'baseline_commit_sha'),
             ('preview_deployment_id', 'preview_deployment_id'),
-            ('summary', 'summary'),
         ):
             if tool_input.get(source_key) is not None:
                 payload[target_key] = tool_input[source_key]

@@ -72,6 +72,108 @@ def _tool(**overrides):
 
 
 @pytest.mark.anyio
+async def test_deploy_preview_change_posts_kernel_schema_payload(monkeypatch) -> None:
+    calls: list[tuple[str, dict]] = []
+
+    async def fake_cp_post(path: str, payload: dict) -> dict:
+        calls.append((path, payload))
+        return {"deployment_id": "preview-1"}
+
+    monkeypatch.setattr(tool_execution, "_cp_post", fake_cp_post)
+
+    response = await tool_execution._execute_mapped_tool(
+        "deploy_preview_change",
+        {
+            "branch": "preview/test",
+            "commit_sha": "abcdef1",
+            "target_unit_id": "mission-control-frontend-shell",
+            "target_application_id": "telemetry",
+            "changed_files": ["ignored-by-kernel.tsx"],
+            "summary": "ignored by kernel",
+        },
+        db=object(),
+        trace={
+            "conversation_id": "11111111-1111-1111-1111-111111111111",
+            "agent_run_id": "22222222-2222-2222-2222-222222222222",
+            "request_id": "33333333-3333-3333-3333-333333333333",
+            "tool_call_id": "44444444-4444-4444-4444-444444444444",
+        },
+    )
+
+    assert response == {"deployment_id": "preview-1"}
+    assert calls == [
+        (
+            "change-previews/deploy",
+            {
+                "branch": "preview/test",
+                "commit_sha": "abcdef1",
+                "target_unit_id": "mission-control-frontend-shell",
+                "target_application_id": "telemetry",
+                "conversation_id": "11111111-1111-1111-1111-111111111111",
+                "agent_run_id": "22222222-2222-2222-2222-222222222222",
+            },
+        )
+    ]
+    assert "unit_id" not in calls[0][1]
+    assert "application_id" not in calls[0][1]
+    assert "request_id" not in calls[0][1]
+    assert "tool_call_id" not in calls[0][1]
+    assert "changed_files" not in calls[0][1]
+    assert "summary" not in calls[0][1]
+
+
+@pytest.mark.anyio
+async def test_revert_preview_change_posts_kernel_schema_payload(monkeypatch) -> None:
+    calls: list[tuple[str, dict]] = []
+
+    async def fake_cp_post(path: str, payload: dict) -> dict:
+        calls.append((path, payload))
+        return {"deployment_id": "baseline-1"}
+
+    monkeypatch.setattr(tool_execution, "_cp_post", fake_cp_post)
+
+    response = await tool_execution._execute_mapped_tool(
+        "revert_preview_change",
+        {
+            "target_unit_id": "mission-control-frontend-shell",
+            "target_application_id": "telemetry",
+            "baseline_branch": "main",
+            "baseline_commit_sha": "1234567",
+            "preview_deployment_id": "preview-1",
+            "summary": "ignored by kernel",
+        },
+        db=object(),
+        trace={
+            "conversation_id": "11111111-1111-1111-1111-111111111111",
+            "agent_run_id": "22222222-2222-2222-2222-222222222222",
+            "request_id": "33333333-3333-3333-3333-333333333333",
+            "tool_call_id": "44444444-4444-4444-4444-444444444444",
+        },
+    )
+
+    assert response == {"deployment_id": "baseline-1"}
+    assert calls == [
+        (
+            "change-previews/revert",
+            {
+                "target_unit_id": "mission-control-frontend-shell",
+                "target_application_id": "telemetry",
+                "baseline_branch": "main",
+                "baseline_commit_sha": "1234567",
+                "preview_deployment_id": "preview-1",
+                "conversation_id": "11111111-1111-1111-1111-111111111111",
+                "agent_run_id": "22222222-2222-2222-2222-222222222222",
+            },
+        )
+    ]
+    assert "unit_id" not in calls[0][1]
+    assert "application_id" not in calls[0][1]
+    assert "request_id" not in calls[0][1]
+    assert "tool_call_id" not in calls[0][1]
+    assert "summary" not in calls[0][1]
+
+
+@pytest.mark.anyio
 async def test_permission_required_tool_does_not_execute_before_approval(monkeypatch) -> None:
     mapped_called = False
 
