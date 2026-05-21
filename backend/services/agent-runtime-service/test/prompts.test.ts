@@ -39,6 +39,8 @@ test("AI Engineer system prompt includes required durable constraints", () => {
   assert.match(prompt, /write only the scoped requested changes/);
   assert.match(prompt, /create a commit/);
   assert.match(prompt, /deploy_preview_change/);
+  assert.match(prompt, /resolve_preview_deploy_target/);
+  assert.match(prompt, /do not guess deploy target ids from memory/);
   assert.match(prompt, /revert_preview_change/);
   assert.match(prompt, /runtime pauses the tool call, shows the user a permission card/);
   assert.match(prompt, /Do not ask the user to approve a tool unless the tool call actually produced a permission card/);

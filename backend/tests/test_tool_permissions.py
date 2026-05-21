@@ -75,11 +75,23 @@ def _tool(**overrides):
 async def test_deploy_preview_change_posts_kernel_schema_payload(monkeypatch) -> None:
     calls: list[tuple[str, dict]] = []
 
-    async def fake_cp_post(path: str, payload: dict) -> dict:
+    async def fake_cp_post(path: str, payload: dict, timeout: float) -> dict:
+        assert timeout == 45.0
         calls.append((path, payload))
-        return {"deployment_id": "preview-1"}
+        return {
+            "deployment_id": "preview-1",
+            "unit_id": "mission-control-frontend-shell",
+            "branch": "preview/test",
+            "commit_sha": "abcdef1",
+            "status": "healthy",
+            "health_status": "passing",
+            "logs_url": "/deployments/preview-1/logs",
+            "registered": True,
+            "target_unit_id": "mission-control-frontend-shell",
+            "target_application_id": "telemetry",
+        }
 
-    monkeypatch.setattr(tool_execution, "_cp_post", fake_cp_post)
+    monkeypatch.setattr(tool_execution, "_cp_post_with_timeout", fake_cp_post)
 
     response = await tool_execution._execute_mapped_tool(
         "deploy_preview_change",
@@ -100,7 +112,15 @@ async def test_deploy_preview_change_posts_kernel_schema_payload(monkeypatch) ->
         },
     )
 
-    assert response == {"deployment_id": "preview-1"}
+    raw_events = response.pop("_raw_events")
+    assert response["deployment_id"] == "preview-1"
+    assert response["status"] == "healthy"
+    assert [event["event_type"] for event in raw_events] == [
+        "deployment.requested",
+        "deployment.submitted",
+        "preview.active",
+        "deployment.health_passed",
+    ]
     assert calls == [
         (
             "change-previews/deploy",
@@ -120,6 +140,42 @@ async def test_deploy_preview_change_posts_kernel_schema_payload(monkeypatch) ->
     assert "tool_call_id" not in calls[0][1]
     assert "changed_files" not in calls[0][1]
     assert "summary" not in calls[0][1]
+
+
+@pytest.mark.anyio
+async def test_resolve_preview_deploy_target_maps_mission_control_ui(monkeypatch) -> None:
+    async def fake_cp_get(path: str, params: dict | None = None) -> list[dict]:
+        assert path == "registry/units"
+        return [
+            {
+                "unitId": "derived-telemetry-service",
+                "runtimeKind": "service",
+                "sourcePath": "project/space-ops-platform/backend/services/derived-telemetry-service",
+            },
+            {
+                "unitId": "mission-control-frontend-shell",
+                "runtimeKind": "frontend_shell",
+                "sourcePath": "project/space-ops-apps/mission-control-ui",
+            },
+        ]
+
+    monkeypatch.setattr(tool_execution, "_cp_get", fake_cp_get)
+
+    response = await tool_execution._execute_mapped_tool(
+        "resolve_preview_deploy_target",
+        {
+            "branch": "preview/cyan-change",
+            "changed_files": ["project/space-ops-apps/mission-control-ui/src/components/telemetry-detail-header.tsx"],
+            "target_application_id": "telemetry",
+        },
+        db=object(),
+    )
+
+    assert response["status"] == "resolved"
+    assert response["target_unit_id"] == "mission-control-frontend-shell"
+    assert response["target_application_id"] == "telemetry"
+    assert response["runtime_kind"] == "frontend_shell"
+    assert response["source_path"] == "project/space-ops-apps/mission-control-ui"
 
 
 @pytest.mark.anyio

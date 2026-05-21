@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import asyncio
 import uuid
 
 import httpx
@@ -83,12 +84,227 @@ async def _cp_post(path: str, json_body: dict) -> dict:
     return resp.json()
 
 
+async def _cp_post_with_timeout(path: str, json_body: dict, timeout: float) -> dict:
+    async with httpx.AsyncClient(timeout=timeout) as client:
+        resp = await client.post(_cp_url(path), json=json_body)
+    if resp.status_code >= 400:
+        raise HTTPException(status_code=resp.status_code, detail=_detail_from_http_response(resp))
+    return resp.json()
+
+
 async def _cp_put(path: str, json_body: dict) -> dict:
     async with httpx.AsyncClient(timeout=30.0) as client:
         resp = await client.put(_cp_url(path), json=json_body)
     if resp.status_code >= 400:
         raise HTTPException(status_code=resp.status_code, detail=_detail_from_http_response(resp))
     return resp.json()
+
+
+def _unit_field(unit: dict, snake: str, camel: str) -> str | None:
+    value = unit.get(snake)
+    if not isinstance(value, str):
+        value = unit.get(camel)
+    return value if isinstance(value, str) and value else None
+
+
+def _normalize_changed_path(path: str) -> str:
+    return path.strip().lstrip("./")
+
+
+def _matches_source_path(changed_file: str, source_path: str) -> bool:
+    normalized_file = _normalize_changed_path(changed_file)
+    normalized_source = _normalize_changed_path(source_path).rstrip("/")
+    return normalized_file == normalized_source or normalized_file.startswith(f"{normalized_source}/")
+
+
+async def _resolve_preview_deploy_target(tool_input: dict) -> dict:
+    changed_files = [_normalize_changed_path(path) for path in tool_input.get("changed_files", []) if isinstance(path, str) and path.strip()]
+    units_response = await _cp_get("registry/units")
+    units = units_response if isinstance(units_response, list) else []
+    matches_by_unit: dict[str, dict] = {}
+    unmatched_files: list[str] = []
+
+    for changed_file in changed_files:
+        candidates = []
+        for unit in units:
+            if not isinstance(unit, dict):
+                continue
+            source_path = _unit_field(unit, "source_path", "sourcePath")
+            unit_id = _unit_field(unit, "unit_id", "unitId")
+            if source_path and unit_id and _matches_source_path(changed_file, source_path):
+                candidates.append((len(source_path), unit))
+        if not candidates:
+            unmatched_files.append(changed_file)
+            continue
+        _, best = max(candidates, key=lambda item: item[0])
+        unit_id = _unit_field(best, "unit_id", "unitId")
+        if unit_id:
+            existing = matches_by_unit.setdefault(unit_id, {"unit": best, "changed_files": []})
+            existing["changed_files"].append(changed_file)
+
+    if not matches_by_unit:
+        return {
+            "status": "not_found",
+            "confidence": "none",
+            "branch": tool_input["branch"],
+            "changed_files": changed_files,
+            "unmatched_files": unmatched_files,
+            "reason": "No changed files matched a managed runtime unit source_path.",
+        }
+    if len(matches_by_unit) > 1:
+        return {
+            "status": "ambiguous",
+            "confidence": "low",
+            "branch": tool_input["branch"],
+            "matches": [
+                {
+                    "target_unit_id": unit_id,
+                    "source_path": _unit_field(match["unit"], "source_path", "sourcePath"),
+                    "runtime_kind": _unit_field(match["unit"], "runtime_kind", "runtimeKind"),
+                    "changed_files": match["changed_files"],
+                }
+                for unit_id, match in sorted(matches_by_unit.items())
+            ],
+            "reason": "Changed files map to multiple managed runtime units. Ask for or choose a single deploy target explicitly.",
+        }
+
+    unit_id, match = next(iter(matches_by_unit.items()))
+    unit = match["unit"]
+    source_path = _unit_field(unit, "source_path", "sourcePath")
+    runtime_kind = _unit_field(unit, "runtime_kind", "runtimeKind")
+    target_application_id = tool_input.get("target_application_id")
+    if not isinstance(target_application_id, str) or not target_application_id:
+        target_application_id = _unit_field(unit, "application_id", "applicationId")
+    if not target_application_id and runtime_kind == "frontend_shell":
+        target_application_id = "telemetry"
+    return {
+        "status": "resolved",
+        "target_unit_id": unit_id,
+        "target_application_id": target_application_id,
+        "runtime_kind": runtime_kind,
+        "source_path": source_path,
+        "confidence": "high",
+        "branch": tool_input["branch"],
+        "changed_files": match["changed_files"],
+        "unmatched_files": unmatched_files,
+        "reason": f"Changed file is under {source_path}, which maps to the managed {runtime_kind or 'runtime'} unit {unit_id}.",
+    }
+
+
+def _deployment_event(event_type: str, deployment: dict, *, tool_name: str = "deploy_preview_change", message: str | None = None) -> dict:
+    status = str(deployment.get("status") or "unknown")
+    payload = {
+        "deployment_id": str(deployment.get("deployment_id") or "unknown"),
+        "branch": str(deployment.get("branch") or "unknown"),
+        "unit_id": str(deployment.get("unit_id") or deployment.get("target_unit_id") or "unknown"),
+        "status": status,
+    }
+    if event_type == "deployment.requested":
+        payload["tool_name"] = tool_name
+    if event_type == "deployment.failed":
+        payload["failure_reason"] = str(deployment.get("failure_reason") or message or "Deployment failed.")
+    if event_type == "deployment.timeout":
+        payload["message"] = message or "Deployment did not reach a terminal state in time."
+    return raw_event(event_type=event_type, payload=payload, emitted_by="tool-execution-service", tool_call_id=None)
+
+
+def _deployment_lifecycle_type(deployment: dict) -> str:
+    status = deployment.get("status")
+    if status == "healthy":
+        return "preview.active"
+    if status in {"failed", "replaced"}:
+        return "deployment.failed"
+    if status == "building":
+        return "deployment.build_started"
+    return "deployment.submitted"
+
+
+async def _poll_deployment_until_terminal(deployment_id: str, *, timeout_seconds: float = 180.0, interval_seconds: float = 2.0) -> tuple[dict, list[dict]]:
+    deadline = asyncio.get_running_loop().time() + timeout_seconds
+    events: list[dict] = []
+    seen: set[tuple[str, str]] = set()
+    latest: dict = {}
+    while True:
+        response = await _cp_get(f"deployments/{deployment_id}")
+        latest = response if isinstance(response, dict) else {}
+        event_type = _deployment_lifecycle_type(latest)
+        key = (event_type, str(latest.get("status") or "unknown"))
+        if key not in seen:
+            seen.add(key)
+            events.append(_deployment_event(event_type, latest))
+            if event_type == "preview.active":
+                events.append(_deployment_event("deployment.health_passed", latest))
+        if latest.get("status") in {"healthy", "failed", "replaced"}:
+            return latest, events
+        if asyncio.get_running_loop().time() >= deadline:
+            events.append(_deployment_event("deployment.timeout", latest, message="Preview deployment timed out before reaching a terminal state."))
+            return {
+                **latest,
+                "status": "timeout",
+                "failure_reason": "Preview deployment timed out before reaching a terminal state.",
+            }, events
+        await asyncio.sleep(interval_seconds)
+
+
+async def _deploy_preview_change(tool_input: dict, trace_payload: dict) -> dict:
+    payload = {
+        'branch': tool_input['branch'],
+        'target_unit_id': tool_input['target_unit_id'],
+        'conversation_id': trace_payload.get('conversation_id'),
+        'agent_run_id': trace_payload.get('agent_run_id'),
+    }
+    for source_key, target_key in (
+        ('commit_sha', 'commit_sha'),
+        ('target_application_id', 'target_application_id'),
+    ):
+        if tool_input.get(source_key) is not None:
+            payload[target_key] = tool_input[source_key]
+    requested = raw_event(
+        event_type="deployment.requested",
+        payload={"tool_name": "deploy_preview_change", "branch": payload["branch"], "unit_id": payload["target_unit_id"]},
+        emitted_by="tool-execution-service",
+        tool_call_id=None,
+    )
+    try:
+        submitted = await _cp_post_with_timeout('change-previews/deploy', payload, timeout=45.0)
+    except httpx.TimeoutException:
+        return {
+            "status": "timeout",
+            "target_unit_id": payload["target_unit_id"],
+            "target_application_id": payload.get("target_application_id"),
+            "branch": payload["branch"],
+            "message": "Preview deployment submission timed out before a deployment id was returned.",
+            "_raw_events": [
+                requested,
+                raw_event(
+                    event_type="deployment.timeout",
+                    payload={
+                        "deployment_id": "unknown",
+                        "branch": payload["branch"],
+                        "unit_id": payload["target_unit_id"],
+                        "status": "timeout",
+                        "message": "Preview deployment submission timed out before a deployment id was returned.",
+                    },
+                    emitted_by="tool-execution-service",
+                    tool_call_id=None,
+                ),
+            ],
+        }
+    if not isinstance(submitted, dict):
+        return {"deployment": submitted, "_raw_events": [requested]}
+    deployment_id = submitted.get("deployment_id")
+    events = [requested, _deployment_event("deployment.submitted", submitted)]
+    final = submitted
+    if isinstance(deployment_id, str) and submitted.get("status") not in {"healthy", "failed", "replaced"}:
+        final, polled_events = await _poll_deployment_until_terminal(deployment_id)
+        events.extend(polled_events)
+    else:
+        terminal_type = _deployment_lifecycle_type(submitted)
+        if terminal_type != "deployment.submitted":
+            events.append(_deployment_event(terminal_type, submitted))
+            if terminal_type == "preview.active":
+                events.append(_deployment_event("deployment.health_passed", submitted))
+    return {**submitted, **final, "_raw_events": events}
 
 
 async def _runtime_get(slug: str, path: str, params: dict | None = None) -> dict | list:
@@ -143,6 +359,8 @@ async def _execute_mapped_tool(name: str, tool_input: dict, *, db: Session, trac
         return await _cp_get('registry/units')
     if name == 'list_managed_repositories':
         return await _cp_get('code/roots')
+    if name == 'resolve_preview_deploy_target':
+        return await _resolve_preview_deploy_target(tool_input)
 
     if name == 'create_working_branch':
         payload = {'branch': tool_input['branch'], 'from_branch': tool_input.get('from_branch') or 'main'}
@@ -184,20 +402,7 @@ async def _execute_mapped_tool(name: str, tool_input: dict, *, db: Session, trac
         return result if isinstance(result, dict) else {'deployment': result}
 
     if name == 'deploy_preview_change':
-        payload = {
-            'branch': tool_input['branch'],
-            'target_unit_id': tool_input['target_unit_id'],
-            'conversation_id': trace_payload.get('conversation_id'),
-            'agent_run_id': trace_payload.get('agent_run_id'),
-        }
-        for source_key, target_key in (
-            ('commit_sha', 'commit_sha'),
-            ('target_application_id', 'target_application_id'),
-        ):
-            if tool_input.get(source_key) is not None:
-                payload[target_key] = tool_input[source_key]
-        result = await _cp_post('change-previews/deploy', payload)
-        return result if isinstance(result, dict) else {'deployment': result}
+        return await _deploy_preview_change(tool_input, trace_payload)
 
     if name == 'revert_preview_change':
         payload = {
@@ -576,6 +781,7 @@ async def execute_tool(body: ToolExecutionRequest, request: Request, db: Session
                 "tool_call_id": tool_call_id,
             },
         )
+        mapped_raw_events = output.pop("_raw_events", []) if isinstance(output, dict) else []
     except HTTPException:
         raise
     except Exception as exc:
@@ -615,6 +821,7 @@ async def execute_tool(body: ToolExecutionRequest, request: Request, db: Session
     raw_events = [
         *raw_events,
         started_event,
+        *(mapped_raw_events if isinstance(mapped_raw_events, list) else []),
         raw_event(
             event_type='tool.completed',
             payload={'tool_name': body.tool_name, 'status': 'completed', 'result_preview': redact(call.output_json), 'duration_ms': int((call.completed_at - call.started_at).total_seconds() * 1000)},

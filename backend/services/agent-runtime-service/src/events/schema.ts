@@ -28,6 +28,13 @@ export const AGENT_EVENT_REQUIRED_PAYLOAD_FIELDS = {
   "code.index_completed": ["repository", "branch", "commit_sha", "file_count", "chunk_count", "duration_ms"],
   "code.index_failed": ["repository", "branch", "error_code", "message"],
   "navigation.requested": ["action", "application_id", "route_path"],
+  "deployment.requested": ["tool_name", "branch", "unit_id"],
+  "deployment.submitted": ["deployment_id", "branch", "unit_id", "status"],
+  "deployment.build_started": ["deployment_id", "branch", "unit_id", "status"],
+  "deployment.health_passed": ["deployment_id", "branch", "unit_id", "status"],
+  "deployment.failed": ["deployment_id", "branch", "unit_id", "status", "failure_reason"],
+  "deployment.timeout": ["deployment_id", "branch", "unit_id", "status", "message"],
+  "preview.active": ["deployment_id", "branch", "unit_id", "status"],
   "change.summary": [
     "branch",
     "base_branch",

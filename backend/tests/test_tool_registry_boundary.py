@@ -22,8 +22,8 @@ def test_supported_tool_inventory_matches_input_schemas() -> None:
     assert not missing
 
 
-def test_supported_registry_has_exactly_twenty_seven_tools() -> None:
-    assert len(tool_registry.SUPPORTED_TOOL_NAMES) == 27
+def test_supported_registry_has_exactly_twenty_eight_tools() -> None:
+    assert len(tool_registry.SUPPORTED_TOOL_NAMES) == 28
 
 
 def test_write_classification_tools_are_supported() -> None:
@@ -35,6 +35,7 @@ def test_write_tools_have_strict_non_empty_schemas_where_applicable() -> None:
     assert tool_registry.TOOL_INPUT_SCHEMAS["create_working_branch"]["properties"]
     assert tool_registry.TOOL_INPUT_SCHEMAS["write_source_file"]["required"] == ["branch", "path", "content"]
     assert tool_registry.TOOL_INPUT_SCHEMAS["read_source_file"]["required"] == ["branch", "path"]
+    assert tool_registry.TOOL_INPUT_SCHEMAS["resolve_preview_deploy_target"]["required"] == ["branch", "changed_files"]
 
 
 def test_tool_input_validation_accepts_valid_nested_objects() -> None:
@@ -118,6 +119,9 @@ def test_phase3_write_deploy_delete_tools_remain_metadata_only_and_discoverable(
     assert seeded["create_working_branch"].backing_service == "control-plane"
     assert seeded["deploy_service_or_application"].backing_api == "POST /deployments"
     assert seeded["deploy_preview_change"].backing_api == "POST /change-previews/deploy"
+    assert seeded["resolve_preview_deploy_target"].backing_api == "GET /registry/units"
+    assert seeded["resolve_preview_deploy_target"].mode_policy_json["read_only"] == "enabled"
+    assert seeded["resolve_preview_deploy_target"].read_write_classification == "read"
     assert seeded["revert_preview_change"].backing_api == "POST /change-previews/revert"
     assert seeded["delete_managed_resources"].read_write_classification == "destructive_write"
     assert seeded["create_working_branch"].required_execution_mode == "execute"

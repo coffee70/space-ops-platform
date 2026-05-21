@@ -43,6 +43,7 @@ SUPPORTED_TOOL_NAMES: frozenset[str] = frozenset(
         'search_codebase',
         'read_source_file',
         'get_related_code_context',
+        'resolve_preview_deploy_target',
         'navigate_to_application',
         'create_working_branch',
         'scaffold_service',
@@ -165,6 +166,19 @@ TOOL_INPUT_SCHEMAS: dict[str, dict] = {
             'route_path': {'type': 'string', 'pattern': '^/apps/.*', 'maxLength': 2000},
         },
         'required': ['application_id'],
+        'additionalProperties': False,
+    },
+    'resolve_preview_deploy_target': {
+        'type': 'object',
+        'properties': {
+            'branch': {'type': 'string', 'minLength': 1, 'maxLength': 256},
+            'changed_files': {
+                'type': 'array',
+                'items': {'type': 'string', 'minLength': 1, 'maxLength': 2000},
+            },
+            'target_application_id': {'type': 'string', 'maxLength': 128},
+        },
+        'required': ['branch', 'changed_files'],
         'additionalProperties': False,
     },
     'create_working_branch': {
@@ -374,6 +388,7 @@ def seed_tools(db: Session = Depends(get_db)):
         ('search_codebase', 'Search indexed code chunks.', 'code_intelligence', 'layer2', 'read_only'),
         ('read_source_file', 'Read file contents from the managed fork (Layer 1).', 'code_intelligence', 'layer1', 'read_only'),
         ('get_related_code_context', 'Return additional indexed chunks for a repository file path.', 'code_intelligence', 'layer2', 'read_only'),
+        ('resolve_preview_deploy_target', 'Resolve the managed runtime unit that should receive a preview deploy for changed files.', 'deployment', 'layer1', 'read_only'),
         ('navigate_to_application', 'Navigate Mission Control UI to a platform application.', 'navigation', 'layer3', 'read_only'),
     ]
 
@@ -394,6 +409,7 @@ def seed_tools(db: Session = Depends(get_db)):
         'search_codebase': ('code-intelligence-service', 'POST /intelligence/code/search'),
         'read_source_file': ('control-plane', 'GET /code/file'),
         'get_related_code_context': ('code-intelligence-service', 'POST /intelligence/code/related-context'),
+        'resolve_preview_deploy_target': ('control-plane', 'GET /registry/units'),
     }
 
     for name, description, cat, lt, ej in read_tools:
