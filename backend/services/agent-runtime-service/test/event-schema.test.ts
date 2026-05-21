@@ -21,3 +21,69 @@ test("missing required payload fields and unsupported event types are rejected",
 test("tool lifecycle events require tool_call_id", () => {
   assert.throws(() => validateAgentEventPayload("tool.completed", validPayload("tool.completed"), null), /requires tool_call_id/);
 });
+
+test("permission tool events validate required payloads and event-level tool_call_id", () => {
+  assert.equal(
+    validateAgentEventPayload(
+      "tool.permission_required",
+      {
+        tool_name: "deploy_preview_change",
+        tool_call_id: "tool-call-1",
+        permission_request_id: "permission-1",
+        approval_token: "approval-token",
+        execution_mode: "execute",
+        prompt: { title: "Deploy preview changes?" },
+      },
+      "tool-call-1",
+    ),
+    "tool.permission_required",
+  );
+  assert.equal(
+    validateAgentEventPayload(
+      "tool.permission_approved",
+      {
+        tool_name: "deploy_preview_change",
+        tool_call_id: "tool-call-1",
+        permission_request_id: "permission-1",
+      },
+      "tool-call-1",
+    ),
+    "tool.permission_approved",
+  );
+  assert.equal(
+    validateAgentEventPayload(
+      "tool.permission_denied",
+      {
+        tool_name: "deploy_preview_change",
+        tool_call_id: "tool-call-1",
+        permission_request_id: "permission-1",
+        reason: "user_denied",
+      },
+      "tool-call-1",
+    ),
+    "tool.permission_denied",
+  );
+});
+
+test("permission tool events still reject missing fields, missing tool_call_id, and unknown types", () => {
+  assert.throws(
+    () =>
+      validateAgentEventPayload(
+        "tool.permission_required",
+        {
+          tool_name: "deploy_preview_change",
+          tool_call_id: "tool-call-1",
+          permission_request_id: "permission-1",
+          execution_mode: "execute",
+          prompt: { title: "Deploy preview changes?" },
+        },
+        "tool-call-1",
+      ),
+    /missing required payload.*approval_token/,
+  );
+  assert.throws(
+    () => validateAgentEventPayload("tool.permission_denied", validPayload("tool.permission_denied"), null),
+    /requires tool_call_id/,
+  );
+  assert.throws(() => validateAgentEventPayload("tool.permission_expired", {}, "tool-call-1"), /Invalid enum value|invalid/i);
+});
