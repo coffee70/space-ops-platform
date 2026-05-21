@@ -64,6 +64,17 @@ function hasRetryIntent(message: string): boolean {
   return RETRY_INTENT_PATTERN.test(message.toLowerCase());
 }
 
+function rawEventsIncludeToolActivity(events: RawEventFact[] | undefined): boolean {
+  return (events ?? []).some((event) => event.event_type.startsWith("tool."));
+}
+
+function textDeltaWithToolBoundary(assistantText: string, textDelta: string, pendingToolTextBoundary: boolean): string {
+  if (!pendingToolTextBoundary || assistantText.trim().length === 0) {
+    return textDelta;
+  }
+  return `${assistantText.endsWith("\n\n") ? "" : "\n\n"}${textDelta}`;
+}
+
 function recentConversationHasCodeIntent(messages: ChatInputMessage[]): boolean {
   return messages.slice(-8).some((message) => hasCodeIntent(message.content));
 }
@@ -270,6 +281,7 @@ async function orchestrateChat(input: {
 
   let toolCallCount = 0;
   let assistantText = "";
+  let pendingToolTextBoundary = false;
   let reasoningText = "";
   let reasoningStarted = false;
   let reasoningCompleted = false;
@@ -339,6 +351,9 @@ async function orchestrateChat(input: {
         toolCallCount += 1;
       },
       emitRawToolEvents: async (events) => {
+        if (rawEventsIncludeToolActivity(events) && assistantText.trim().length > 0) {
+          pendingToolTextBoundary = true;
+        }
         await stream.emitRawEvents(events as RawEventFact[] | undefined);
       },
     });
@@ -511,8 +526,10 @@ async function orchestrateChat(input: {
 
       const textDelta = getTextDelta(part);
       if (textDelta && textDelta.length > 0) {
-        assistantText += textDelta;
-        await stream.emitMessageDelta(textDelta);
+        const segmentedTextDelta = textDeltaWithToolBoundary(assistantText, textDelta, pendingToolTextBoundary);
+        assistantText += segmentedTextDelta;
+        pendingToolTextBoundary = false;
+        await stream.emitMessageDelta(segmentedTextDelta);
       }
     }
 

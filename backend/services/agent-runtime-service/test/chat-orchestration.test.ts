@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { createApp } from "../src/server.js";
+import type { RawEventFact, ToolDefinition, ToolExecutionResponse } from "../src/types.js";
 import {
   baseRuntimeConfig,
   contextResolvedEvent,
@@ -13,6 +14,67 @@ import {
   parseNdjson,
 } from "./helpers.js";
 
+const platformServiceTool: ToolDefinition = {
+  name: "get_platform_service",
+  description: "Get runtime service details.",
+  category: "platform_discovery",
+  layer_target: "layer1",
+  read_write_classification: "read",
+  required_execution_mode: "read_only",
+  enabled: true,
+  requires_confirmation: false,
+  input_schema_json: {
+    type: "object",
+    properties: {
+      service_slug: {
+        type: "string",
+        description: "Service slug to inspect.",
+      },
+    },
+    required: ["service_slug"],
+  },
+};
+
+function toolStartedEvent(toolCallId: string): RawEventFact {
+  return {
+    event_type: "tool.started",
+    emitted_by: "tool-execution-service",
+    tool_call_id: toolCallId,
+    payload: {
+      tool_name: "get_platform_service",
+      category: "platform_discovery",
+      read_write_classification: "read",
+      input_preview: { service_slug: "agent-runtime-service" },
+    },
+  };
+}
+
+function toolCompletedEvent(toolCallId: string): RawEventFact {
+  return {
+    event_type: "tool.completed",
+    emitted_by: "tool-execution-service",
+    tool_call_id: toolCallId,
+    payload: {
+      tool_name: "get_platform_service",
+      status: "completed",
+      result_preview: { service_slug: "agent-runtime-service" },
+      duration_ms: 12,
+    },
+  };
+}
+
+function completedToolResponse(rawEvents: RawEventFact[] = [toolStartedEvent("tool-call-1"), toolCompletedEvent("tool-call-1")]): ToolExecutionResponse {
+  return {
+    conversation_id: "ignored",
+    agent_run_id: "ignored",
+    request_id: "ignored",
+    tool_call_id: "tool-call-1",
+    status: "completed" as const,
+    output: { service_slug: "agent-runtime-service" },
+    raw_events: rawEvents,
+  };
+}
+
 test("chat orchestration emits backend-owned run, context, tool, and completion events", async () => {
   const store = new MemoryConversationStore();
   const conversation = await store.createConversation({
@@ -20,61 +82,8 @@ test("chat orchestration emits backend-owned run, context, tool, and completion 
     execution_mode: "read_only",
     initial_message: { role: "user", content: "Start AI Engineer session." },
   });
-  const toolRegistry = new FakeToolRegistryClient([
-    {
-      name: "get_platform_service",
-      description: "Get runtime service details.",
-      category: "platform_discovery",
-      layer_target: "layer1",
-      read_write_classification: "read",
-      required_execution_mode: "read_only",
-      enabled: true,
-      requires_confirmation: false,
-      input_schema_json: {
-        type: "object",
-        properties: {
-          service_slug: {
-            type: "string",
-            description: "Service slug to inspect.",
-          },
-        },
-        required: ["service_slug"],
-      },
-    },
-  ]);
-
-  const toolExecution = new FakeToolExecutionClient({
-    conversation_id: conversation.id,
-    agent_run_id: "ignored",
-    request_id: "ignored",
-    tool_call_id: "tool-call-1",
-    status: "completed",
-    output: { service_slug: "agent-runtime-service" },
-    raw_events: [
-      {
-        event_type: "tool.started",
-        emitted_by: "tool-execution-service",
-        tool_call_id: "tool-call-1",
-        payload: {
-          tool_name: "get_platform_service",
-          category: "platform_discovery",
-          read_write_classification: "read",
-          input_preview: { service_slug: "agent-runtime-service" },
-        },
-      },
-      {
-        event_type: "tool.completed",
-        emitted_by: "tool-execution-service",
-        tool_call_id: "tool-call-1",
-        payload: {
-          tool_name: "get_platform_service",
-          status: "completed",
-          result_preview: { service_slug: "agent-runtime-service" },
-          duration_ms: 12,
-        },
-      },
-    ],
-  });
+  const toolRegistry = new FakeToolRegistryClient([platformServiceTool]);
+  const toolExecution = new FakeToolExecutionClient(completedToolResponse());
 
   const app = createApp({
     config: baseRuntimeConfig({
@@ -179,6 +188,221 @@ test("chat orchestration emits backend-owned run, context, tool, and completion 
   ]);
   assert.equal(toolExecution.calls.length, 1);
   assert.equal(toolExecution.calls[0]?.tool_name, "get_platform_service");
+});
+
+test("chat orchestration persists one paragraph boundary when assistant text resumes after tool activity", async () => {
+  const store = new MemoryConversationStore();
+  const conversation = await store.createConversation({
+    title: "AI Engineer Session",
+    execution_mode: "read_only",
+    initial_message: { role: "user", content: "Start AI Engineer session." },
+  });
+
+  const app = createApp({
+    config: baseRuntimeConfig({
+      openAiApiKey: "test-key",
+      maxSteps: 3,
+      requestTimeoutMs: 1000,
+      allowMissingKeyFallback: false,
+    }),
+    store,
+    contextClient: new FakeContextClient([contextResolvedEvent()]),
+    toolRegistryClient: new FakeToolRegistryClient([platformServiceTool]),
+    toolExecutionClient: new FakeToolExecutionClient(completedToolResponse()),
+    modelRunner: {
+      async *stream(input) {
+        const runtimeTool = input.tools.get_platform_service as {
+          execute: (args: { service_slug: string }, options: { toolCallId: string; messages: [] }) => Promise<unknown>;
+        };
+        yield { type: "text-delta", textDelta: "I'll inspect the code." };
+        await runtimeTool.execute({ service_slug: "agent-runtime-service" }, { toolCallId: "tool-call-1", messages: [] });
+        yield { type: "text-delta", textDelta: "The issue is in schema.ts." };
+        yield { type: "finish", finishReason: "stop" };
+      },
+    },
+    modelCatalog: new FakeModelCatalog(),
+  });
+
+  const response = await app.request("/chat", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      conversation_id: conversation.id,
+      execution_mode: "read_only",
+      messages: [{ role: "user", content: "Inspect the runtime service." }],
+    }),
+  });
+
+  assert.equal(response.status, 200);
+  const chunks = parseNdjson(await response.text());
+  const events = chunks.filter((chunk) => chunk.kind === "event") as Array<{ event: { event_type: string; payload: Record<string, unknown> } }>;
+  assert.deepEqual(
+    events.filter((chunk) => chunk.event.event_type.startsWith("tool.")).map((chunk) => chunk.event.event_type),
+    ["tool.started", "tool.completed"],
+  );
+  assert.deepEqual(
+    events.filter((chunk) => chunk.event.event_type === "message.delta").map((chunk) => chunk.event.payload.text_delta),
+    ["I'll inspect the code.", "\n\nThe issue is in schema.ts."],
+  );
+
+  const persisted = await store.getConversation(conversation.id);
+  const assistantMessages = persisted?.messages.filter((message) => message.role === "assistant") ?? [];
+  assert.equal(assistantMessages.length, 1);
+  assert.equal(assistantMessages[0]?.content, "I'll inspect the code.\n\nThe issue is in schema.ts.");
+});
+
+test("chat orchestration emits one persisted boundary for multiple tool events between text deltas", async () => {
+  const store = new MemoryConversationStore();
+  const conversation = await store.createConversation({
+    title: "AI Engineer Session",
+    execution_mode: "read_only",
+    initial_message: { role: "user", content: "Start AI Engineer session." },
+  });
+
+  const app = createApp({
+    config: baseRuntimeConfig({
+      openAiApiKey: "test-key",
+      maxSteps: 3,
+      requestTimeoutMs: 1000,
+      allowMissingKeyFallback: false,
+    }),
+    store,
+    contextClient: new FakeContextClient([contextResolvedEvent()]),
+    toolRegistryClient: new FakeToolRegistryClient([platformServiceTool]),
+    toolExecutionClient: new FakeToolExecutionClient(completedToolResponse([
+      toolStartedEvent("tool-call-1"),
+      toolCompletedEvent("tool-call-1"),
+      toolStartedEvent("tool-call-2"),
+      toolCompletedEvent("tool-call-2"),
+    ])),
+    modelRunner: {
+      async *stream(input) {
+        const runtimeTool = input.tools.get_platform_service as {
+          execute: (args: { service_slug: string }, options: { toolCallId: string; messages: [] }) => Promise<unknown>;
+        };
+        yield { type: "text-delta", textDelta: "Before tools." };
+        await runtimeTool.execute({ service_slug: "agent-runtime-service" }, { toolCallId: "tool-call-1", messages: [] });
+        yield { type: "text-delta", textDelta: "After tools." };
+        yield { type: "finish", finishReason: "stop" };
+      },
+    },
+    modelCatalog: new FakeModelCatalog(),
+  });
+
+  const response = await app.request("/chat", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      conversation_id: conversation.id,
+      execution_mode: "read_only",
+      messages: [{ role: "user", content: "Inspect the runtime service." }],
+    }),
+  });
+
+  assert.equal(response.status, 200);
+  await response.text();
+
+  const persisted = await store.getConversation(conversation.id);
+  const assistantMessages = persisted?.messages.filter((message) => message.role === "assistant") ?? [];
+  assert.equal(assistantMessages[0]?.content, "Before tools.\n\nAfter tools.");
+});
+
+test("chat orchestration does not add leading whitespace for tool activity before first assistant text", async () => {
+  const store = new MemoryConversationStore();
+  const conversation = await store.createConversation({
+    title: "AI Engineer Session",
+    execution_mode: "read_only",
+    initial_message: { role: "user", content: "Start AI Engineer session." },
+  });
+
+  const app = createApp({
+    config: baseRuntimeConfig({
+      openAiApiKey: "test-key",
+      maxSteps: 3,
+      requestTimeoutMs: 1000,
+      allowMissingKeyFallback: false,
+    }),
+    store,
+    contextClient: new FakeContextClient([contextResolvedEvent()]),
+    toolRegistryClient: new FakeToolRegistryClient([platformServiceTool]),
+    toolExecutionClient: new FakeToolExecutionClient(completedToolResponse()),
+    modelRunner: {
+      async *stream(input) {
+        const runtimeTool = input.tools.get_platform_service as {
+          execute: (args: { service_slug: string }, options: { toolCallId: string; messages: [] }) => Promise<unknown>;
+        };
+        await runtimeTool.execute({ service_slug: "agent-runtime-service" }, { toolCallId: "tool-call-1", messages: [] });
+        yield { type: "text-delta", textDelta: "First text." };
+        yield { type: "finish", finishReason: "stop" };
+      },
+    },
+    modelCatalog: new FakeModelCatalog(),
+  });
+
+  const response = await app.request("/chat", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      conversation_id: conversation.id,
+      execution_mode: "read_only",
+      messages: [{ role: "user", content: "Inspect the runtime service." }],
+    }),
+  });
+
+  assert.equal(response.status, 200);
+  await response.text();
+
+  const persisted = await store.getConversation(conversation.id);
+  const assistantMessages = persisted?.messages.filter((message) => message.role === "assistant") ?? [];
+  assert.equal(assistantMessages[0]?.content, "First text.");
+});
+
+test("chat orchestration keeps consecutive assistant text deltas continuous without tool activity", async () => {
+  const store = new MemoryConversationStore();
+  const conversation = await store.createConversation({
+    title: "AI Engineer Session",
+    execution_mode: "read_only",
+    initial_message: { role: "user", content: "Start AI Engineer session." },
+  });
+
+  const app = createApp({
+    config: baseRuntimeConfig({
+      openAiApiKey: "test-key",
+      maxSteps: 3,
+      requestTimeoutMs: 1000,
+      allowMissingKeyFallback: false,
+    }),
+    store,
+    contextClient: new FakeContextClient([contextResolvedEvent()]),
+    toolRegistryClient: new FakeToolRegistryClient([]),
+    toolExecutionClient: new FakeToolExecutionClient(completedToolResponse([])),
+    modelRunner: {
+      async *stream(input) {
+        void input;
+        yield { type: "text-delta", textDelta: "Hello" };
+        yield { type: "text-delta", textDelta: " world." };
+        yield { type: "finish", finishReason: "stop" };
+      },
+    },
+    modelCatalog: new FakeModelCatalog(),
+  });
+
+  const response = await app.request("/chat", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      conversation_id: conversation.id,
+      execution_mode: "read_only",
+      messages: [{ role: "user", content: "Inspect the runtime service." }],
+    }),
+  });
+
+  assert.equal(response.status, 200);
+  await response.text();
+
+  const persisted = await store.getConversation(conversation.id);
+  const assistantMessages = persisted?.messages.filter((message) => message.role === "assistant") ?? [];
+  assert.equal(assistantMessages[0]?.content, "Hello world.");
 });
 
 test("retry after code index failure requests fresh code retrieval from recent context", async () => {
