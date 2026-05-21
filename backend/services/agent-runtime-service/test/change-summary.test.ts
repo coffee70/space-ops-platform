@@ -50,6 +50,16 @@ const TELEMETRY_APP_UNIT: ChangeSummaryRegistryUnit = {
   category: "frontend",
 };
 
+const MISSION_CONTROL_FRONTEND_SHELL_UNIT: ChangeSummaryRegistryUnit = {
+  unit_id: "mission-control-frontend-shell",
+  source_path: "project/space-ops-apps/mission-control-ui",
+  service_slug: null,
+  application_id: null,
+  runtime_kind: "frontend_shell",
+  capabilities: ["mission-control", "frontend-shell"],
+  category: "frontend",
+};
+
 test("aggregator emits change.summary after create_working_branch + write + create_commit", async () => {
   const { stream, events } = fakeStream();
   const aggregator = new ChangeSummaryAggregator({
@@ -228,6 +238,49 @@ test("aggregator suppresses change.summary when commit lands on base branch", as
     { branch: "main", commit_sha: "def", changed_files: [] },
   );
   assert.equal(events.length, 0);
+});
+
+test("aggregator targets Mission Control frontend shell for frontend-only UI changes", async () => {
+  const { stream, events } = fakeStream();
+  const aggregator = new ChangeSummaryAggregator({
+    stream,
+    registryClient: fakeRegistryClient([DERIVED_TELEMETRY_UNIT, MISSION_CONTROL_FRONTEND_SHELL_UNIT]),
+  });
+  const changedFile = "project/space-ops-apps/mission-control-ui/src/components/telemetry-inventory-page.tsx";
+
+  await aggregator.observeToolCompletion(
+    "create_working_branch",
+    { branch: "preview/frontend-shell-change", from_branch: "main" },
+    {
+      branch: "preview/frontend-shell-change",
+      commit_sha: "baseline-sha",
+      data: { base_branch: "main", base_commit_sha: "baseline-sha" },
+    },
+  );
+  await aggregator.observeToolCompletion(
+    "write_source_file",
+    { branch: "preview/frontend-shell-change", path: changedFile },
+    {
+      branch: "preview/frontend-shell-change",
+      commit_sha: "baseline-sha",
+      changed_files: [changedFile],
+    },
+  );
+  await aggregator.observeToolCompletion(
+    "create_commit",
+    { branch: "preview/frontend-shell-change", message: "Adjust telemetry inventory UI" },
+    {
+      branch: "preview/frontend-shell-change",
+      commit_sha: "preview-sha",
+      changed_files: [changedFile],
+    },
+  );
+
+  assert.equal(events.length, 1);
+  assert.equal(events[0].type, "change.summary");
+  assert.equal(events[0].payload.target_unit_id, "mission-control-frontend-shell");
+  assert.equal(events[0].payload.target_application_id, null);
+  assert.equal(events[0].payload.affected_capability, "mission-control");
 });
 
 test("aggregator emits null target when no unit matches", async () => {
