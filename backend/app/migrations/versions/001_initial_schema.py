@@ -449,6 +449,8 @@ def upgrade() -> None:
         sa.Column("required_execution_mode", sa.Text(), nullable=False),
         sa.Column("enabled", sa.Boolean(), nullable=False, server_default=sa.text("true")),
         sa.Column("requires_confirmation", sa.Boolean(), nullable=False, server_default=sa.text("false")),
+        sa.Column("mode_policy_json", JSONB(), nullable=False),
+        sa.Column("permission_prompt_json", JSONB(), nullable=False),
         sa.Column("input_schema_json", JSONB(), nullable=False),
         sa.Column("output_schema_json", JSONB(), nullable=False),
         sa.Column("audit_policy_json", JSONB(), nullable=False),
@@ -483,6 +485,53 @@ def upgrade() -> None:
     op.create_index("ix_ai_tool_calls_conversation_started", "ai_tool_calls", ["conversation_id", "started_at"])
     op.create_index("ix_ai_tool_calls_agent_run_started", "ai_tool_calls", ["agent_run_id", "started_at"])
     op.create_index("ix_ai_tool_calls_tool_call_id", "ai_tool_calls", ["tool_call_id"], unique=True)
+
+    op.create_table(
+        "ai_tool_permission_requests",
+        sa.Column("id", UUID(as_uuid=True), primary_key=True, nullable=False),
+        sa.Column(
+            "conversation_id",
+            UUID(as_uuid=True),
+            sa.ForeignKey("ai_conversations.id", ondelete="SET NULL"),
+            nullable=True,
+        ),
+        sa.Column("agent_run_id", UUID(as_uuid=True), nullable=False),
+        sa.Column("request_id", UUID(as_uuid=True), nullable=False),
+        sa.Column("tool_call_id", UUID(as_uuid=True), nullable=False),
+        sa.Column("tool_name", sa.Text(), nullable=False),
+        sa.Column("input_json", JSONB(), nullable=False),
+        sa.Column("redacted_input_json", JSONB(), nullable=False),
+        sa.Column("status", sa.Text(), nullable=False),
+        sa.Column("prompt_json", JSONB(), nullable=False),
+        sa.Column("mode_policy_json", JSONB(), nullable=False),
+        sa.Column("execution_mode", sa.Text(), nullable=False),
+        sa.Column("approval_token", sa.Text(), nullable=False),
+        sa.Column("response_json", JSONB(), nullable=True),
+        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
+        sa.Column("resolved_at", sa.DateTime(timezone=True), nullable=True),
+    )
+    op.create_index(
+        "ix_ai_tool_permission_requests_agent_run_created",
+        "ai_tool_permission_requests",
+        ["agent_run_id", "created_at"],
+    )
+    op.create_index(
+        "ix_ai_tool_permission_requests_status_created",
+        "ai_tool_permission_requests",
+        ["status", "created_at"],
+    )
+    op.create_index(
+        "ix_ai_tool_permission_requests_tool_call_id",
+        "ai_tool_permission_requests",
+        ["tool_call_id"],
+        unique=True,
+    )
+    op.create_index(
+        "ix_ai_tool_permission_requests_approval_token",
+        "ai_tool_permission_requests",
+        ["approval_token"],
+        unique=True,
+    )
 
     op.create_table(
         "ai_agent_events",
@@ -671,6 +720,12 @@ def downgrade() -> None:
     op.drop_index("ix_ai_tool_calls_agent_run_started", table_name="ai_tool_calls")
     op.drop_index("ix_ai_tool_calls_conversation_started", table_name="ai_tool_calls")
     op.drop_table("ai_tool_calls")
+
+    op.drop_index("ix_ai_tool_permission_requests_approval_token", table_name="ai_tool_permission_requests")
+    op.drop_index("ix_ai_tool_permission_requests_tool_call_id", table_name="ai_tool_permission_requests")
+    op.drop_index("ix_ai_tool_permission_requests_status_created", table_name="ai_tool_permission_requests")
+    op.drop_index("ix_ai_tool_permission_requests_agent_run_created", table_name="ai_tool_permission_requests")
+    op.drop_table("ai_tool_permission_requests")
 
     op.drop_index("ix_ai_tool_definitions_name", table_name="ai_tool_definitions")
     op.drop_table("ai_tool_definitions")

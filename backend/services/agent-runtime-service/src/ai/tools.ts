@@ -1,8 +1,10 @@
+import { randomUUID } from "node:crypto";
+
 import { tool, type ToolSet } from "ai";
 import { z, type ZodTypeAny } from "zod";
 
 import { withToolTrace } from "../trace.js";
-import type { ExecutionMode, RawEventFact, ToolDefinition, ToolExecutionClient, TraceEnvelope } from "../types.js";
+import type { ExecutionMode, RawEventFact, ToolDefinition, ToolExecutionClient, ToolModePolicy, ToolPermissionClient, TraceEnvelope } from "../types.js";
 
 function canUseTool(requiredMode: ExecutionMode, executionMode: ExecutionMode): boolean {
   const rank: Record<ExecutionMode, number> = {
@@ -15,14 +17,20 @@ function canUseTool(requiredMode: ExecutionMode, executionMode: ExecutionMode): 
   return rank[executionMode] >= rank[requiredMode];
 }
 
+export function policyForMode(definition: ToolDefinition, executionMode: ExecutionMode): ToolModePolicy {
+  const policy = definition.mode_policy_json?.[executionMode];
+  if (policy === "disabled" || policy === "requires_permission" || policy === "enabled") {
+    return policy;
+  }
+  return canUseTool(definition.required_execution_mode, executionMode) ? "enabled" : "disabled";
+}
+
 /** Matches `createToolSet` exposure so prompts list the same callable tools as the SDK tool surface. */
 export function filterToolDefinitionsForExecutionMode(
   definitions: ToolDefinition[],
   executionMode: ExecutionMode,
 ): ToolDefinition[] {
-  return definitions.filter(
-    (definition) => definition.enabled && canUseTool(definition.required_execution_mode, executionMode),
-  );
+  return definitions.filter((definition) => definition.enabled && policyForMode(definition, executionMode) !== "disabled");
 }
 
 type JsonSchema = {
@@ -118,8 +126,10 @@ export function schemaToZod(schema: unknown): ZodTypeAny {
 export function createToolSet(input: {
   toolDefinitions: ToolDefinition[];
   toolExecutionClient: ToolExecutionClient;
+  toolPermissionClient?: ToolPermissionClient;
   trace: TraceEnvelope;
   executionMode: ExecutionMode;
+  abortSignal?: AbortSignal;
   onToolCallRequested?: (definition: ToolDefinition, toolCallId: string, args: Record<string, unknown>) => void | Promise<void>;
   onToolCallCompleted?: (
     definition: ToolDefinition,
@@ -144,7 +154,7 @@ export function createToolSet(input: {
             parsedArgs.success && typeof parsedArgs.data === "object" && parsedArgs.data !== null
               ? (parsedArgs.data as Record<string, unknown>)
               : {};
-          const toolCallId = crypto.randomUUID();
+          const toolCallId = randomUUID();
 
           await input.onToolCallRequested?.(definition, toolCallId, normalizedArgs);
           const response = await input.toolExecutionClient.execute({
@@ -154,6 +164,43 @@ export function createToolSet(input: {
             execution_mode: input.executionMode,
           });
           await input.emitRawToolEvents(response.raw_events);
+          if (response.status === "permission_required") {
+            const output = response.output && typeof response.output === "object" ? (response.output as Record<string, unknown>) : {};
+            const permissionRequestId =
+              typeof output.permission_request_id === "string" ? output.permission_request_id : null;
+            const approvalToken = typeof output.approval_token === "string" ? output.approval_token : null;
+            if (!permissionRequestId || !approvalToken || !input.toolPermissionClient) {
+              return response.output;
+            }
+
+            const decision = await input.toolPermissionClient.waitForDecision({
+              permissionRequestId,
+              abortSignal: input.abortSignal,
+            });
+            await input.emitRawToolEvents(decision.raw_events);
+            if (decision.status === "denied") {
+              return {
+                status: "permission_denied",
+                message: "The user denied this tool call. No action was taken.",
+                permission_request_id: permissionRequestId,
+                tool_name: definition.name,
+                reason: decision.reason ?? "user_denied",
+              };
+            }
+
+            const approvedResponse = await input.toolExecutionClient.execute({
+              trace: withToolTrace(input.trace, toolCallId),
+              tool_name: definition.name,
+              input: normalizedArgs,
+              execution_mode: input.executionMode,
+              approval_token: approvalToken,
+            });
+            await input.emitRawToolEvents(approvedResponse.raw_events);
+            if (approvedResponse.status === "completed") {
+              await input.onToolCallCompleted?.(definition, toolCallId, normalizedArgs, approvedResponse.output, approvedResponse.status);
+            }
+            return approvedResponse.output;
+          }
           if (response.status === "completed") {
             await input.onToolCallCompleted?.(definition, toolCallId, normalizedArgs, response.output, response.status);
           }

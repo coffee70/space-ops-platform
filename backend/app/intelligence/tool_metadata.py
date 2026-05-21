@@ -13,5 +13,7 @@ def tool_summary(tool: ToolDefinition) -> dict:
         "required_execution_mode": tool.required_execution_mode,
         "enabled": tool.enabled,
         "requires_confirmation": tool.requires_confirmation,
+        "mode_policy_json": getattr(tool, "mode_policy_json", {}) or {},
+        "permission_prompt_json": getattr(tool, "permission_prompt_json", {}) or {},
         "input_schema_json": tool.input_schema_json,
     }

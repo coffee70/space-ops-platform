@@ -93,7 +93,7 @@ def _resolve_intelligence_service(path: str) -> tuple[str, str]:
         return "code-intelligence-service", path[len("code/") :]
     if re.fullmatch(r"code/repositories/[^/]+/status", path):
         return "code-intelligence-service", path[len("code/") :] if path.startswith("code/") else ""
-    if path == "tools/execute" or path.startswith("tools/execute/"):
+    if path == "tools/execute" or path.startswith("tools/execute/") or path == "tools/permissions" or path.startswith("tools/permissions/"):
         return "tool-execution-service", path[len("tools/") :]
     if path == "tools/definitions" or path.startswith("tools/definitions/"):
         return "tool-registry-service", path[len("tools/") :]

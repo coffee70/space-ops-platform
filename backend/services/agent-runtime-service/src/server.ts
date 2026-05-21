@@ -5,6 +5,7 @@ import { createModelRunner } from "./ai/model.js";
 import { HttpModelRegistryClient } from "./clients/model-registry.js";
 import { HttpContextRetrievalClient } from "./clients/context-retrieval.js";
 import { HttpToolExecutionClient } from "./clients/tool-execution.js";
+import { HttpToolPermissionClient } from "./clients/tool-permissions.js";
 import { HttpToolRegistryClient } from "./clients/tool-registry.js";
 import { loadConfig } from "./config.js";
 import { PgConversationStore } from "./db/conversations.js";
@@ -22,6 +23,7 @@ export function createApp(overrides?: Partial<RunDependencies>): Hono {
     contextClient: overrides?.contextClient ?? new HttpContextRetrievalClient(config),
     toolRegistryClient: overrides?.toolRegistryClient ?? new HttpToolRegistryClient(config),
     toolExecutionClient: overrides?.toolExecutionClient ?? new HttpToolExecutionClient(config),
+    toolPermissionClient: overrides?.toolPermissionClient ?? new HttpToolPermissionClient(config),
     modelRunner: overrides?.modelRunner ?? createModelRunner(config),
     modelCatalog: overrides?.modelCatalog ?? new HttpModelRegistryClient(config),
     now: overrides?.now ?? (() => new Date()),

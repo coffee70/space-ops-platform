@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.intelligence.tool_metadata import tool_summary
+from app.intelligence.tool_permissions import DEPLOY_REVERT_POLICY, DESTRUCTIVE_POLICY, READ_ONLY_POLICY, WRITE_POLICY
 from app.intelligence.tooling import API_INVENTORY
 from app.models.intelligence import ToolDefinition
 
@@ -48,6 +49,8 @@ SUPPORTED_TOOL_NAMES: frozenset[str] = frozenset(
         'write_source_file',
         'create_commit',
         'deploy_service_or_application',
+        'deploy_preview_change',
+        'revert_preview_change',
         'delete_managed_resources',
     }
 )
@@ -216,6 +219,32 @@ TOOL_INPUT_SCHEMAS: dict[str, dict] = {
         'required': ['unit_id'],
         'additionalProperties': False,
     },
+    'deploy_preview_change': {
+        'type': 'object',
+        'properties': {
+            'branch': {'type': 'string', 'minLength': 1, 'maxLength': 256},
+            'commit_sha': {'type': 'string', 'minLength': 7, 'maxLength': 64},
+            'target_unit_id': {'type': 'string', 'minLength': 1, 'maxLength': 256},
+            'target_application_id': {'type': 'string', 'maxLength': 128},
+            'changed_files': {'type': 'array', 'items': {'type': 'string', 'maxLength': 2000}},
+            'summary': {'type': 'string', 'maxLength': 4000},
+        },
+        'required': ['branch', 'target_unit_id'],
+        'additionalProperties': False,
+    },
+    'revert_preview_change': {
+        'type': 'object',
+        'properties': {
+            'target_unit_id': {'type': 'string', 'minLength': 1, 'maxLength': 256},
+            'target_application_id': {'type': 'string', 'maxLength': 128},
+            'baseline_branch': {'type': 'string', 'minLength': 1, 'maxLength': 256},
+            'baseline_commit_sha': {'type': 'string', 'minLength': 7, 'maxLength': 64},
+            'preview_deployment_id': {'type': 'string', 'minLength': 1, 'maxLength': 64},
+            'summary': {'type': 'string', 'maxLength': 4000},
+        },
+        'required': ['target_unit_id'],
+        'additionalProperties': False,
+    },
     'delete_managed_resources': {
         'type': 'object',
         'properties': {
@@ -285,7 +314,19 @@ def get_tool(tool_name: str, db: Session = Depends(get_db)):
 def seed_tools(db: Session = Depends(get_db)):
     seeded = 0
 
-    def upsert(*, name: str, description: str, category: str, layer_target: str, read_write: str, execution_mode: str, backing_service: str | None = None, backing_api: str | None = None):
+    def upsert(
+        *,
+        name: str,
+        description: str,
+        category: str,
+        layer_target: str,
+        read_write: str,
+        execution_mode: str,
+        backing_service: str | None = None,
+        backing_api: str | None = None,
+        mode_policy: dict | None = None,
+        permission_prompt: dict | None = None,
+    ):
         nonlocal seeded
         existing = db.query(ToolDefinition).filter(ToolDefinition.name == name).one_or_none()
         payload = {
@@ -296,6 +337,8 @@ def seed_tools(db: Session = Depends(get_db)):
             'required_execution_mode': execution_mode,
             'enabled': True,
             'requires_confirmation': False,
+            'mode_policy_json': mode_policy or READ_ONLY_POLICY,
+            'permission_prompt_json': permission_prompt or {},
             'backing_service': backing_service,
             'backing_api': backing_api,
             'input_schema_json': TOOL_INPUT_SCHEMAS.get(name, STRICT_EMPTY_INPUT),
@@ -355,7 +398,7 @@ def seed_tools(db: Session = Depends(get_db)):
 
     for name, description, cat, lt, ej in read_tools:
         svc, api = backing_read.get(name, (None, None))
-        upsert(name=name, description=description, category=cat, layer_target=lt, read_write='read', execution_mode='read_only', backing_service=svc, backing_api=api)
+        upsert(name=name, description=description, category=cat, layer_target=lt, read_write='read', execution_mode='read_only', backing_service=svc, backing_api=api, mode_policy=READ_ONLY_POLICY)
 
     writes = [
         (
@@ -370,12 +413,20 @@ def seed_tools(db: Session = Depends(get_db)):
         ('write_source_file', 'Overwrite a file on a managed fork branch.', 'code_write', 'layer1', ('control-plane', 'PUT /code/file')),
         ('create_commit', 'Create a commit for staged changes on a branch.', 'code_write', 'layer1', ('control-plane', 'POST /code/commits')),
         ('deploy_service_or_application', 'Build and deploy a managed unit from a branch.', 'deployment', 'layer1', ('control-plane', 'POST /deployments')),
+        ('deploy_preview_change', 'Deploy a prepared preview change through the change-preview runtime path.', 'deployment', 'layer1', ('control-plane', 'POST /change-previews/deploy')),
+        ('revert_preview_change', 'Revert an active preview runtime to its baseline.', 'deployment', 'layer1', ('control-plane', 'POST /change-previews/revert')),
         ('delete_managed_resources', 'Delete delete-eligible managed resources through control-plane delete routes.', 'resource_delete', 'layer1', ('control-plane', 'POST /internal/delete/...')),
     ]
     for name, description, cat, lt, bk in writes:
         read_write = 'destructive_write' if name == 'delete_managed_resources' else 'write'
-        execution_mode = 'governed_execute' if name in {'deploy_service_or_application', 'delete_managed_resources'} else 'execute'
-        upsert(name=name, description=description, category=cat, layer_target=lt, read_write=read_write, execution_mode=execution_mode, backing_service=bk[0], backing_api=bk[1])
+        execution_mode = 'governed_execute' if name in {'deploy_service_or_application', 'deploy_preview_change', 'revert_preview_change', 'delete_managed_resources'} else 'execute'
+        if name in {'deploy_preview_change', 'revert_preview_change', 'deploy_service_or_application'}:
+            mode_policy = DEPLOY_REVERT_POLICY
+        elif name == 'delete_managed_resources':
+            mode_policy = DESTRUCTIVE_POLICY
+        else:
+            mode_policy = WRITE_POLICY
+        upsert(name=name, description=description, category=cat, layer_target=lt, read_write=read_write, execution_mode=execution_mode, backing_service=bk[0], backing_api=bk[1], mode_policy=mode_policy)
 
     stale_removed = _delete_stale_tool_definitions(db)
     db.flush()

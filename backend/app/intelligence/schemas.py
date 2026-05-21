@@ -8,6 +8,9 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
+ToolModePolicy = Literal["disabled", "requires_permission", "enabled"]
+ToolPermissionStatus = Literal["pending", "approved", "denied", "executing", "executed", "failed", "expired"]
+
 
 class TraceEnvelope(BaseModel):
     conversation_id: str | None = None
@@ -26,6 +29,7 @@ class ToolExecutionRequest(BaseModel):
     tool_name: str
     input: dict[str, Any] = Field(default_factory=dict)
     confirmation_token: str | None = None
+    approval_token: str | None = None
     execution_mode: Literal["read_only", "suggest", "execute", "governed_execute"] = "read_only"
 
 
@@ -34,7 +38,7 @@ class ToolExecutionResponse(BaseModel):
     agent_run_id: str
     request_id: str
     tool_call_id: str
-    status: Literal["completed", "failed", "confirmation_required"]
+    status: Literal["completed", "failed", "confirmation_required", "permission_required", "permission_denied"]
     output: dict[str, Any] = Field(default_factory=dict)
     raw_events: list[dict[str, Any]] = Field(default_factory=list)
 
@@ -75,7 +79,26 @@ class ToolDefinitionSummary(BaseModel):
     required_execution_mode: str
     enabled: bool
     requires_confirmation: bool
+    mode_policy_json: dict[str, ToolModePolicy] = Field(default_factory=dict)
+    permission_prompt_json: dict[str, Any] = Field(default_factory=dict)
     input_schema_json: dict[str, Any] = Field(default_factory=dict)
+
+
+class ToolPermissionApproveRequest(BaseModel):
+    approval_token: str
+
+
+class ToolPermissionDenyRequest(BaseModel):
+    approval_token: str
+    reason: str | None = None
+
+
+class ToolPermissionStatusResponse(BaseModel):
+    permission_request_id: str
+    tool_call_id: str
+    status: ToolPermissionStatus
+    response_json: dict[str, Any] | None = None
+    raw_events: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class DocumentUploadResponse(BaseModel):

@@ -12,15 +12,14 @@ from app.database import get_db
 from app.intelligence.events import raw_event
 from app.intelligence.redaction import redact
 from app.intelligence.tool_metadata import tool_summary
+from app.intelligence.tool_permissions import build_permission_prompt, policy_for_mode
 from app.intelligence.managed_code_paths import canonicalize_managed_code_path
 from app.routes.handlers.tool_registry import SUPPORTED_TOOL_NAMES
-from app.intelligence.schemas import ToolExecutionRequest
+from app.intelligence.schemas import ToolExecutionRequest, ToolPermissionApproveRequest, ToolPermissionDenyRequest
 from app.intelligence.tool_validation import ToolInputValidationError, ToolSchemaDefinitionError, validate_tool_input
 from app.intelligence.trace import extract_trace
-from app.models.intelligence import ToolCall, ToolDefinition
+from app.models.intelligence import ToolCall, ToolDefinition, ToolPermissionRequest
 from platform_common.service_proxy import build_service_proxy_url
-
-EXECUTION_MODE_RANK = {"read_only": 0, "suggest": 1, "execute": 2, "governed_execute": 3}
 
 
 def _trace_identifier_text(body_value: object | None, fallback: str | None) -> str | None:
@@ -184,6 +183,46 @@ async def _execute_mapped_tool(name: str, tool_input: dict, *, db: Session, trac
         result = await _cp_post('deployments', dep)
         return result if isinstance(result, dict) else {'deployment': result}
 
+    if name == 'deploy_preview_change':
+        payload = {
+            'unit_id': tool_input['target_unit_id'],
+            'branch': tool_input['branch'],
+            'conversation_id': trace_payload.get('conversation_id'),
+            'agent_run_id': trace_payload.get('agent_run_id'),
+            'request_id': trace_payload.get('request_id'),
+            'tool_call_id': trace_payload.get('tool_call_id'),
+        }
+        for source_key, target_key in (
+            ('commit_sha', 'commit_sha'),
+            ('target_application_id', 'application_id'),
+            ('changed_files', 'changed_files'),
+            ('summary', 'summary'),
+        ):
+            if tool_input.get(source_key) is not None:
+                payload[target_key] = tool_input[source_key]
+        result = await _cp_post('change-previews/deploy', payload)
+        return result if isinstance(result, dict) else {'deployment': result}
+
+    if name == 'revert_preview_change':
+        payload = {
+            'unit_id': tool_input['target_unit_id'],
+            'conversation_id': trace_payload.get('conversation_id'),
+            'agent_run_id': trace_payload.get('agent_run_id'),
+            'request_id': trace_payload.get('request_id'),
+            'tool_call_id': trace_payload.get('tool_call_id'),
+        }
+        for source_key, target_key in (
+            ('target_application_id', 'application_id'),
+            ('baseline_branch', 'baseline_branch'),
+            ('baseline_commit_sha', 'baseline_commit_sha'),
+            ('preview_deployment_id', 'preview_deployment_id'),
+            ('summary', 'summary'),
+        ):
+            if tool_input.get(source_key) is not None:
+                payload[target_key] = tool_input[source_key]
+        result = await _cp_post('change-previews/revert', payload)
+        return result if isinstance(result, dict) else {'deployment': result}
+
     if name == 'delete_managed_resources':
         mode = tool_input['mode']
         payload = {
@@ -326,29 +365,17 @@ async def execute_tool(body: ToolExecutionRequest, request: Request, db: Session
         raise HTTPException(status_code=404, detail='tool not found')
     if not tool.enabled:
         raise HTTPException(status_code=400, detail='tool disabled')
-    required_mode = getattr(tool, "required_execution_mode", "execute")
-    required_rank = EXECUTION_MODE_RANK.get(required_mode, EXECUTION_MODE_RANK["execute"])
-    request_rank = EXECUTION_MODE_RANK.get(body.execution_mode, EXECUTION_MODE_RANK["read_only"])
-    if request_rank < required_rank:
+    mode_policy = policy_for_mode(tool, body.execution_mode)
+    if mode_policy == "disabled":
         raise HTTPException(
             status_code=403,
             detail={
                 "error_code": "tool_execution_mode_forbidden",
                 "message": "tool not allowed in current execution mode",
-                "required_execution_mode": required_mode,
                 "requested_execution_mode": body.execution_mode,
+                "mode_policy": mode_policy,
             },
         )
-    if tool.requires_confirmation and not body.confirmation_token:
-        return {
-            'conversation_id': conversation_id,
-            'agent_run_id': agent_run_id,
-            'request_id': request_id,
-            'tool_call_id': tool_call_id,
-            'status': 'confirmation_required',
-            'output': {'error_code': 'confirmation_required', 'message': 'confirmation token required'},
-            'raw_events': [],
-        }
     try:
         validate_tool_input(tool.input_schema_json or {'type': 'object', 'properties': {}, 'additionalProperties': False}, body.input)
     except ToolInputValidationError as exc:
@@ -366,19 +393,137 @@ async def execute_tool(body: ToolExecutionRequest, request: Request, db: Session
             detail={'error_code': 'invalid_tool_schema', 'message': str(exc)},
         ) from exc
 
-    call = ToolCall(
-        conversation_id=conversation_uuid,
-        agent_run_id=agent_run_uuid,
-        request_id=request_uuid,
-        tool_call_id=tool_call_uuid,
-        tool_name=body.tool_name,
-        input_json=body.input,
-        redacted_input_json=redact(body.input),
-        status='running',
-        started_at=datetime.now(timezone.utc),
-    )
-    db.add(call)
+    approval_token = body.approval_token or body.confirmation_token
+    permission_request: ToolPermissionRequest | None = None
+    if mode_policy == "requires_permission":
+        if approval_token:
+            permission_request = db.query(ToolPermissionRequest).filter(ToolPermissionRequest.approval_token == approval_token).one_or_none()
+            if not permission_request or str(permission_request.tool_call_id) != tool_call_id or permission_request.status not in {"approved", "executing"}:
+                raise HTTPException(
+                    status_code=403,
+                    detail={
+                        "error_code": "tool_permission_not_approved",
+                        "message": "tool permission request has not been approved",
+                    },
+                )
+            permission_request.status = "executing"
+            permission_request.resolved_at = datetime.now(timezone.utc)
+        else:
+            prompt = build_permission_prompt(body.tool_name, body.input, getattr(tool, "permission_prompt_json", {}) or {})
+            permission_request = ToolPermissionRequest(
+                id=uuid.uuid4(),
+                conversation_id=conversation_uuid,
+                agent_run_id=agent_run_uuid,
+                request_id=request_uuid,
+                tool_call_id=tool_call_uuid,
+                tool_name=body.tool_name,
+                input_json=body.input,
+                redacted_input_json=redact(body.input),
+                status="pending",
+                prompt_json=prompt,
+                mode_policy_json=getattr(tool, "mode_policy_json", {}) or {},
+                execution_mode=body.execution_mode,
+                approval_token=uuid.uuid4().hex,
+                created_at=datetime.now(timezone.utc),
+            )
+            call = ToolCall(
+                conversation_id=conversation_uuid,
+                agent_run_id=agent_run_uuid,
+                request_id=request_uuid,
+                tool_call_id=tool_call_uuid,
+                tool_name=body.tool_name,
+                input_json=body.input,
+                redacted_input_json=redact(body.input),
+                status="permission_required",
+                started_at=datetime.now(timezone.utc),
+            )
+            db.add(call)
+            db.add(permission_request)
+            db.flush()
+            permission_event = raw_event(
+                event_type="tool.permission_required",
+                payload={
+                    "tool_name": tool.name,
+                    "tool_call_id": tool_call_id,
+                    "permission_request_id": str(permission_request.id),
+                    "approval_token": permission_request.approval_token,
+                    "execution_mode": body.execution_mode,
+                    "prompt": prompt,
+                },
+                emitted_by="tool-execution-service",
+                tool_call_id=tool_call_id,
+            )
+            return {
+                "conversation_id": conversation_id,
+                "agent_run_id": agent_run_id,
+                "request_id": request_id,
+                "tool_call_id": tool_call_id,
+                "status": "permission_required",
+                "output": {
+                    "permission_request_id": str(permission_request.id),
+                    "approval_token": permission_request.approval_token,
+                    "tool_name": tool.name,
+                    "prompt": prompt,
+                },
+                "raw_events": [permission_event],
+            }
+    elif tool.requires_confirmation and not body.confirmation_token:
+        return {
+            'conversation_id': conversation_id,
+            'agent_run_id': agent_run_id,
+            'request_id': request_id,
+            'tool_call_id': tool_call_id,
+            'status': 'confirmation_required',
+            'output': {'error_code': 'confirmation_required', 'message': 'confirmation token required'},
+            'raw_events': [],
+        }
+
+    if permission_request:
+        call = db.query(ToolCall).filter(ToolCall.tool_call_id == tool_call_uuid).one_or_none()
+        if call is None:
+            call = ToolCall(
+                conversation_id=conversation_uuid,
+                agent_run_id=agent_run_uuid,
+                request_id=request_uuid,
+                tool_call_id=tool_call_uuid,
+                tool_name=body.tool_name,
+                input_json=body.input,
+                redacted_input_json=redact(body.input),
+                status='running',
+                started_at=datetime.now(timezone.utc),
+            )
+            db.add(call)
+        else:
+            call.status = 'running'
+            call.started_at = datetime.now(timezone.utc)
+    else:
+        call = ToolCall(
+            conversation_id=conversation_uuid,
+            agent_run_id=agent_run_uuid,
+            request_id=request_uuid,
+            tool_call_id=tool_call_uuid,
+            tool_name=body.tool_name,
+            input_json=body.input,
+            redacted_input_json=redact(body.input),
+            status='running',
+            started_at=datetime.now(timezone.utc),
+        )
+        db.add(call)
     db.flush()
+    raw_events = []
+    if permission_request:
+        raw_events.append(
+            raw_event(
+                event_type="tool.permission_approved",
+                payload={
+                    "tool_name": body.tool_name,
+                    "tool_call_id": tool_call_id,
+                    "permission_request_id": str(permission_request.id),
+                },
+                emitted_by="tool-execution-service",
+                tool_call_id=tool_call_id,
+            )
+        )
     started_event = raw_event(
         event_type='tool.started',
         payload={
@@ -409,6 +554,10 @@ async def execute_tool(body: ToolExecutionRequest, request: Request, db: Session
         call.status = 'failed'
         call.error_message = str(exc)
         call.completed_at = datetime.now(timezone.utc)
+        if permission_request:
+            permission_request.status = "failed"
+            permission_request.response_json = {'error_code': 'tool_execution_failed', 'message': str(exc)}
+            permission_request.resolved_at = datetime.now(timezone.utc)
         return {
             'conversation_id': conversation_id,
             'agent_run_id': agent_run_id,
@@ -417,6 +566,7 @@ async def execute_tool(body: ToolExecutionRequest, request: Request, db: Session
             'status': 'failed',
             'output': {'error_code': 'tool_execution_failed', 'message': str(exc)},
             'raw_events': [
+                *raw_events,
                 started_event,
                 raw_event(
                     event_type='tool.failed',
@@ -430,7 +580,12 @@ async def execute_tool(body: ToolExecutionRequest, request: Request, db: Session
     call.status = 'completed'
     call.output_json = redact(output if isinstance(output, dict) else {'result': output})
     call.completed_at = datetime.now(timezone.utc)
+    if permission_request:
+        permission_request.status = "executed"
+        permission_request.response_json = call.output_json
+        permission_request.resolved_at = datetime.now(timezone.utc)
     raw_events = [
+        *raw_events,
         started_event,
         raw_event(
             event_type='tool.completed',
@@ -449,3 +604,102 @@ async def execute_tool(body: ToolExecutionRequest, request: Request, db: Session
             )
         )
     return {'conversation_id': conversation_id,'agent_run_id': agent_run_id,'request_id': request_id,'tool_call_id': tool_call_id,'status': 'completed','output': output,'raw_events': raw_events}
+
+
+def _permission_status_response(permission: ToolPermissionRequest, raw_events: list[dict] | None = None) -> dict:
+    return {
+        "permission_request_id": str(permission.id),
+        "tool_call_id": str(permission.tool_call_id),
+        "status": permission.status,
+        "response_json": permission.response_json,
+        "raw_events": raw_events or [],
+    }
+
+
+def get_tool_permission_status(permission_request_id: str, db: Session = Depends(get_db)):
+    try:
+        permission_uuid = uuid.UUID(permission_request_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="invalid permission request id") from exc
+    permission = db.query(ToolPermissionRequest).filter(ToolPermissionRequest.id == permission_uuid).one_or_none()
+    if not permission:
+        raise HTTPException(status_code=404, detail="permission request not found")
+    raw_events = []
+    if permission.status == "denied":
+        response = permission.response_json or {}
+        raw_events.append(
+            raw_event(
+                event_type="tool.permission_denied",
+                payload={
+                    "tool_name": permission.tool_name,
+                    "tool_call_id": str(permission.tool_call_id),
+                    "permission_request_id": str(permission.id),
+                    "reason": response.get("reason") or "user_denied",
+                },
+                emitted_by="tool-execution-service",
+                tool_call_id=str(permission.tool_call_id),
+            )
+        )
+    return _permission_status_response(permission, raw_events)
+
+
+def approve_tool_permission(permission_request_id: str, body: ToolPermissionApproveRequest, db: Session = Depends(get_db)):
+    try:
+        permission_uuid = uuid.UUID(permission_request_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="invalid permission request id") from exc
+    permission = db.query(ToolPermissionRequest).filter(ToolPermissionRequest.id == permission_uuid).one_or_none()
+    if not permission:
+        raise HTTPException(status_code=404, detail="permission request not found")
+    if permission.approval_token != body.approval_token:
+        raise HTTPException(status_code=403, detail="invalid approval token")
+    if permission.status not in {"pending", "approved"}:
+        raise HTTPException(status_code=409, detail=f"permission request is {permission.status}")
+    permission.status = "approved"
+    permission.resolved_at = datetime.now(timezone.utc)
+    event = raw_event(
+        event_type="tool.permission_approved",
+        payload={
+            "tool_name": permission.tool_name,
+            "tool_call_id": str(permission.tool_call_id),
+            "permission_request_id": str(permission.id),
+        },
+        emitted_by="tool-execution-service",
+        tool_call_id=str(permission.tool_call_id),
+    )
+    db.flush()
+    return _permission_status_response(permission, [event])
+
+
+def deny_tool_permission(permission_request_id: str, body: ToolPermissionDenyRequest, db: Session = Depends(get_db)):
+    try:
+        permission_uuid = uuid.UUID(permission_request_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="invalid permission request id") from exc
+    permission = db.query(ToolPermissionRequest).filter(ToolPermissionRequest.id == permission_uuid).one_or_none()
+    if not permission:
+        raise HTTPException(status_code=404, detail="permission request not found")
+    if permission.approval_token != body.approval_token:
+        raise HTTPException(status_code=403, detail="invalid approval token")
+    if permission.status not in {"pending", "denied"}:
+        raise HTTPException(status_code=409, detail=f"permission request is {permission.status}")
+    permission.status = "denied"
+    permission.response_json = {
+        "status": "permission_denied",
+        "reason": body.reason or "user_denied",
+        "message": "The user denied this tool call. No action was taken.",
+    }
+    permission.resolved_at = datetime.now(timezone.utc)
+    event = raw_event(
+        event_type="tool.permission_denied",
+        payload={
+            "tool_name": permission.tool_name,
+            "tool_call_id": str(permission.tool_call_id),
+            "permission_request_id": str(permission.id),
+            "reason": body.reason or "user_denied",
+        },
+        emitted_by="tool-execution-service",
+        tool_call_id=str(permission.tool_call_id),
+    )
+    db.flush()
+    return _permission_status_response(permission, [event])

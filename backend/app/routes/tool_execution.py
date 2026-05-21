@@ -55,3 +55,6 @@ async def tool_execution_validation_exception_handler(
 
 router = APIRouter()
 router.add_api_route("/execute", handlers.execute_tool, methods=["POST"])
+router.add_api_route("/permissions/{permission_request_id}", handlers.get_tool_permission_status, methods=["GET"])
+router.add_api_route("/permissions/{permission_request_id}/approve", handlers.approve_tool_permission, methods=["POST"])
+router.add_api_route("/permissions/{permission_request_id}/deny", handlers.deny_tool_permission, methods=["POST"])

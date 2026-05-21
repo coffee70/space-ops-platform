@@ -1,6 +1,8 @@
 import type { ToolSet } from "ai";
 
 export type ExecutionMode = "read_only" | "suggest" | "execute" | "governed_execute";
+export type ToolModePolicy = "disabled" | "requires_permission" | "enabled";
+export type ToolPermissionStatus = "pending" | "approved" | "denied" | "executing" | "executed" | "failed" | "expired";
 
 export interface ClientContext {
   current_application_id?: string;
@@ -129,6 +131,8 @@ export interface ToolDefinition {
   required_execution_mode: ExecutionMode;
   enabled: boolean;
   requires_confirmation: boolean;
+  mode_policy_json?: Partial<Record<ExecutionMode, ToolModePolicy>>;
+  permission_prompt_json?: Record<string, unknown>;
   input_schema_json: Record<string, unknown>;
   output_schema_json?: Record<string, unknown>;
   audit_policy_json?: Record<string, unknown>;
@@ -142,8 +146,16 @@ export interface ToolExecutionResponse {
   agent_run_id: string;
   request_id: string;
   tool_call_id: string;
-  status: "completed" | "failed" | "confirmation_required";
+  status: "completed" | "failed" | "confirmation_required" | "permission_required" | "permission_denied";
   output: unknown;
+  raw_events?: RawEventFact[];
+}
+
+export interface ToolPermissionStatusResponse {
+  permission_request_id: string;
+  tool_call_id: string;
+  status: ToolPermissionStatus;
+  response_json?: Record<string, unknown> | null;
   raw_events?: RawEventFact[];
 }
 
@@ -182,7 +194,15 @@ export interface ToolExecutionClient {
     input: Record<string, unknown>;
     execution_mode: ExecutionMode;
     confirmation_token?: string | null;
+    approval_token?: string | null;
   }): Promise<ToolExecutionResponse>;
+}
+
+export interface ToolPermissionClient {
+  waitForDecision(input: {
+    permissionRequestId: string;
+    abortSignal?: AbortSignal;
+  }): Promise<{ status: "approved" | "denied"; reason?: string | null; raw_events?: RawEventFact[] }>;
 }
 
 export interface ModelStreamTextDelta {
@@ -425,6 +445,7 @@ export interface RunDependencies {
   contextClient: ContextRetrievalClient;
   toolRegistryClient: ToolRegistryClient;
   toolExecutionClient: ToolExecutionClient;
+  toolPermissionClient: ToolPermissionClient;
   modelRunner: ModelRunner;
   modelCatalog: ModelCatalogPort;
   config: RuntimeConfig;

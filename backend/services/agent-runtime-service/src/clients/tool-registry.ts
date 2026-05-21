@@ -16,6 +16,10 @@ const ToolDefinitionSchema: z.ZodType<ToolDefinition, z.ZodTypeDef, unknown> = z
     required_execution_mode: z.enum(["read_only", "suggest", "execute", "governed_execute"]),
     enabled: z.boolean(),
     requires_confirmation: z.boolean(),
+    mode_policy_json: z
+      .record(z.enum(["disabled", "requires_permission", "enabled"]))
+      .optional(),
+    permission_prompt_json: z.record(z.unknown()).optional(),
     input_schema_json: z.record(z.unknown()),
     output_schema_json: z.record(z.unknown()).optional(),
     audit_policy_json: z.record(z.unknown()).optional(),

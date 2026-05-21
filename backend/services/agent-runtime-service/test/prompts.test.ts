@@ -38,9 +38,11 @@ test("AI Engineer system prompt includes required durable constraints", () => {
   assert.match(prompt, /use an isolated branch or worktree when available/);
   assert.match(prompt, /write only the scoped requested changes/);
   assert.match(prompt, /create a commit/);
-  assert.match(prompt, /stop after preparing the preview change/);
-  assert.match(prompt, /use the generated preview controls to deploy or revert/);
-  assert.match(prompt, /In `execute`, do not deploy directly, revert directly, delete managed resources, or promote runtime changes directly/);
+  assert.match(prompt, /deploy_preview_change/);
+  assert.match(prompt, /revert_preview_change/);
+  assert.match(prompt, /runtime pauses the tool call, shows the user a permission card/);
+  assert.match(prompt, /Do not ask the user to approve a tool unless the tool call actually produced a permission card/);
+  assert.match(prompt, /In `execute`, do not delete managed resources or promote runtime changes directly/);
   assert.match(prompt, /In `governed_execute`, more privileged direct operational actions may be available/);
   assert.match(prompt, /direct deploy, direct delete/);
   assert.match(prompt, /Do not deploy, revert, delete managed resources, or promote runtime changes unless/);

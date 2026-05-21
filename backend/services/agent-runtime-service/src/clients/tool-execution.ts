@@ -6,13 +6,17 @@ function serviceUrl(config: RuntimeConfig, serviceSlug: string, path: string): s
   return `${config.controlPlaneUrl.replace(/\/$/, "")}/internal/runtime-services/${serviceSlug}/${path.replace(/^\//, "")}`;
 }
 
+export function runtimeServiceUrl(config: RuntimeConfig, serviceSlug: string, path: string): string {
+  return serviceUrl(config, serviceSlug, path);
+}
+
 const ToolExecutionResponseSchema = z
   .object({
     conversation_id: z.string().nullable(),
     agent_run_id: z.string(),
     request_id: z.string(),
     tool_call_id: z.string(),
-    status: z.enum(["completed", "failed", "confirmation_required"]),
+    status: z.enum(["completed", "failed", "confirmation_required", "permission_required", "permission_denied"]),
     output: z.unknown(),
     raw_events: z
       .array(
@@ -52,6 +56,7 @@ export class HttpToolExecutionClient implements ToolExecutionClient {
     input: Record<string, unknown>;
     execution_mode: string;
     confirmation_token?: string | null;
+    approval_token?: string | null;
   }): Promise<ToolExecutionResponse> {
     const response = await fetch(serviceUrl(this.#config, "tool-execution-service", "execute"), {
       method: "POST",
@@ -68,6 +73,7 @@ export class HttpToolExecutionClient implements ToolExecutionClient {
         input: input.input,
         execution_mode: input.execution_mode,
         confirmation_token: input.confirmation_token ?? null,
+        approval_token: input.approval_token ?? input.confirmation_token ?? null,
       }),
       signal: AbortSignal.timeout(this.#config.requestTimeoutMs),
     });

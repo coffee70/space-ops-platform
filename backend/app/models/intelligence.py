@@ -52,6 +52,8 @@ class ToolDefinition(Base):
     required_execution_mode: Mapped[str] = mapped_column(Text, nullable=False)
     enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     requires_confirmation: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    mode_policy_json: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+    permission_prompt_json: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
     input_schema_json: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
     output_schema_json: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
     audit_policy_json: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
@@ -77,6 +79,33 @@ class ToolCall(Base):
     started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+class ToolPermissionRequest(Base):
+    __tablename__ = "ai_tool_permission_requests"
+    __table_args__ = (
+        Index("ix_ai_tool_permission_requests_agent_run_created", "agent_run_id", "created_at"),
+        Index("ix_ai_tool_permission_requests_status_created", "status", "created_at"),
+        Index("ix_ai_tool_permission_requests_tool_call_id", "tool_call_id", unique=True),
+        Index("ix_ai_tool_permission_requests_approval_token", "approval_token", unique=True),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    conversation_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("ai_conversations.id", ondelete="SET NULL"), nullable=True)
+    agent_run_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    request_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    tool_call_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    tool_name: Mapped[str] = mapped_column(Text, nullable=False)
+    input_json: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+    redacted_input_json: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+    status: Mapped[str] = mapped_column(Text, nullable=False)
+    prompt_json: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+    mode_policy_json: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+    execution_mode: Mapped[str] = mapped_column(Text, nullable=False)
+    approval_token: Mapped[str] = mapped_column(Text, nullable=False)
+    response_json: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
+    resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 class AgentEvent(Base):

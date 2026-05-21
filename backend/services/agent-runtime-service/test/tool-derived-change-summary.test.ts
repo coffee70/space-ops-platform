@@ -187,7 +187,7 @@ function toolExecutionResponse(
   };
 }
 
-test("real LLM-driven tool flow emits change.summary with structured base_commit_sha and target metadata", async () => {
+test("real LLM-driven tool flow no longer emits change.summary cards from tool completions", async () => {
   const store = new MemoryConversationStore();
   const conversation = await store.createConversation({
     title: "AI Engineer Session",
@@ -225,14 +225,15 @@ test("real LLM-driven tool flow emits change.summary with structured base_commit
   const chunks = parseNdjson(await response.text());
   const changeSummary = chunks.find(
     (chunk) => chunk.kind === "event" && (chunk as { event: { event_type: string } }).event.event_type === "change.summary",
-  ) as { event: { payload: Record<string, unknown> } } | undefined;
-  assert.ok(changeSummary, "change.summary must be emitted from real tool flow");
-  assert.equal(changeSummary.event.payload.branch, "preview/agent-real");
-  assert.equal(changeSummary.event.payload.base_branch, "main");
-  assert.equal(changeSummary.event.payload.base_commit_sha, "baseline-sha");
-  assert.equal(changeSummary.event.payload.commit_sha, "preview-sha");
-  assert.equal(changeSummary.event.payload.target_unit_id, "derived-telemetry-service");
-  assert.deepEqual(changeSummary.event.payload.changed_files, [
-    "project/space-ops-platform/backend/services/derived-telemetry-service/app/main.py",
-  ]);
+  );
+  assert.equal(changeSummary, undefined);
+  assert.ok(
+    chunks.some(
+      (chunk) =>
+        chunk.kind === "event" &&
+        (chunk as { event: { event_type: string; payload: Record<string, unknown> } }).event.event_type === "tool.completed" &&
+        (chunk as { event: { event_type: string; payload: Record<string, unknown> } }).event.payload.tool_name === "create_commit",
+    ),
+    "tool activity remains available as raw events",
+  );
 });
