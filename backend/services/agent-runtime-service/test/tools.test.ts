@@ -204,10 +204,19 @@ test("permission-required tool waits, re-executes with permission request id, an
       execute: "requires_permission",
       governed_execute: "enabled",
     },
-    input_schema_json: { type: "object", properties: {}, additionalProperties: false },
+    input_schema_json: {
+      type: "object",
+      properties: {
+        branch: { type: "string" },
+        target_unit_id: { type: "string" },
+        target_application_id: { type: "string" },
+      },
+      required: ["branch", "target_unit_id"],
+      additionalProperties: false,
+    },
   };
   const executionCalls: Array<{ permission_request_id?: string | null }> = [];
-  const emittedEvents: string[] = [];
+  const emittedEvents: Array<{ event_type: string; payload: Record<string, unknown> }> = [];
   const tools = createToolSet({
     toolDefinitions: [definition],
     executionMode: "execute",
@@ -251,18 +260,32 @@ test("permission-required tool waits, re-executes with permission request id, an
       },
     },
     emitRawToolEvents: async (events) => {
-      emittedEvents.push(...(events ?? []).map((event) => event.event_type));
+      emittedEvents.push(...(events ?? []).map((event) => ({ event_type: event.event_type, payload: event.payload })));
     },
   });
 
   const runtimeTool = tools.deploy_preview_change as {
-    execute: (args: Record<string, never>, options: { toolCallId: string }) => Promise<unknown>;
+    execute: (args: Record<string, string>, options: { toolCallId: string }) => Promise<unknown>;
   };
-  const output = await runtimeTool.execute({}, { toolCallId: "call_provider_non_uuid" });
+  const output = await runtimeTool.execute(
+    {
+      branch: "preview/cyan",
+      target_unit_id: "mission-control-frontend-shell",
+      target_application_id: "telemetry",
+    },
+    { toolCallId: "call_provider_non_uuid" },
+  );
 
   assert.deepEqual(output, { deployment_id: "deployment-1" });
   assert.deepEqual(executionCalls.map((call) => call.permission_request_id ?? null), [null, "permission-1"]);
-  assert.deepEqual(emittedEvents, ["tool.permission_required", "tool.completed"]);
+  assert.deepEqual(emittedEvents.map((event) => event.event_type), ["tool.permission_required", "deployment.requested", "tool.completed"]);
+  assert.deepEqual(emittedEvents[1]?.payload, {
+    tool_name: "deploy_preview_change",
+    branch: "preview/cyan",
+    unit_id: "mission-control-frontend-shell",
+    target_application_id: "telemetry",
+    status: "requested",
+  });
 });
 
 test("permission-required tool returns denial result without executing approved path", async () => {

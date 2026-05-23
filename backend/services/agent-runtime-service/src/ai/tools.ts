@@ -123,6 +123,26 @@ export function schemaToZod(schema: unknown): ZodTypeAny {
   return schemaNodeToZod(parsed.data);
 }
 
+function approvedPermissionOperationEvents(
+  toolName: string,
+  toolCallId: string,
+  args: Record<string, unknown>,
+): RawEventFact[] | undefined {
+  if (toolName !== "deploy_preview_change") return undefined;
+
+  const payload: Record<string, unknown> = {
+    tool_name: toolName,
+    branch: typeof args.branch === "string" && args.branch ? args.branch : "unknown",
+    unit_id: typeof args.target_unit_id === "string" && args.target_unit_id ? args.target_unit_id : "unknown",
+    status: "requested",
+  };
+  if (typeof args.target_application_id === "string" && args.target_application_id) {
+    payload.target_application_id = args.target_application_id;
+  }
+
+  return [{ event_type: "deployment.requested", emitted_by: "agent-runtime-service", payload, tool_call_id: toolCallId }];
+}
+
 export function createToolSet(input: {
   toolDefinitions: ToolDefinition[];
   toolExecutionClient: ToolExecutionClient;
@@ -187,6 +207,7 @@ export function createToolSet(input: {
               };
             }
 
+            await input.emitRawToolEvents(approvedPermissionOperationEvents(definition.name, toolCallId, normalizedArgs));
             const approvedResponse = await input.toolExecutionClient.execute({
               trace: withToolTrace(input.trace, toolCallId),
               tool_name: definition.name,
