@@ -41,6 +41,11 @@ test("AI Engineer system prompt includes required durable constraints", () => {
   assert.match(prompt, /deploy_preview_change/);
   assert.match(prompt, /resolve_preview_deploy_target/);
   assert.match(prompt, /do not guess deploy target ids from memory/);
+  assert.match(prompt, /deployment_id/);
+  assert.match(prompt, /wait_for_deployment/);
+  assert.match(prompt, /get_deployment_status/);
+  assert.match(prompt, /get_deployment_logs/);
+  assert.match(prompt, /runtime proxy timeout is not proof/);
   assert.match(prompt, /revert_preview_change/);
   assert.match(prompt, /runtime pauses the tool call, shows the user a permission card/);
   assert.match(prompt, /Do not ask the user to approve a tool unless the tool call actually produced a permission card/);

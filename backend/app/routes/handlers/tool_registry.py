@@ -13,6 +13,15 @@ from app.models.intelligence import ToolDefinition
 
 STRICT_EMPTY_INPUT = {'type': 'object', 'properties': {}, 'additionalProperties': False}
 
+DEPLOYMENT_ID_INPUT = {
+    'type': 'object',
+    'properties': {
+        'deployment_id': {'type': 'string', 'minLength': 1, 'maxLength': 64},
+    },
+    'required': ['deployment_id'],
+    'additionalProperties': False,
+}
+
 GET_TELEMETRY_SCHEMA_TOOL_BACKING: tuple[str, str] = (
     'telemetry-query-service',
     'GET /telemetry/inventory?source_id={source_id}',
@@ -44,6 +53,9 @@ SUPPORTED_TOOL_NAMES: frozenset[str] = frozenset(
         'read_source_file',
         'get_related_code_context',
         'resolve_preview_deploy_target',
+        'get_deployment_status',
+        'get_deployment_logs',
+        'wait_for_deployment',
         'navigate_to_application',
         'create_working_branch',
         'scaffold_service',
@@ -179,6 +191,18 @@ TOOL_INPUT_SCHEMAS: dict[str, dict] = {
             'target_application_id': {'type': 'string', 'maxLength': 128},
         },
         'required': ['branch', 'changed_files'],
+        'additionalProperties': False,
+    },
+    'get_deployment_status': DEPLOYMENT_ID_INPUT,
+    'get_deployment_logs': DEPLOYMENT_ID_INPUT,
+    'wait_for_deployment': {
+        'type': 'object',
+        'properties': {
+            'deployment_id': {'type': 'string', 'minLength': 1, 'maxLength': 64},
+            'timeout_seconds': {'type': 'integer', 'minimum': 1, 'maximum': 180},
+            'poll_interval_seconds': {'type': 'integer', 'minimum': 2, 'maximum': 30},
+        },
+        'required': ['deployment_id'],
         'additionalProperties': False,
     },
     'create_working_branch': {
@@ -389,6 +413,9 @@ def seed_tools(db: Session = Depends(get_db)):
         ('read_source_file', 'Read file contents from the managed fork (Layer 1).', 'code_intelligence', 'layer1', 'read_only'),
         ('get_related_code_context', 'Return additional indexed chunks for a repository file path.', 'code_intelligence', 'layer2', 'read_only'),
         ('resolve_preview_deploy_target', 'Resolve the managed runtime unit that should receive a preview deploy for changed files.', 'deployment', 'layer1', 'read_only'),
+        ('get_deployment_status', 'Get durable deployment status by deployment id.', 'deployment', 'layer1', 'read_only'),
+        ('get_deployment_logs', 'Get deployment logs by deployment id.', 'deployment', 'layer1', 'read_only'),
+        ('wait_for_deployment', 'Wait for a deployment to reach a terminal lifecycle state.', 'deployment', 'layer1', 'read_only'),
         ('navigate_to_application', 'Navigate Mission Control UI to a platform application.', 'navigation', 'layer3', 'read_only'),
     ]
 
@@ -410,6 +437,9 @@ def seed_tools(db: Session = Depends(get_db)):
         'read_source_file': ('control-plane', 'GET /code/file'),
         'get_related_code_context': ('code-intelligence-service', 'POST /intelligence/code/related-context'),
         'resolve_preview_deploy_target': ('control-plane', 'GET /registry/units'),
+        'get_deployment_status': ('control-plane', 'GET /deployments/{deployment_id}'),
+        'get_deployment_logs': ('control-plane', 'GET /deployments/{deployment_id}/logs'),
+        'wait_for_deployment': ('control-plane', 'GET /deployments/{deployment_id}'),
     }
 
     for name, description, cat, lt, ej in read_tools:

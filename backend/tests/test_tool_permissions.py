@@ -143,6 +143,165 @@ async def test_deploy_preview_change_posts_kernel_schema_payload(monkeypatch) ->
 
 
 @pytest.mark.anyio
+async def test_deployment_diagnostic_tools_call_control_plane_paths(monkeypatch) -> None:
+    calls: list[str] = []
+
+    async def fake_cp_get(path: str, params: dict | None = None) -> dict:
+        assert params is None
+        calls.append(path)
+        return {"deployment_id": "dep_1", "status": "healthy"}
+
+    monkeypatch.setattr(tool_execution, "_cp_get", fake_cp_get)
+
+    status = await tool_execution._execute_mapped_tool("get_deployment_status", {"deployment_id": "dep_1"}, db=object())
+    logs = await tool_execution._execute_mapped_tool("get_deployment_logs", {"deployment_id": "dep_1"}, db=object())
+
+    assert status == {"deployment_id": "dep_1", "status": "healthy"}
+    assert logs == {"deployment_id": "dep_1", "status": "healthy"}
+    assert calls == ["deployments/dep_1", "deployments/dep_1/logs"]
+
+
+@pytest.mark.anyio
+async def test_wait_for_deployment_returns_immediate_healthy(monkeypatch) -> None:
+    async def fake_cp_get(path: str, params: dict | None = None) -> dict:
+        assert path == "deployments/dep_healthy"
+        return {
+            "deployment_id": "dep_healthy",
+            "status": "healthy",
+            "health_status": "passing",
+            "logs_url": "/deployments/dep_healthy/logs",
+        }
+
+    monkeypatch.setattr(tool_execution, "_cp_get", fake_cp_get)
+
+    response = await tool_execution._execute_mapped_tool("wait_for_deployment", {"deployment_id": "dep_healthy"}, db=object())
+
+    assert response["deployment_id"] == "dep_healthy"
+    assert response["status"] == "healthy"
+    assert response["terminal"] is True
+    assert response["elapsed_seconds"] == 0
+    assert "next_diagnostic_tools" not in response
+
+
+@pytest.mark.anyio
+async def test_wait_for_deployment_returns_failed_with_log_hint(monkeypatch) -> None:
+    async def fake_cp_get(path: str, params: dict | None = None) -> dict:
+        assert path == "deployments/dep_failed"
+        return {
+            "deployment_id": "dep_failed",
+            "status": "failed",
+            "health_status": "unknown",
+            "failure_reason": "Docker Compose exit status 17",
+            "logs_url": "/deployments/dep_failed/logs",
+        }
+
+    monkeypatch.setattr(tool_execution, "_cp_get", fake_cp_get)
+
+    response = await tool_execution._execute_mapped_tool("wait_for_deployment", {"deployment_id": "dep_failed"}, db=object())
+
+    assert response["status"] == "failed"
+    assert response["terminal"] is True
+    assert response["failure_reason"] == "Docker Compose exit status 17"
+    assert response["next_diagnostic_tools"] == [
+        {"tool_name": "get_deployment_logs", "input": {"deployment_id": "dep_failed"}},
+    ]
+
+
+@pytest.mark.anyio
+async def test_wait_for_deployment_times_out_with_status_hint(monkeypatch) -> None:
+    class FakeLoop:
+        def __init__(self) -> None:
+            self.current = 0.0
+
+        def time(self) -> float:
+            self.current += 2.0
+            return self.current
+
+    sleep_calls: list[int] = []
+
+    async def fake_cp_get(path: str, params: dict | None = None) -> dict:
+        assert path == "deployments/dep_building"
+        return {"deployment_id": "dep_building", "status": "building", "health_status": "starting"}
+
+    async def fake_sleep(seconds: int) -> None:
+        sleep_calls.append(seconds)
+
+    monkeypatch.setattr(tool_execution, "_cp_get", fake_cp_get)
+    monkeypatch.setattr(tool_execution.asyncio, "sleep", fake_sleep)
+    monkeypatch.setattr(tool_execution.asyncio, "get_running_loop", lambda: FakeLoop())
+
+    response = await tool_execution._execute_mapped_tool(
+        "wait_for_deployment",
+        {"deployment_id": "dep_building", "timeout_seconds": 1, "poll_interval_seconds": 2},
+        db=object(),
+    )
+
+    assert response["status"] == "building"
+    assert response["terminal"] is False
+    assert response["message"] == "Deployment did not reach a terminal state before timeout."
+    assert response["next_diagnostic_tools"] == [
+        {"tool_name": "get_deployment_status", "input": {"deployment_id": "dep_building"}},
+    ]
+    assert sleep_calls == []
+
+
+@pytest.mark.anyio
+async def test_wait_for_deployment_caps_timeout_and_bounds_poll_interval(monkeypatch) -> None:
+    class FakeLoop:
+        def __init__(self) -> None:
+            self.times = iter([0.0, 0.0, 0.0, 181.0, 181.0])
+
+        def time(self) -> float:
+            return next(self.times)
+
+    sleep_calls: list[int] = []
+
+    async def fake_cp_get(path: str, params: dict | None = None) -> dict:
+        return {"deployment_id": "dep_slow", "status": "building"}
+
+    async def fake_sleep(seconds: int) -> None:
+        sleep_calls.append(seconds)
+
+    monkeypatch.setattr(tool_execution, "_cp_get", fake_cp_get)
+    monkeypatch.setattr(tool_execution.asyncio, "sleep", fake_sleep)
+    monkeypatch.setattr(tool_execution.asyncio, "get_running_loop", lambda: FakeLoop())
+
+    response = await tool_execution._wait_for_deployment(
+        {"deployment_id": "dep_slow", "timeout_seconds": 999, "poll_interval_seconds": 1},
+    )
+
+    assert response["terminal"] is False
+    assert response["elapsed_seconds"] == 181
+    assert sleep_calls == [2]
+
+
+@pytest.mark.anyio
+async def test_deploy_preview_change_adds_next_diagnostic_tools(monkeypatch) -> None:
+    async def fake_cp_post(path: str, payload: dict, timeout: float) -> dict:
+        return {
+            "deployment_id": "dep_failed",
+            "unit_id": "mission-control-frontend-shell",
+            "branch": "preview/test",
+            "status": "failed",
+            "failure_reason": "Docker Compose exit status 17",
+            "logs_url": "/deployments/dep_failed/logs",
+        }
+
+    monkeypatch.setattr(tool_execution, "_cp_post_with_timeout", fake_cp_post)
+
+    response = await tool_execution._execute_mapped_tool(
+        "deploy_preview_change",
+        {"branch": "preview/test", "target_unit_id": "mission-control-frontend-shell"},
+        db=object(),
+    )
+
+    assert response["status"] == "failed"
+    assert response["next_diagnostic_tools"] == [
+        {"tool_name": "get_deployment_logs", "input": {"deployment_id": "dep_failed"}},
+    ]
+
+
+@pytest.mark.anyio
 async def test_resolve_preview_deploy_target_maps_mission_control_ui(monkeypatch) -> None:
     async def fake_cp_get(path: str, params: dict | None = None) -> list[dict]:
         assert path == "registry/units"

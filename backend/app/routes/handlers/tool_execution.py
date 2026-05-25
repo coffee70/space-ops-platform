@@ -246,6 +246,69 @@ async def _poll_deployment_until_terminal(deployment_id: str, *, timeout_seconds
         await asyncio.sleep(interval_seconds)
 
 
+def _deployment_next_diagnostic_tools(deployment: dict) -> list[dict]:
+    deployment_id = deployment.get("deployment_id")
+    if not isinstance(deployment_id, str) or not deployment_id:
+        return []
+
+    status = deployment.get("status")
+    if status == "failed":
+        return [{"tool_name": "get_deployment_logs", "input": {"deployment_id": deployment_id}}]
+    if status == "timeout":
+        return [
+            {"tool_name": "get_deployment_status", "input": {"deployment_id": deployment_id}},
+            {"tool_name": "wait_for_deployment", "input": {"deployment_id": deployment_id, "timeout_seconds": 120}},
+        ]
+    if status in {"healthy", "replaced"}:
+        return []
+    return [{"tool_name": "wait_for_deployment", "input": {"deployment_id": deployment_id}}]
+
+
+async def _wait_for_deployment(tool_input: dict) -> dict:
+    deployment_id = tool_input["deployment_id"]
+    timeout_seconds = max(1, min(int(tool_input.get("timeout_seconds") or 120), 180))
+    poll_interval_seconds = max(2, min(int(tool_input.get("poll_interval_seconds") or 5), 30))
+
+    terminal_statuses = {"healthy", "failed", "replaced"}
+    loop = asyncio.get_running_loop()
+    started = loop.time()
+    deadline = started + timeout_seconds
+    latest: dict = {}
+
+    while True:
+        response = await _cp_get(f"deployments/{deployment_id}")
+        latest = response if isinstance(response, dict) else {}
+        status = latest.get("status")
+        elapsed_seconds = int(loop.time() - started)
+
+        if status in terminal_statuses:
+            output = {
+                **latest,
+                "deployment_id": latest.get("deployment_id") or deployment_id,
+                "terminal": True,
+                "elapsed_seconds": elapsed_seconds,
+            }
+            if status == "failed":
+                output["next_diagnostic_tools"] = [
+                    {"tool_name": "get_deployment_logs", "input": {"deployment_id": deployment_id}},
+                ]
+            return output
+
+        if loop.time() >= deadline:
+            return {
+                **latest,
+                "deployment_id": latest.get("deployment_id") or deployment_id,
+                "terminal": False,
+                "elapsed_seconds": elapsed_seconds,
+                "message": "Deployment did not reach a terminal state before timeout.",
+                "next_diagnostic_tools": [
+                    {"tool_name": "get_deployment_status", "input": {"deployment_id": deployment_id}},
+                ],
+            }
+
+        await asyncio.sleep(poll_interval_seconds)
+
+
 async def _deploy_preview_change(tool_input: dict, trace_payload: dict) -> dict:
     payload = {
         'branch': tool_input['branch'],
@@ -270,10 +333,12 @@ async def _deploy_preview_change(tool_input: dict, trace_payload: dict) -> dict:
     except httpx.TimeoutException:
         return {
             "status": "timeout",
+            "deployment_id": None,
             "target_unit_id": payload["target_unit_id"],
             "target_application_id": payload.get("target_application_id"),
             "branch": payload["branch"],
             "message": "Preview deployment submission timed out before a deployment id was returned.",
+            "next_diagnostic_tools": [],
             "_raw_events": [
                 requested,
                 raw_event(
@@ -304,7 +369,9 @@ async def _deploy_preview_change(tool_input: dict, trace_payload: dict) -> dict:
             events.append(_deployment_event(terminal_type, submitted))
             if terminal_type == "preview.active":
                 events.append(_deployment_event("deployment.health_passed", submitted))
-    return {**submitted, **final, "_raw_events": events}
+    output = {**submitted, **final}
+    output["next_diagnostic_tools"] = _deployment_next_diagnostic_tools(output)
+    return {**output, "_raw_events": events}
 
 
 async def _runtime_get(slug: str, path: str, params: dict | None = None) -> dict | list:
@@ -361,6 +428,12 @@ async def _execute_mapped_tool(name: str, tool_input: dict, *, db: Session, trac
         return await _cp_get('code/roots')
     if name == 'resolve_preview_deploy_target':
         return await _resolve_preview_deploy_target(tool_input)
+    if name == 'get_deployment_status':
+        return await _cp_get(f"deployments/{tool_input['deployment_id']}")
+    if name == 'get_deployment_logs':
+        return await _cp_get(f"deployments/{tool_input['deployment_id']}/logs")
+    if name == 'wait_for_deployment':
+        return await _wait_for_deployment(tool_input)
 
     if name == 'create_working_branch':
         payload = {'branch': tool_input['branch'], 'from_branch': tool_input.get('from_branch') or 'main'}

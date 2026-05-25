@@ -22,8 +22,8 @@ def test_supported_tool_inventory_matches_input_schemas() -> None:
     assert not missing
 
 
-def test_supported_registry_has_exactly_twenty_eight_tools() -> None:
-    assert len(tool_registry.SUPPORTED_TOOL_NAMES) == 28
+def test_supported_registry_has_exactly_thirty_one_tools() -> None:
+    assert len(tool_registry.SUPPORTED_TOOL_NAMES) == 31
 
 
 def test_write_classification_tools_are_supported() -> None:
@@ -89,6 +89,25 @@ def test_query_recent_telemetry_backing_documents_recent_endpoint() -> None:
     )
 
 
+@pytest.mark.parametrize("tool_name", ["get_deployment_status", "get_deployment_logs", "wait_for_deployment"])
+def test_deployment_diagnostic_tools_require_deployment_id(tool_name: str) -> None:
+    schema = tool_registry.TOOL_INPUT_SCHEMAS[tool_name]
+    assert schema["required"] == ["deployment_id"]
+    assert schema.get("additionalProperties") is False
+    validate_tool_input(schema, {"deployment_id": "dep_1"})
+    with pytest.raises(ToolInputValidationError):
+        validate_tool_input(schema, {})
+
+
+def test_wait_for_deployment_schema_bounds_wait_options() -> None:
+    schema = tool_registry.TOOL_INPUT_SCHEMAS["wait_for_deployment"]
+    validate_tool_input(schema, {"deployment_id": "dep_1", "timeout_seconds": 180, "poll_interval_seconds": 30})
+    with pytest.raises(ToolInputValidationError):
+        validate_tool_input(schema, {"deployment_id": "dep_1", "timeout_seconds": 181})
+    with pytest.raises(ToolInputValidationError):
+        validate_tool_input(schema, {"deployment_id": "dep_1", "poll_interval_seconds": 1})
+
+
 def test_delete_managed_resources_schema_is_strict_and_destructive() -> None:
     schema = tool_registry.TOOL_INPUT_SCHEMAS["delete_managed_resources"]
     assert schema["required"] == ["mode"]
@@ -120,6 +139,15 @@ def test_phase3_write_deploy_delete_tools_remain_metadata_only_and_discoverable(
     assert seeded["deploy_service_or_application"].backing_api == "POST /deployments"
     assert seeded["deploy_preview_change"].backing_api == "POST /change-previews/deploy"
     assert seeded["resolve_preview_deploy_target"].backing_api == "GET /registry/units"
+    assert seeded["get_deployment_status"].backing_api == "GET /deployments/{deployment_id}"
+    assert seeded["get_deployment_logs"].backing_api == "GET /deployments/{deployment_id}/logs"
+    assert seeded["wait_for_deployment"].backing_api == "GET /deployments/{deployment_id}"
+    assert seeded["get_deployment_status"].required_execution_mode == "read_only"
+    assert seeded["get_deployment_logs"].required_execution_mode == "read_only"
+    assert seeded["wait_for_deployment"].required_execution_mode == "read_only"
+    assert seeded["get_deployment_status"].read_write_classification == "read"
+    assert seeded["get_deployment_logs"].read_write_classification == "read"
+    assert seeded["wait_for_deployment"].read_write_classification == "read"
     assert seeded["resolve_preview_deploy_target"].mode_policy_json["read_only"] == "enabled"
     assert seeded["resolve_preview_deploy_target"].read_write_classification == "read"
     assert seeded["revert_preview_change"].backing_api == "POST /change-previews/revert"
