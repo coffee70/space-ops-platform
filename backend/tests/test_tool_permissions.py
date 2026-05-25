@@ -408,7 +408,14 @@ async def test_revert_preview_change_posts_kernel_schema_payload(monkeypatch) ->
         },
     )
 
+    raw_events = response.pop("_raw_events")
     assert response == {"deployment_id": "baseline-1"}
+    assert [event["event_type"] for event in raw_events] == [
+        "revert.requested",
+        "baseline.deployment_submitted",
+    ]
+    assert raw_events[0]["payload"]["tool_name"] == "revert_preview_change"
+    assert raw_events[1]["payload"]["deployment_id"] == "baseline-1"
     assert calls == [
         (
             "change-previews/revert",

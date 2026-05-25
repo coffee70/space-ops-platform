@@ -35,6 +35,11 @@ export const AGENT_EVENT_REQUIRED_PAYLOAD_FIELDS = {
   "deployment.failed": ["deployment_id", "branch", "unit_id", "status", "failure_reason"],
   "deployment.timeout": ["deployment_id", "branch", "unit_id", "status", "message"],
   "preview.active": ["deployment_id", "branch", "unit_id", "status"],
+  "revert.requested": ["tool_name", "branch", "unit_id", "status"],
+  "baseline.deployment_submitted": ["deployment_id", "branch", "unit_id", "status"],
+  "baseline.build_started": ["deployment_id", "branch", "unit_id", "status"],
+  "baseline.active": ["deployment_id", "branch", "unit_id", "status"],
+  "revert.failed": ["deployment_id", "branch", "unit_id", "status", "failure_reason"],
   "change.summary": [
     "branch",
     "base_branch",

@@ -219,6 +219,34 @@ def _deployment_lifecycle_type(deployment: dict) -> str:
     return "deployment.submitted"
 
 
+def _revert_event(event_type: str, payload: dict, *, message: str | None = None) -> dict:
+    event_payload = {
+        "deployment_id": str(payload.get("deployment_id") or "unknown"),
+        "branch": str(payload.get("branch") or payload.get("baseline_branch") or "unknown"),
+        "unit_id": str(payload.get("unit_id") or payload.get("target_unit_id") or "unknown"),
+        "status": str(payload.get("status") or "unknown"),
+    }
+    for key in ("target_application_id", "preview_deployment_id"):
+        if payload.get(key) is not None:
+            event_payload[key] = str(payload[key])
+    if event_type == "revert.requested":
+        event_payload["tool_name"] = "revert_preview_change"
+    if event_type == "revert.failed":
+        event_payload["failure_reason"] = str(payload.get("failure_reason") or message or "Revert failed.")
+    return raw_event(event_type=event_type, payload=event_payload, emitted_by="tool-execution-service", tool_call_id=None)
+
+
+def _revert_lifecycle_type(deployment: dict) -> str:
+    status = deployment.get("status")
+    if status == "healthy":
+        return "baseline.active"
+    if status in {"failed", "replaced"}:
+        return "revert.failed"
+    if status in {"building", "health_checking", "materializing"}:
+        return "baseline.build_started"
+    return "baseline.deployment_submitted"
+
+
 async def _poll_deployment_until_terminal(deployment_id: str, *, timeout_seconds: float = 180.0, interval_seconds: float = 2.0) -> tuple[dict, list[dict]]:
     deadline = asyncio.get_running_loop().time() + timeout_seconds
     events: list[dict] = []
@@ -384,6 +412,30 @@ async def _deploy_preview_change(tool_input: dict, trace_payload: dict) -> dict:
     return {**output, "_raw_events": events}
 
 
+async def _revert_preview_change(tool_input: dict, trace_payload: dict) -> dict:
+    payload = {
+        'target_unit_id': tool_input['target_unit_id'],
+        'conversation_id': trace_payload.get('conversation_id'),
+        'agent_run_id': trace_payload.get('agent_run_id'),
+    }
+    for source_key, target_key in (
+        ('target_application_id', 'target_application_id'),
+        ('baseline_branch', 'baseline_branch'),
+        ('baseline_commit_sha', 'baseline_commit_sha'),
+        ('preview_deployment_id', 'preview_deployment_id'),
+    ):
+        if tool_input.get(source_key) is not None:
+            payload[target_key] = tool_input[source_key]
+    requested = _revert_event("revert.requested", payload)
+    result = await _cp_post('change-previews/revert', payload)
+    if not isinstance(result, dict):
+        return {'deployment': result, "_raw_events": [requested]}
+    event_payload = {**payload, **result}
+    events = [requested, _revert_event(_revert_lifecycle_type(result), event_payload)]
+    output = {**result}
+    return {**output, "_raw_events": events}
+
+
 async def _runtime_get(slug: str, path: str, params: dict | None = None) -> dict | list:
     url = build_service_proxy_url(slug, path)
     async with httpx.AsyncClient(timeout=30.0, follow_redirects=False) as client:
@@ -491,21 +543,7 @@ async def _execute_mapped_tool(name: str, tool_input: dict, *, db: Session, trac
         return await _deploy_preview_change(tool_input, trace_payload)
 
     if name == 'revert_preview_change':
-        payload = {
-            'target_unit_id': tool_input['target_unit_id'],
-            'conversation_id': trace_payload.get('conversation_id'),
-            'agent_run_id': trace_payload.get('agent_run_id'),
-        }
-        for source_key, target_key in (
-            ('target_application_id', 'target_application_id'),
-            ('baseline_branch', 'baseline_branch'),
-            ('baseline_commit_sha', 'baseline_commit_sha'),
-            ('preview_deployment_id', 'preview_deployment_id'),
-        ):
-            if tool_input.get(source_key) is not None:
-                payload[target_key] = tool_input[source_key]
-        result = await _cp_post('change-previews/revert', payload)
-        return result if isinstance(result, dict) else {'deployment': result}
+        return await _revert_preview_change(tool_input, trace_payload)
 
     if name == 'delete_managed_resources':
         mode = tool_input['mode']
