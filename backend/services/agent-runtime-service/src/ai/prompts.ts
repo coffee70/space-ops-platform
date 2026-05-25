@@ -6,6 +6,7 @@ import type {
   ToolDefinition,
   ToolModePolicy,
 } from "../types.js";
+import { policyForMode } from "./tools.js";
 
 export interface AiEngineerSystemPromptInput {
   executionMode: ExecutionMode;
@@ -24,25 +25,6 @@ function summarizeHistory(messages: ChatInputMessage[]): string {
     .slice(-8)
     .map((message, index) => `${index + 1}. ${message.role}: ${message.content}`)
     .join("\n");
-}
-
-function canUseTool(requiredMode: ExecutionMode, executionMode: ExecutionMode): boolean {
-  const rank: Record<ExecutionMode, number> = {
-    read_only: 0,
-    suggest: 1,
-    execute: 2,
-    governed_execute: 3,
-  };
-
-  return rank[executionMode] >= rank[requiredMode];
-}
-
-function policyForMode(definition: ToolDefinition, executionMode: ExecutionMode): ToolModePolicy {
-  const policy = definition.mode_policy_json?.[executionMode];
-  if (policy === "disabled" || policy === "requires_permission" || policy === "enabled") {
-    return policy;
-  }
-  return canUseTool(definition.required_execution_mode, executionMode) ? "enabled" : "disabled";
 }
 
 function summarizeCurrentModePolicy(policy: ToolModePolicy): string {
