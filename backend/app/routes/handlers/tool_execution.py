@@ -274,11 +274,20 @@ async def _wait_for_deployment(tool_input: dict) -> dict:
     started = loop.time()
     deadline = started + timeout_seconds
     latest: dict = {}
+    raw_events: list[dict] = []
+    seen_events: set[tuple[str, str]] = set()
 
     while True:
         response = await _cp_get(f"deployments/{deployment_id}")
         latest = response if isinstance(response, dict) else {}
         status = latest.get("status")
+        event_type = _deployment_lifecycle_type(latest)
+        event_key = (event_type, str(status or "unknown"))
+        if event_key not in seen_events:
+            seen_events.add(event_key)
+            raw_events.append(_deployment_event(event_type, latest))
+            if event_type == "preview.active":
+                raw_events.append(_deployment_event("deployment.health_passed", latest))
         elapsed_seconds = int(loop.time() - started)
 
         if status in terminal_statuses:
@@ -287,6 +296,7 @@ async def _wait_for_deployment(tool_input: dict) -> dict:
                 "deployment_id": latest.get("deployment_id") or deployment_id,
                 "terminal": True,
                 "elapsed_seconds": elapsed_seconds,
+                "_raw_events": raw_events,
             }
             if status == "failed":
                 output["next_diagnostic_tools"] = [
@@ -295,6 +305,11 @@ async def _wait_for_deployment(tool_input: dict) -> dict:
             return output
 
         if loop.time() >= deadline:
+            timeout_event = _deployment_event(
+                "deployment.timeout",
+                {**latest, "deployment_id": latest.get("deployment_id") or deployment_id, "status": "timeout"},
+                message="Deployment did not reach a terminal state before timeout.",
+            )
             return {
                 **latest,
                 "deployment_id": latest.get("deployment_id") or deployment_id,
@@ -304,6 +319,7 @@ async def _wait_for_deployment(tool_input: dict) -> dict:
                 "next_diagnostic_tools": [
                     {"tool_name": "get_deployment_status", "input": {"deployment_id": deployment_id}},
                 ],
+                "_raw_events": [*raw_events, timeout_event],
             }
 
         await asyncio.sleep(poll_interval_seconds)

@@ -176,11 +176,13 @@ async def test_wait_for_deployment_returns_immediate_healthy(monkeypatch) -> Non
 
     response = await tool_execution._execute_mapped_tool("wait_for_deployment", {"deployment_id": "dep_healthy"}, db=object())
 
+    raw_events = response.pop("_raw_events")
     assert response["deployment_id"] == "dep_healthy"
     assert response["status"] == "healthy"
     assert response["terminal"] is True
     assert response["elapsed_seconds"] == 0
     assert "next_diagnostic_tools" not in response
+    assert [event["event_type"] for event in raw_events] == ["preview.active", "deployment.health_passed"]
 
 
 @pytest.mark.anyio
@@ -199,12 +201,14 @@ async def test_wait_for_deployment_returns_failed_with_log_hint(monkeypatch) -> 
 
     response = await tool_execution._execute_mapped_tool("wait_for_deployment", {"deployment_id": "dep_failed"}, db=object())
 
+    raw_events = response.pop("_raw_events")
     assert response["status"] == "failed"
     assert response["terminal"] is True
     assert response["failure_reason"] == "Docker Compose exit status 17"
     assert response["next_diagnostic_tools"] == [
         {"tool_name": "get_deployment_logs", "input": {"deployment_id": "dep_failed"}},
     ]
+    assert [event["event_type"] for event in raw_events] == ["deployment.failed"]
 
 
 @pytest.mark.anyio
@@ -236,12 +240,14 @@ async def test_wait_for_deployment_times_out_with_status_hint(monkeypatch) -> No
         db=object(),
     )
 
+    raw_events = response.pop("_raw_events")
     assert response["status"] == "building"
     assert response["terminal"] is False
     assert response["message"] == "Deployment did not reach a terminal state before timeout."
     assert response["next_diagnostic_tools"] == [
         {"tool_name": "get_deployment_status", "input": {"deployment_id": "dep_building"}},
     ]
+    assert [event["event_type"] for event in raw_events] == ["deployment.build_started", "deployment.timeout"]
     assert sleep_calls == []
 
 
