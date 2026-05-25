@@ -214,7 +214,7 @@ def _deployment_lifecycle_type(deployment: dict) -> str:
         return "preview.active"
     if status in {"failed", "replaced"}:
         return "deployment.failed"
-    if status == "building":
+    if status in {"building", "health_checking", "materializing"}:
         return "deployment.build_started"
     return "deployment.submitted"
 
@@ -357,19 +357,13 @@ async def _deploy_preview_change(tool_input: dict, trace_payload: dict) -> dict:
         }
     if not isinstance(submitted, dict):
         return {"deployment": submitted, "_raw_events": [requested]}
-    deployment_id = submitted.get("deployment_id")
     events = [requested, _deployment_event("deployment.submitted", submitted)]
-    final = submitted
-    if isinstance(deployment_id, str) and submitted.get("status") not in {"healthy", "failed", "replaced"}:
-        final, polled_events = await _poll_deployment_until_terminal(deployment_id)
-        events.extend(polled_events)
-    else:
-        terminal_type = _deployment_lifecycle_type(submitted)
-        if terminal_type != "deployment.submitted":
-            events.append(_deployment_event(terminal_type, submitted))
-            if terminal_type == "preview.active":
-                events.append(_deployment_event("deployment.health_passed", submitted))
-    output = {**submitted, **final}
+    terminal_type = _deployment_lifecycle_type(submitted)
+    if terminal_type != "deployment.submitted":
+        events.append(_deployment_event(terminal_type, submitted))
+        if terminal_type == "preview.active":
+            events.append(_deployment_event("deployment.health_passed", submitted))
+    output = {**submitted}
     output["next_diagnostic_tools"] = _deployment_next_diagnostic_tools(output)
     return {**output, "_raw_events": events}
 
@@ -472,7 +466,10 @@ async def _execute_mapped_tool(name: str, tool_input: dict, *, db: Session, trac
         if tool_input.get('commit_sha'):
             dep['commit_sha'] = tool_input['commit_sha']
         result = await _cp_post('deployments', dep)
-        return result if isinstance(result, dict) else {'deployment': result}
+        if not isinstance(result, dict):
+            return {'deployment': result}
+        result["next_diagnostic_tools"] = _deployment_next_diagnostic_tools(result)
+        return result
 
     if name == 'deploy_preview_change':
         return await _deploy_preview_change(tool_input, trace_payload)

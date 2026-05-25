@@ -302,6 +302,42 @@ async def test_deploy_preview_change_adds_next_diagnostic_tools(monkeypatch) -> 
 
 
 @pytest.mark.anyio
+async def test_deploy_preview_change_returns_queued_handle_without_polling(monkeypatch) -> None:
+    get_calls: list[str] = []
+
+    async def fake_cp_post(path: str, payload: dict, timeout: float) -> dict:
+        return {
+            "deployment_id": "dep_queued",
+            "unit_id": "mission-control-frontend-shell",
+            "branch": "preview/test",
+            "status": "queued",
+            "health_status": "pending",
+            "logs_url": "/deployments/dep_queued/logs",
+        }
+
+    async def fake_cp_get(path: str, params: dict | None = None) -> dict:
+        get_calls.append(path)
+        return {"deployment_id": "dep_queued", "status": "healthy"}
+
+    monkeypatch.setattr(tool_execution, "_cp_post_with_timeout", fake_cp_post)
+    monkeypatch.setattr(tool_execution, "_cp_get", fake_cp_get)
+
+    response = await tool_execution._execute_mapped_tool(
+        "deploy_preview_change",
+        {"branch": "preview/test", "target_unit_id": "mission-control-frontend-shell"},
+        db=object(),
+    )
+
+    raw_events = response.pop("_raw_events")
+    assert response["status"] == "queued"
+    assert response["next_diagnostic_tools"] == [
+        {"tool_name": "wait_for_deployment", "input": {"deployment_id": "dep_queued"}},
+    ]
+    assert [event["event_type"] for event in raw_events] == ["deployment.requested", "deployment.submitted"]
+    assert get_calls == []
+
+
+@pytest.mark.anyio
 async def test_resolve_preview_deploy_target_maps_mission_control_ui(monkeypatch) -> None:
     async def fake_cp_get(path: str, params: dict | None = None) -> list[dict]:
         assert path == "registry/units"
