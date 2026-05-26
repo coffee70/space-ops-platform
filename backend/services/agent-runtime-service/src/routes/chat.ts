@@ -381,8 +381,10 @@ async function orchestrateChat(input: {
         store: dependencies.store,
         trace: input.trace,
         executionMode: input.executionMode,
+        abortSignal: input.abortSignal,
         toolDefinitions,
         toolExecutionClient: dependencies.toolExecutionClient,
+        toolPermissionClient: dependencies.toolPermissionClient,
         contextPacketId: context.context_packet_id,
       });
       await completeScriptedRun({

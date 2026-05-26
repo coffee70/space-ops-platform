@@ -52,23 +52,23 @@ class _Db:
 
 
 def _tool(**overrides):
-    return SimpleNamespace(
-        name="deploy_preview_change",
-        enabled=True,
-        category="deployment",
-        read_write_classification="write",
-        requires_confirmation=False,
-        required_execution_mode="governed_execute",
-        mode_policy_json={
+    defaults = {
+        "name": "deploy_preview_change",
+        "enabled": True,
+        "category": "deployment",
+        "read_write_classification": "write",
+        "requires_confirmation": False,
+        "required_execution_mode": "execute",
+        "mode_policy_json": {
             "read_only": "disabled",
             "suggest": "requires_permission",
             "execute": "requires_permission",
             "governed_execute": "enabled",
         },
-        permission_prompt_json={},
-        input_schema_json=tool_registry.TOOL_INPUT_SCHEMAS["deploy_preview_change"],
-        **overrides,
-    )
+        "permission_prompt_json": {},
+        "input_schema_json": tool_registry.TOOL_INPUT_SCHEMAS["deploy_preview_change"],
+    }
+    return SimpleNamespace(**{**defaults, **overrides})
 
 
 @pytest.mark.anyio
@@ -143,6 +143,207 @@ async def test_deploy_preview_change_posts_kernel_schema_payload(monkeypatch) ->
 
 
 @pytest.mark.anyio
+async def test_deployment_diagnostic_tools_call_control_plane_paths(monkeypatch) -> None:
+    calls: list[str] = []
+
+    async def fake_cp_get(path: str, params: dict | None = None) -> dict:
+        assert params is None
+        calls.append(path)
+        return {"deployment_id": "dep_1", "status": "healthy"}
+
+    monkeypatch.setattr(tool_execution, "_cp_get", fake_cp_get)
+
+    status = await tool_execution._execute_mapped_tool("get_deployment_status", {"deployment_id": "dep_1"}, db=object())
+    logs = await tool_execution._execute_mapped_tool("get_deployment_logs", {"deployment_id": "dep_1"}, db=object())
+
+    assert status == {"deployment_id": "dep_1", "status": "healthy"}
+    assert logs == {"deployment_id": "dep_1", "status": "healthy"}
+    assert calls == ["deployments/dep_1", "deployments/dep_1/logs"]
+
+
+@pytest.mark.anyio
+async def test_wait_for_deployment_returns_immediate_healthy(monkeypatch) -> None:
+    async def fake_cp_get(path: str, params: dict | None = None) -> dict:
+        assert path == "deployments/dep_healthy"
+        return {
+            "deployment_id": "dep_healthy",
+            "status": "healthy",
+            "health_status": "passing",
+            "logs_url": "/deployments/dep_healthy/logs",
+        }
+
+    monkeypatch.setattr(tool_execution, "_cp_get", fake_cp_get)
+
+    response = await tool_execution._execute_mapped_tool("wait_for_deployment", {"deployment_id": "dep_healthy"}, db=object())
+
+    raw_events = response.pop("_raw_events")
+    assert response["deployment_id"] == "dep_healthy"
+    assert response["status"] == "healthy"
+    assert response["terminal"] is True
+    assert response["elapsed_seconds"] == 0
+    assert "next_diagnostic_tools" not in response
+    assert [event["event_type"] for event in raw_events] == ["preview.active", "deployment.health_passed"]
+
+
+@pytest.mark.anyio
+async def test_wait_for_deployment_returns_failed_with_log_hint(monkeypatch) -> None:
+    async def fake_cp_get(path: str, params: dict | None = None) -> dict:
+        assert path == "deployments/dep_failed"
+        return {
+            "deployment_id": "dep_failed",
+            "status": "failed",
+            "health_status": "unknown",
+            "failure_reason": "Docker Compose exit status 17",
+            "logs_url": "/deployments/dep_failed/logs",
+        }
+
+    monkeypatch.setattr(tool_execution, "_cp_get", fake_cp_get)
+
+    response = await tool_execution._execute_mapped_tool("wait_for_deployment", {"deployment_id": "dep_failed"}, db=object())
+
+    raw_events = response.pop("_raw_events")
+    assert response["status"] == "failed"
+    assert response["terminal"] is True
+    assert response["failure_reason"] == "Docker Compose exit status 17"
+    assert response["next_diagnostic_tools"] == [
+        {"tool_name": "get_deployment_logs", "input": {"deployment_id": "dep_failed"}},
+    ]
+    assert [event["event_type"] for event in raw_events] == ["deployment.failed"]
+
+
+@pytest.mark.anyio
+async def test_wait_for_deployment_times_out_with_status_hint(monkeypatch) -> None:
+    class FakeLoop:
+        def __init__(self) -> None:
+            self.current = 0.0
+
+        def time(self) -> float:
+            self.current += 2.0
+            return self.current
+
+    sleep_calls: list[int] = []
+
+    async def fake_cp_get(path: str, params: dict | None = None) -> dict:
+        assert path == "deployments/dep_building"
+        return {"deployment_id": "dep_building", "status": "building", "health_status": "starting"}
+
+    async def fake_sleep(seconds: int) -> None:
+        sleep_calls.append(seconds)
+
+    monkeypatch.setattr(tool_execution, "_cp_get", fake_cp_get)
+    monkeypatch.setattr(tool_execution.asyncio, "sleep", fake_sleep)
+    monkeypatch.setattr(tool_execution.asyncio, "get_running_loop", lambda: FakeLoop())
+
+    response = await tool_execution._execute_mapped_tool(
+        "wait_for_deployment",
+        {"deployment_id": "dep_building", "timeout_seconds": 1, "poll_interval_seconds": 2},
+        db=object(),
+    )
+
+    raw_events = response.pop("_raw_events")
+    assert response["status"] == "building"
+    assert response["terminal"] is False
+    assert response["message"] == "Deployment did not reach a terminal state before timeout."
+    assert response["next_diagnostic_tools"] == [
+        {"tool_name": "get_deployment_status", "input": {"deployment_id": "dep_building"}},
+    ]
+    assert [event["event_type"] for event in raw_events] == ["deployment.build_started", "deployment.timeout"]
+    assert sleep_calls == []
+
+
+@pytest.mark.anyio
+async def test_wait_for_deployment_caps_timeout_and_bounds_poll_interval(monkeypatch) -> None:
+    class FakeLoop:
+        def __init__(self) -> None:
+            self.times = iter([0.0, 0.0, 0.0, 181.0, 181.0])
+
+        def time(self) -> float:
+            return next(self.times)
+
+    sleep_calls: list[int] = []
+
+    async def fake_cp_get(path: str, params: dict | None = None) -> dict:
+        return {"deployment_id": "dep_slow", "status": "building"}
+
+    async def fake_sleep(seconds: int) -> None:
+        sleep_calls.append(seconds)
+
+    monkeypatch.setattr(tool_execution, "_cp_get", fake_cp_get)
+    monkeypatch.setattr(tool_execution.asyncio, "sleep", fake_sleep)
+    monkeypatch.setattr(tool_execution.asyncio, "get_running_loop", lambda: FakeLoop())
+
+    response = await tool_execution._wait_for_deployment(
+        {"deployment_id": "dep_slow", "timeout_seconds": 999, "poll_interval_seconds": 1},
+    )
+
+    assert response["terminal"] is False
+    assert response["elapsed_seconds"] == 181
+    assert sleep_calls == [2]
+
+
+@pytest.mark.anyio
+async def test_deploy_preview_change_adds_next_diagnostic_tools(monkeypatch) -> None:
+    async def fake_cp_post(path: str, payload: dict, timeout: float) -> dict:
+        return {
+            "deployment_id": "dep_failed",
+            "unit_id": "mission-control-frontend-shell",
+            "branch": "preview/test",
+            "status": "failed",
+            "failure_reason": "Docker Compose exit status 17",
+            "logs_url": "/deployments/dep_failed/logs",
+        }
+
+    monkeypatch.setattr(tool_execution, "_cp_post_with_timeout", fake_cp_post)
+
+    response = await tool_execution._execute_mapped_tool(
+        "deploy_preview_change",
+        {"branch": "preview/test", "target_unit_id": "mission-control-frontend-shell"},
+        db=object(),
+    )
+
+    assert response["status"] == "failed"
+    assert response["next_diagnostic_tools"] == [
+        {"tool_name": "get_deployment_logs", "input": {"deployment_id": "dep_failed"}},
+    ]
+
+
+@pytest.mark.anyio
+async def test_deploy_preview_change_returns_queued_handle_without_polling(monkeypatch) -> None:
+    get_calls: list[str] = []
+
+    async def fake_cp_post(path: str, payload: dict, timeout: float) -> dict:
+        return {
+            "deployment_id": "dep_queued",
+            "unit_id": "mission-control-frontend-shell",
+            "branch": "preview/test",
+            "status": "queued",
+            "health_status": "pending",
+            "logs_url": "/deployments/dep_queued/logs",
+        }
+
+    async def fake_cp_get(path: str, params: dict | None = None) -> dict:
+        get_calls.append(path)
+        return {"deployment_id": "dep_queued", "status": "healthy"}
+
+    monkeypatch.setattr(tool_execution, "_cp_post_with_timeout", fake_cp_post)
+    monkeypatch.setattr(tool_execution, "_cp_get", fake_cp_get)
+
+    response = await tool_execution._execute_mapped_tool(
+        "deploy_preview_change",
+        {"branch": "preview/test", "target_unit_id": "mission-control-frontend-shell"},
+        db=object(),
+    )
+
+    raw_events = response.pop("_raw_events")
+    assert response["status"] == "queued"
+    assert response["next_diagnostic_tools"] == [
+        {"tool_name": "wait_for_deployment", "input": {"deployment_id": "dep_queued"}},
+    ]
+    assert [event["event_type"] for event in raw_events] == ["deployment.requested", "deployment.submitted"]
+    assert get_calls == []
+
+
+@pytest.mark.anyio
 async def test_resolve_preview_deploy_target_maps_mission_control_ui(monkeypatch) -> None:
     async def fake_cp_get(path: str, params: dict | None = None) -> list[dict]:
         assert path == "registry/units"
@@ -207,7 +408,14 @@ async def test_revert_preview_change_posts_kernel_schema_payload(monkeypatch) ->
         },
     )
 
+    raw_events = response.pop("_raw_events")
     assert response == {"deployment_id": "baseline-1"}
+    assert [event["event_type"] for event in raw_events] == [
+        "revert.requested",
+        "baseline.deployment_submitted",
+    ]
+    assert raw_events[0]["payload"]["tool_name"] == "revert_preview_change"
+    assert raw_events[1]["payload"]["deployment_id"] == "baseline-1"
     assert calls == [
         (
             "change-previews/revert",
@@ -271,6 +479,66 @@ async def test_permission_required_tool_does_not_execute_before_approval(monkeyp
     assert [type(item) for item in db.added] == [ToolCall, ToolPermissionRequest]
     assert db.added[0].status == "permission_required"
     assert db.added[1].status == "pending"
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    ("tool_name", "tool_input"),
+    [
+        ("deploy_service_or_application", {"unit_id": "phase3-test-fixture-service", "branch": "feature/phase3-no-llm"}),
+        ("delete_managed_resources", {"mode": "managed_unit", "unit_id": "phase3-test-fixture-service"}),
+    ],
+)
+async def test_direct_deploy_and_delete_require_permission_in_execute_mode(monkeypatch, tool_name: str, tool_input: dict) -> None:
+    mapped_called = False
+
+    async def fake_mapped(*_args, **_kwargs):
+        nonlocal mapped_called
+        mapped_called = True
+        return {}
+
+    mode_policy = {
+        "read_only": "disabled",
+        "suggest": "requires_permission",
+        "execute": "requires_permission",
+        "governed_execute": "requires_permission" if tool_name == "delete_managed_resources" else "enabled",
+    }
+    monkeypatch.setattr(tool_execution, "_execute_mapped_tool", fake_mapped)
+    db = _Db(
+        tool=_tool(
+            name=tool_name,
+            category="resource_delete" if tool_name == "delete_managed_resources" else "deployment",
+            read_write_classification="destructive_write" if tool_name == "delete_managed_resources" else "write",
+            required_execution_mode="execute",
+            mode_policy_json=mode_policy,
+            input_schema_json=tool_registry.TOOL_INPUT_SCHEMAS[tool_name],
+        )
+    )
+
+    response = await tool_execution.execute_tool(
+        tool_execution.ToolExecutionRequest(
+            conversation_id="11111111-1111-1111-1111-111111111111",
+            agent_run_id="22222222-2222-2222-2222-222222222222",
+            request_id="33333333-3333-3333-3333-333333333333",
+            tool_call_id="44444444-4444-4444-4444-444444444444",
+            tool_name=tool_name,
+            input=tool_input,
+            execution_mode="execute",
+        ),
+        request=_request(
+            {
+                "x-agent-run-id": "22222222-2222-2222-2222-222222222222",
+                "x-request-id": "33333333-3333-3333-3333-333333333333",
+                "x-tool-call-id": "44444444-4444-4444-4444-444444444444",
+            }
+        ),
+        db=db,  # type: ignore[arg-type]
+    )
+
+    assert response["status"] == "permission_required"
+    assert response["raw_events"][0]["payload"]["tool_name"] == tool_name
+    assert response["raw_events"][0]["payload"]["execution_mode"] == "execute"
+    assert mapped_called is False
 
 
 def test_approve_permission_marks_request_approved_and_emits_event() -> None:

@@ -6,7 +6,7 @@ import { z, type ZodTypeAny } from "zod";
 import { withToolTrace } from "../trace.js";
 import type { ExecutionMode, RawEventFact, ToolDefinition, ToolExecutionClient, ToolModePolicy, ToolPermissionClient, TraceEnvelope } from "../types.js";
 
-function canUseTool(requiredMode: ExecutionMode, executionMode: ExecutionMode): boolean {
+export function canUseTool(requiredMode: ExecutionMode, executionMode: ExecutionMode): boolean {
   const rank: Record<ExecutionMode, number> = {
     read_only: 0,
     suggest: 1,

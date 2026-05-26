@@ -289,7 +289,13 @@ export class FakeToolRegistryClient implements ToolRegistryClient {
 }
 
 export class FakeToolExecutionClient implements ToolExecutionClient {
-  calls: Array<{ tool_name: string; input: Record<string, unknown>; trace: TraceEnvelope; execution_mode: ExecutionMode }> = [];
+  calls: Array<{
+    tool_name: string;
+    input: Record<string, unknown>;
+    trace: TraceEnvelope;
+    execution_mode: ExecutionMode;
+    permission_request_id?: string | null;
+  }> = [];
 
   constructor(
     private readonly response:
@@ -317,6 +323,7 @@ export class FakeToolExecutionClient implements ToolExecutionClient {
       input: input.input,
       trace: input.trace,
       execution_mode: input.execution_mode,
+      permission_request_id: input.permission_request_id,
     });
     return typeof this.response === "function" ? await this.response(input) : this.response;
   }

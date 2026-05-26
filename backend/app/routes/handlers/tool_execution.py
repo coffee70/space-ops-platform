@@ -214,9 +214,37 @@ def _deployment_lifecycle_type(deployment: dict) -> str:
         return "preview.active"
     if status in {"failed", "replaced"}:
         return "deployment.failed"
-    if status == "building":
+    if status in {"building", "health_checking", "materializing"}:
         return "deployment.build_started"
     return "deployment.submitted"
+
+
+def _revert_event(event_type: str, payload: dict, *, message: str | None = None) -> dict:
+    event_payload = {
+        "deployment_id": str(payload.get("deployment_id") or "unknown"),
+        "branch": str(payload.get("branch") or payload.get("baseline_branch") or "unknown"),
+        "unit_id": str(payload.get("unit_id") or payload.get("target_unit_id") or "unknown"),
+        "status": str(payload.get("status") or "unknown"),
+    }
+    for key in ("target_application_id", "preview_deployment_id"):
+        if payload.get(key) is not None:
+            event_payload[key] = str(payload[key])
+    if event_type == "revert.requested":
+        event_payload["tool_name"] = "revert_preview_change"
+    if event_type == "revert.failed":
+        event_payload["failure_reason"] = str(payload.get("failure_reason") or message or "Revert failed.")
+    return raw_event(event_type=event_type, payload=event_payload, emitted_by="tool-execution-service", tool_call_id=None)
+
+
+def _revert_lifecycle_type(deployment: dict) -> str:
+    status = deployment.get("status")
+    if status == "healthy":
+        return "baseline.active"
+    if status in {"failed", "replaced"}:
+        return "revert.failed"
+    if status in {"building", "health_checking", "materializing"}:
+        return "baseline.build_started"
+    return "baseline.deployment_submitted"
 
 
 async def _poll_deployment_until_terminal(deployment_id: str, *, timeout_seconds: float = 180.0, interval_seconds: float = 2.0) -> tuple[dict, list[dict]]:
@@ -246,6 +274,85 @@ async def _poll_deployment_until_terminal(deployment_id: str, *, timeout_seconds
         await asyncio.sleep(interval_seconds)
 
 
+def _deployment_next_diagnostic_tools(deployment: dict) -> list[dict]:
+    deployment_id = deployment.get("deployment_id")
+    if not isinstance(deployment_id, str) or not deployment_id:
+        return []
+
+    status = deployment.get("status")
+    if status == "failed":
+        return [{"tool_name": "get_deployment_logs", "input": {"deployment_id": deployment_id}}]
+    if status == "timeout":
+        return [
+            {"tool_name": "get_deployment_status", "input": {"deployment_id": deployment_id}},
+            {"tool_name": "wait_for_deployment", "input": {"deployment_id": deployment_id, "timeout_seconds": 120}},
+        ]
+    if status in {"healthy", "replaced"}:
+        return []
+    return [{"tool_name": "wait_for_deployment", "input": {"deployment_id": deployment_id}}]
+
+
+async def _wait_for_deployment(tool_input: dict) -> dict:
+    deployment_id = tool_input["deployment_id"]
+    timeout_seconds = max(1, min(int(tool_input.get("timeout_seconds") or 120), 180))
+    poll_interval_seconds = max(2, min(int(tool_input.get("poll_interval_seconds") or 5), 30))
+
+    terminal_statuses = {"healthy", "failed", "replaced"}
+    loop = asyncio.get_running_loop()
+    started = loop.time()
+    deadline = started + timeout_seconds
+    latest: dict = {}
+    raw_events: list[dict] = []
+    seen_events: set[tuple[str, str]] = set()
+
+    while True:
+        response = await _cp_get(f"deployments/{deployment_id}")
+        latest = response if isinstance(response, dict) else {}
+        status = latest.get("status")
+        event_type = _deployment_lifecycle_type(latest)
+        event_key = (event_type, str(status or "unknown"))
+        if event_key not in seen_events:
+            seen_events.add(event_key)
+            raw_events.append(_deployment_event(event_type, latest))
+            if event_type == "preview.active":
+                raw_events.append(_deployment_event("deployment.health_passed", latest))
+        elapsed_seconds = int(loop.time() - started)
+
+        if status in terminal_statuses:
+            output = {
+                **latest,
+                "deployment_id": latest.get("deployment_id") or deployment_id,
+                "terminal": True,
+                "elapsed_seconds": elapsed_seconds,
+                "_raw_events": raw_events,
+            }
+            if status == "failed":
+                output["next_diagnostic_tools"] = [
+                    {"tool_name": "get_deployment_logs", "input": {"deployment_id": deployment_id}},
+                ]
+            return output
+
+        if loop.time() >= deadline:
+            timeout_event = _deployment_event(
+                "deployment.timeout",
+                {**latest, "deployment_id": latest.get("deployment_id") or deployment_id, "status": "timeout"},
+                message="Deployment did not reach a terminal state before timeout.",
+            )
+            return {
+                **latest,
+                "deployment_id": latest.get("deployment_id") or deployment_id,
+                "terminal": False,
+                "elapsed_seconds": elapsed_seconds,
+                "message": "Deployment did not reach a terminal state before timeout.",
+                "next_diagnostic_tools": [
+                    {"tool_name": "get_deployment_status", "input": {"deployment_id": deployment_id}},
+                ],
+                "_raw_events": [*raw_events, timeout_event],
+            }
+
+        await asyncio.sleep(poll_interval_seconds)
+
+
 async def _deploy_preview_change(tool_input: dict, trace_payload: dict) -> dict:
     payload = {
         'branch': tool_input['branch'],
@@ -270,10 +377,12 @@ async def _deploy_preview_change(tool_input: dict, trace_payload: dict) -> dict:
     except httpx.TimeoutException:
         return {
             "status": "timeout",
+            "deployment_id": None,
             "target_unit_id": payload["target_unit_id"],
             "target_application_id": payload.get("target_application_id"),
             "branch": payload["branch"],
             "message": "Preview deployment submission timed out before a deployment id was returned.",
+            "next_diagnostic_tools": [],
             "_raw_events": [
                 requested,
                 raw_event(
@@ -292,19 +401,39 @@ async def _deploy_preview_change(tool_input: dict, trace_payload: dict) -> dict:
         }
     if not isinstance(submitted, dict):
         return {"deployment": submitted, "_raw_events": [requested]}
-    deployment_id = submitted.get("deployment_id")
     events = [requested, _deployment_event("deployment.submitted", submitted)]
-    final = submitted
-    if isinstance(deployment_id, str) and submitted.get("status") not in {"healthy", "failed", "replaced"}:
-        final, polled_events = await _poll_deployment_until_terminal(deployment_id)
-        events.extend(polled_events)
-    else:
-        terminal_type = _deployment_lifecycle_type(submitted)
-        if terminal_type != "deployment.submitted":
-            events.append(_deployment_event(terminal_type, submitted))
-            if terminal_type == "preview.active":
-                events.append(_deployment_event("deployment.health_passed", submitted))
-    return {**submitted, **final, "_raw_events": events}
+    terminal_type = _deployment_lifecycle_type(submitted)
+    if terminal_type != "deployment.submitted":
+        events.append(_deployment_event(terminal_type, submitted))
+        if terminal_type == "preview.active":
+            events.append(_deployment_event("deployment.health_passed", submitted))
+    output = {**submitted}
+    output["next_diagnostic_tools"] = _deployment_next_diagnostic_tools(output)
+    return {**output, "_raw_events": events}
+
+
+async def _revert_preview_change(tool_input: dict, trace_payload: dict) -> dict:
+    payload = {
+        'target_unit_id': tool_input['target_unit_id'],
+        'conversation_id': trace_payload.get('conversation_id'),
+        'agent_run_id': trace_payload.get('agent_run_id'),
+    }
+    for source_key, target_key in (
+        ('target_application_id', 'target_application_id'),
+        ('baseline_branch', 'baseline_branch'),
+        ('baseline_commit_sha', 'baseline_commit_sha'),
+        ('preview_deployment_id', 'preview_deployment_id'),
+    ):
+        if tool_input.get(source_key) is not None:
+            payload[target_key] = tool_input[source_key]
+    requested = _revert_event("revert.requested", payload)
+    result = await _cp_post('change-previews/revert', payload)
+    if not isinstance(result, dict):
+        return {'deployment': result, "_raw_events": [requested]}
+    event_payload = {**payload, **result}
+    events = [requested, _revert_event(_revert_lifecycle_type(result), event_payload)]
+    output = {**result}
+    return {**output, "_raw_events": events}
 
 
 async def _runtime_get(slug: str, path: str, params: dict | None = None) -> dict | list:
@@ -361,6 +490,12 @@ async def _execute_mapped_tool(name: str, tool_input: dict, *, db: Session, trac
         return await _cp_get('code/roots')
     if name == 'resolve_preview_deploy_target':
         return await _resolve_preview_deploy_target(tool_input)
+    if name == 'get_deployment_status':
+        return await _cp_get(f"deployments/{tool_input['deployment_id']}")
+    if name == 'get_deployment_logs':
+        return await _cp_get(f"deployments/{tool_input['deployment_id']}/logs")
+    if name == 'wait_for_deployment':
+        return await _wait_for_deployment(tool_input)
 
     if name == 'create_working_branch':
         payload = {'branch': tool_input['branch'], 'from_branch': tool_input.get('from_branch') or 'main'}
@@ -399,27 +534,16 @@ async def _execute_mapped_tool(name: str, tool_input: dict, *, db: Session, trac
         if tool_input.get('commit_sha'):
             dep['commit_sha'] = tool_input['commit_sha']
         result = await _cp_post('deployments', dep)
-        return result if isinstance(result, dict) else {'deployment': result}
+        if not isinstance(result, dict):
+            return {'deployment': result}
+        result["next_diagnostic_tools"] = _deployment_next_diagnostic_tools(result)
+        return result
 
     if name == 'deploy_preview_change':
         return await _deploy_preview_change(tool_input, trace_payload)
 
     if name == 'revert_preview_change':
-        payload = {
-            'target_unit_id': tool_input['target_unit_id'],
-            'conversation_id': trace_payload.get('conversation_id'),
-            'agent_run_id': trace_payload.get('agent_run_id'),
-        }
-        for source_key, target_key in (
-            ('target_application_id', 'target_application_id'),
-            ('baseline_branch', 'baseline_branch'),
-            ('baseline_commit_sha', 'baseline_commit_sha'),
-            ('preview_deployment_id', 'preview_deployment_id'),
-        ):
-            if tool_input.get(source_key) is not None:
-                payload[target_key] = tool_input[source_key]
-        result = await _cp_post('change-previews/revert', payload)
-        return result if isinstance(result, dict) else {'deployment': result}
+        return await _revert_preview_change(tool_input, trace_payload)
 
     if name == 'delete_managed_resources':
         mode = tool_input['mode']

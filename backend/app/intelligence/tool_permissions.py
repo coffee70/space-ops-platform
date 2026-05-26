@@ -50,7 +50,22 @@ def policy_for_mode(tool: object, execution_mode: str) -> ToolModePolicy:
 
 
 def build_permission_prompt(tool_name: str, tool_input: dict, prompt_overrides: dict | None = None) -> dict:
-    if tool_name == "deploy_preview_change":
+    if tool_name == "deploy_service_or_application":
+        target = tool_input.get("unit_id") or "the target unit"
+        branch = tool_input.get("branch") or "main"
+        prompt = {
+            "title": "Deploy managed service or application?",
+            "description": f"The AI Engineer wants to deploy {target} from branch {branch}.",
+            "primary_action": "Approve deploy",
+            "secondary_action": "Cancel",
+            "risk_level": "medium",
+            "details": {
+                "unit_id": tool_input.get("unit_id"),
+                "branch": tool_input.get("branch"),
+                "commit_sha": tool_input.get("commit_sha"),
+            },
+        }
+    elif tool_name == "deploy_preview_change":
         target = tool_input.get("target_unit_id") or "the target unit"
         branch = tool_input.get("branch") or "the requested branch"
         prompt = {
@@ -66,6 +81,27 @@ def build_permission_prompt(tool_name: str, tool_input: dict, prompt_overrides: 
                 "target_application_id": tool_input.get("target_application_id"),
                 "changed_files": tool_input.get("changed_files") or [],
                 "summary": tool_input.get("summary"),
+            },
+        }
+    elif tool_name == "delete_managed_resources":
+        mode = tool_input.get("mode") or "managed resources"
+        target = tool_input.get("unit_id") or tool_input.get("deployment_id") or tool_input.get("branch") or "the requested resources"
+        prompt = {
+            "title": "Delete managed resources?",
+            "description": f"The AI Engineer wants to delete {target} using {mode} cleanup.",
+            "primary_action": "Approve delete",
+            "secondary_action": "Cancel",
+            "risk_level": "high",
+            "details": {
+                "mode": tool_input.get("mode"),
+                "unit_id": tool_input.get("unit_id"),
+                "deployment_id": tool_input.get("deployment_id"),
+                "branch": tool_input.get("branch"),
+                "paths": tool_input.get("paths") or [],
+                "include_code": tool_input.get("include_code"),
+                "include_runtime": tool_input.get("include_runtime"),
+                "include_registry": tool_input.get("include_registry"),
+                "include_intelligence_records": tool_input.get("include_intelligence_records"),
             },
         }
     elif tool_name == "revert_preview_change":

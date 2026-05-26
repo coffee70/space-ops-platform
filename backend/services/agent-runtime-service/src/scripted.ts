@@ -1,5 +1,5 @@
 import type { AgentEventStream } from "./events/stream.js";
-import type { ConversationStore, ExecutionMode, RawEventFact, ToolDefinition, ToolExecutionClient, ToolExecutionResponse, TraceEnvelope } from "./types.js";
+import type { ConversationStore, ExecutionMode, RawEventFact, ToolDefinition, ToolExecutionClient, ToolExecutionResponse, ToolPermissionClient, TraceEnvelope } from "./types.js";
 
 const FIXTURE_UNIT_ID = "phase3-test-fixture-service";
 const FIXTURE_BRANCH = "feature/phase3-no-llm";
@@ -93,9 +93,11 @@ async function executeTool(input: {
   toolExecutionClient: ToolExecutionClient;
   trace: TraceEnvelope;
   executionMode: ExecutionMode;
+  abortSignal?: AbortSignal;
   stream: AgentEventStream;
   toolName: string;
   args: Record<string, unknown>;
+  toolPermissionClient?: ToolPermissionClient;
 }): Promise<ToolExecutionResponse> {
   getToolDefinition(input.toolDefinitions, input.toolName, input.executionMode);
   const toolCallId = crypto.randomUUID();
@@ -106,7 +108,43 @@ async function executeTool(input: {
     execution_mode: input.executionMode,
   });
   await input.stream.emitRawEvents(response.raw_events as RawEventFact[] | undefined);
-  return response;
+  if (response.status !== "permission_required") {
+    return response;
+  }
+
+  const output = response.output && typeof response.output === "object" ? (response.output as Record<string, unknown>) : {};
+  const permissionRequestId = typeof output.permission_request_id === "string" ? output.permission_request_id : null;
+  if (!permissionRequestId || !input.toolPermissionClient) {
+    throw new Error(`scripted tool ${input.toolName} requires permission but no approval path is available`);
+  }
+  const decision = await input.toolPermissionClient.waitForDecision({
+    permissionRequestId,
+    abortSignal: input.abortSignal,
+  });
+  await input.stream.emitRawEvents(decision.raw_events);
+  if (decision.status === "denied") {
+    return {
+      ...response,
+      status: "permission_denied",
+      output: {
+        status: "permission_denied",
+        message: "The user denied this tool call. No action was taken.",
+        permission_request_id: permissionRequestId,
+        tool_name: input.toolName,
+        reason: decision.reason ?? "user_denied",
+      },
+    };
+  }
+
+  const approvedResponse = await input.toolExecutionClient.execute({
+    trace: { ...input.trace, tool_call_id: toolCallId },
+    tool_name: input.toolName,
+    input: input.args,
+    execution_mode: input.executionMode,
+    permission_request_id: permissionRequestId,
+  });
+  await input.stream.emitRawEvents(approvedResponse.raw_events as RawEventFact[] | undefined);
+  return approvedResponse;
 }
 
 function extractBaseCommitSha(output: unknown): string | undefined {
@@ -186,8 +224,10 @@ export async function runScriptedMode(input: {
   store: ConversationStore;
   trace: TraceEnvelope;
   executionMode: ExecutionMode;
+  abortSignal?: AbortSignal;
   toolDefinitions: ToolDefinition[];
   toolExecutionClient: ToolExecutionClient;
+  toolPermissionClient?: ToolPermissionClient;
   contextPacketId: string | null;
 }): Promise<ScriptedRunResult> {
   let toolCallCount = 0;
@@ -201,6 +241,8 @@ export async function runScriptedMode(input: {
       stream: input.stream,
       toolName,
       args,
+      abortSignal: input.abortSignal,
+      toolPermissionClient: input.toolPermissionClient,
     });
   };
 
