@@ -52,6 +52,7 @@ export class HttpToolExecutionClient implements ToolExecutionClient {
 
   async execute(input: {
     trace: TraceEnvelope;
+    assistant_message_id: string;
     tool_name: string;
     input: Record<string, unknown>;
     execution_mode: string;
@@ -66,6 +67,7 @@ export class HttpToolExecutionClient implements ToolExecutionClient {
       },
       body: JSON.stringify({
         conversation_id: input.trace.conversation_id,
+        assistant_message_id: input.assistant_message_id,
         agent_run_id: input.trace.agent_run_id,
         request_id: input.trace.request_id,
         tool_call_id: input.trace.tool_call_id,

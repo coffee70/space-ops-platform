@@ -291,6 +291,7 @@ async function orchestrateChat(input: {
   let observedStepCount = 0;
   let latestStepFinishReason: string | null = null;
   let finalFinishReason: string | null = null;
+  let assistantMessageId: string | null = null;
 
   try {
     const persistedUserMessage = input.persistedUserMessageId
@@ -309,11 +310,28 @@ async function orchestrateChat(input: {
         conversationId: input.trace.conversation_id,
         role: "user",
         content: input.latestUserMessage,
+        requestId: input.trace.request_id,
+        agentRunId: input.trace.agent_run_id,
         metadata: {
           request_id: input.trace.request_id,
           agent_run_id: input.trace.agent_run_id,
         },
       }));
+
+    const assistantMessage = await dependencies.store.appendMessage({
+      conversationId: input.trace.conversation_id,
+      role: "assistant",
+      content: "",
+      requestId: input.trace.request_id,
+      agentRunId: input.trace.agent_run_id,
+      metadata: {
+        request_id: input.trace.request_id,
+        agent_run_id: input.trace.agent_run_id,
+        completion_status: "streaming",
+      },
+    });
+    assistantMessageId = assistantMessage.id;
+    const activeAssistantMessageId = assistantMessage.id;
 
     await stream.emitEvent("run.started", {
       execution_mode: input.executionMode,
@@ -346,6 +364,7 @@ async function orchestrateChat(input: {
       toolExecutionClient: dependencies.toolExecutionClient,
       toolPermissionClient: dependencies.toolPermissionClient,
       trace: input.trace,
+      assistantMessageId: activeAssistantMessageId,
       executionMode: input.executionMode,
       abortSignal: input.abortSignal,
       onToolCallRequested: () => {
@@ -386,12 +405,14 @@ async function orchestrateChat(input: {
         toolDefinitions,
         toolExecutionClient: dependencies.toolExecutionClient,
         toolPermissionClient: dependencies.toolPermissionClient,
+        assistantMessageId: activeAssistantMessageId,
         contextPacketId: context.context_packet_id,
       });
       await completeScriptedRun({
         store: dependencies.store,
         stream,
         trace: input.trace,
+        assistantMessageId: activeAssistantMessageId,
         result,
         contextPacketId: context.context_packet_id,
       });
@@ -432,14 +453,17 @@ async function orchestrateChat(input: {
         executionMode: input.executionMode,
         contextPacketId: context.context_packet_id,
         persistAssistantMessage: async (content) =>
-          dependencies.store.appendMessage({
-            conversationId: input.trace.conversation_id,
-            role: "assistant",
+          dependencies.store.updateMessage(activeAssistantMessageId, {
             content,
+            requestId: input.trace.request_id,
+            agentRunId: input.trace.agent_run_id,
             metadata: {
               agent_run_id: input.trace.agent_run_id,
               request_id: input.trace.request_id,
             },
+          }).then((message) => {
+            if (!message) throw new Error("assistant message not found");
+            return message;
           }),
       });
       await maybeGenerateConversationTitle({ dependencies, conversationId: input.trace.conversation_id });
@@ -587,18 +611,21 @@ async function orchestrateChat(input: {
       };
     }
 
-    const assistantMessage = await dependencies.store.appendMessage({
-      conversationId: input.trace.conversation_id,
-      role: "assistant",
+    const completedAssistantMessage = await dependencies.store.updateMessage(activeAssistantMessageId, {
       content: finalAssistantText,
+      requestId: input.trace.request_id,
+      agentRunId: input.trace.agent_run_id,
       metadata: assistantMetadata,
     });
+    if (!completedAssistantMessage) {
+      throw new Error("assistant message not found");
+    }
     await stream.emitEvent("message.completed", {
-      message_id: assistantMessage.id,
+      message_id: completedAssistantMessage.id,
       content_preview: contentPreview(finalAssistantText),
     });
     await stream.emitEvent("run.completed", {
-      assistant_message_id: assistantMessage.id,
+      assistant_message_id: completedAssistantMessage.id,
       tool_call_count: toolCallCount,
       context_packet_id: context.context_packet_id,
       ...(usedStepLimitFallback
@@ -643,13 +670,15 @@ async function orchestrateChat(input: {
 
       let partialAssistantMessageId: string | null = null;
       if (assistantText.trim().length > 0 || reasoningText.trim().length > 0) {
-        const partialAssistantMessage = await dependencies.store.appendMessage({
-          conversationId: input.trace.conversation_id,
-          role: "assistant",
-          content: assistantText,
-          metadata: assistantMetadata,
-        });
-        partialAssistantMessageId = partialAssistantMessage.id;
+        const partialAssistantMessage = assistantMessageId
+          ? await dependencies.store.updateMessage(assistantMessageId, {
+              content: assistantText,
+              requestId: input.trace.request_id,
+              agentRunId: input.trace.agent_run_id,
+              metadata: assistantMetadata,
+            })
+          : null;
+        partialAssistantMessageId = partialAssistantMessage?.id ?? null;
       }
 
       const payload: Record<string, unknown> = {
@@ -671,6 +700,9 @@ async function orchestrateChat(input: {
       return;
     }
 
+    if (assistantMessageId && assistantText.trim().length === 0 && reasoningText.trim().length === 0 && toolCallCount === 0) {
+      await dependencies.store.deleteMessage(assistantMessageId);
+    }
     await stream.fail(error);
   }
 }

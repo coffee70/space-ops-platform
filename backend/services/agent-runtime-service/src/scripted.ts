@@ -98,11 +98,13 @@ async function executeTool(input: {
   toolName: string;
   args: Record<string, unknown>;
   toolPermissionClient?: ToolPermissionClient;
+  assistantMessageId: string;
 }): Promise<ToolExecutionResponse> {
   getToolDefinition(input.toolDefinitions, input.toolName, input.executionMode);
   const toolCallId = crypto.randomUUID();
   const response = await input.toolExecutionClient.execute({
     trace: { ...input.trace, tool_call_id: toolCallId },
+    assistant_message_id: input.assistantMessageId,
     tool_name: input.toolName,
     input: input.args,
     execution_mode: input.executionMode,
@@ -138,6 +140,7 @@ async function executeTool(input: {
 
   const approvedResponse = await input.toolExecutionClient.execute({
     trace: { ...input.trace, tool_call_id: toolCallId },
+    assistant_message_id: input.assistantMessageId,
     tool_name: input.toolName,
     input: input.args,
     execution_mode: input.executionMode,
@@ -193,20 +196,24 @@ async function emitCompletedRun(input: {
   store: ConversationStore;
   stream: AgentEventStream;
   trace: TraceEnvelope;
+  assistantMessageId: string;
   assistantText: string;
   toolCallCount: number;
   contextPacketId: string | null;
 }) {
   await input.stream.emitMessageDelta(input.assistantText);
-  const assistantMessage = await input.store.appendMessage({
-    conversationId: input.trace.conversation_id,
-    role: "assistant",
+  const assistantMessage = await input.store.updateMessage(input.assistantMessageId, {
     content: input.assistantText,
+    requestId: input.trace.request_id,
+    agentRunId: input.trace.agent_run_id,
     metadata: {
       agent_run_id: input.trace.agent_run_id,
       request_id: input.trace.request_id,
     },
   });
+  if (!assistantMessage) {
+    throw new Error("assistant message not found");
+  }
   await input.stream.emitEvent("message.completed", {
     message_id: assistantMessage.id,
     content_preview: input.assistantText.slice(0, 300),
@@ -228,6 +235,7 @@ export async function runScriptedMode(input: {
   toolDefinitions: ToolDefinition[];
   toolExecutionClient: ToolExecutionClient;
   toolPermissionClient?: ToolPermissionClient;
+  assistantMessageId: string;
   contextPacketId: string | null;
 }): Promise<ScriptedRunResult> {
   let toolCallCount = 0;
@@ -237,6 +245,7 @@ export async function runScriptedMode(input: {
       toolDefinitions: input.toolDefinitions,
       toolExecutionClient: input.toolExecutionClient,
       trace: input.trace,
+      assistantMessageId: input.assistantMessageId,
       executionMode: input.executionMode,
       stream: input.stream,
       toolName,
@@ -423,6 +432,7 @@ export async function completeScriptedRun(input: {
   store: ConversationStore;
   stream: AgentEventStream;
   trace: TraceEnvelope;
+  assistantMessageId: string;
   result: ScriptedRunResult;
   contextPacketId: string | null;
 }): Promise<void> {
@@ -433,6 +443,7 @@ export async function completeScriptedRun(input: {
     store: input.store,
     stream: input.stream,
     trace: input.trace,
+    assistantMessageId: input.assistantMessageId,
     assistantText: input.result.assistantText,
     toolCallCount: input.result.toolCallCount,
     contextPacketId: input.contextPacketId,

@@ -64,10 +64,23 @@ export interface ConversationRecord {
 export interface ConversationMessageRecord {
   id: string;
   conversation_id: string;
-  role: "user" | "assistant";
+  role: "user" | "assistant" | "tool";
   content: string;
+  request_id: string | null;
+  agent_run_id: string | null;
+  sequence: number | null;
   metadata_json: Record<string, unknown>;
+  tool_permission_requests?: ToolPermissionRequestSummary[];
   created_at: string;
+}
+
+export interface ToolPermissionRequestSummary {
+  permission_request_id: string;
+  tool_call_id: string;
+  tool_name: string;
+  status: ToolPermissionStatus;
+  prompt: Record<string, unknown>;
+  response?: Record<string, unknown> | null;
 }
 
 export interface ConversationDetail extends ConversationRecord {
@@ -178,10 +191,24 @@ export interface ConversationStore {
   updateConversation(conversationId: string, input: ConversationUpdateBody): Promise<ConversationDetail | null>;
   appendMessage(input: {
     conversationId: string;
-    role: "user" | "assistant";
+    role: "user" | "assistant" | "tool";
     content: string;
+    requestId?: string | null;
+    agentRunId?: string | null;
+    sequence?: number | null;
     metadata?: Record<string, unknown>;
   }): Promise<ConversationMessageRecord>;
+  updateMessage(
+    messageId: string,
+    input: {
+      content?: string;
+      requestId?: string | null;
+      agentRunId?: string | null;
+      sequence?: number | null;
+      metadata?: Record<string, unknown>;
+    },
+  ): Promise<ConversationMessageRecord | null>;
+  deleteMessage(messageId: string): Promise<void>;
   appendEvent(input: Omit<PersistedEvent, "id" | "created_at"> & { created_at?: string }): Promise<PersistedEvent>;
 }
 
@@ -203,6 +230,7 @@ export interface ToolRegistryClient {
 export interface ToolExecutionClient {
   execute(input: {
     trace: TraceEnvelope;
+    assistant_message_id: string;
     tool_name: string;
     input: Record<string, unknown>;
     execution_mode: ExecutionMode;

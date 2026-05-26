@@ -161,7 +161,11 @@ export class MemoryConversationStore implements ConversationStore {
           conversation_id: "",
           role: "user",
           content: initialContent,
+          request_id: null,
+          agent_run_id: null,
+          sequence: null,
           metadata_json: input.initial_message.metadata ?? {},
+          tool_permission_requests: [],
           created_at: now,
         },
       ],
@@ -197,8 +201,11 @@ export class MemoryConversationStore implements ConversationStore {
 
   async appendMessage(input: {
     conversationId: string;
-    role: "user" | "assistant";
+    role: "user" | "assistant" | "tool";
     content: string;
+    requestId?: string | null;
+    agentRunId?: string | null;
+    sequence?: number | null;
     metadata?: Record<string, unknown>;
   }): Promise<ConversationMessageRecord> {
     const conversation = this.conversations.get(input.conversationId);
@@ -210,12 +217,50 @@ export class MemoryConversationStore implements ConversationStore {
       conversation_id: input.conversationId,
       role: input.role,
       content: input.content,
+      request_id: input.requestId ?? null,
+      agent_run_id: input.agentRunId ?? null,
+      sequence: input.sequence ?? null,
       metadata_json: input.metadata ?? {},
+      tool_permission_requests: [],
       created_at: new Date().toISOString(),
     };
     conversation.messages.push(record);
     conversation.updated_at = new Date().toISOString();
     return structuredClone(record);
+  }
+
+  async updateMessage(
+    messageId: string,
+    input: {
+      content?: string;
+      requestId?: string | null;
+      agentRunId?: string | null;
+      sequence?: number | null;
+      metadata?: Record<string, unknown>;
+    },
+  ): Promise<ConversationMessageRecord | null> {
+    for (const conversation of this.conversations.values()) {
+      const message = conversation.messages.find((candidate) => candidate.id === messageId);
+      if (!message) continue;
+      if ("content" in input) message.content = input.content ?? "";
+      if ("requestId" in input) message.request_id = input.requestId ?? null;
+      if ("agentRunId" in input) message.agent_run_id = input.agentRunId ?? null;
+      if ("sequence" in input) message.sequence = input.sequence ?? null;
+      if ("metadata" in input) message.metadata_json = input.metadata ?? {};
+      conversation.updated_at = new Date().toISOString();
+      return structuredClone(message);
+    }
+    return null;
+  }
+
+  async deleteMessage(messageId: string): Promise<void> {
+    for (const conversation of this.conversations.values()) {
+      const index = conversation.messages.findIndex((candidate) => candidate.id === messageId);
+      if (index < 0) continue;
+      conversation.messages.splice(index, 1);
+      conversation.updated_at = new Date().toISOString();
+      return;
+    }
   }
 
   async appendEvent(input: Omit<PersistedEvent, "id" | "created_at"> & { created_at?: string }): Promise<PersistedEvent> {
@@ -308,6 +353,7 @@ export class FakeToolRegistryClient implements ToolRegistryClient {
 export class FakeToolExecutionClient implements ToolExecutionClient {
   calls: Array<{
     tool_name: string;
+    assistant_message_id: string;
     input: Record<string, unknown>;
     trace: TraceEnvelope;
     execution_mode: ExecutionMode;
@@ -319,6 +365,7 @@ export class FakeToolExecutionClient implements ToolExecutionClient {
       | ToolExecutionResponse
       | ((input: {
           trace: TraceEnvelope;
+          assistant_message_id: string;
           tool_name: string;
           input: Record<string, unknown>;
           execution_mode: ExecutionMode;
@@ -329,6 +376,7 @@ export class FakeToolExecutionClient implements ToolExecutionClient {
 
   async execute(input: {
     trace: TraceEnvelope;
+    assistant_message_id: string;
     tool_name: string;
     input: Record<string, unknown>;
     execution_mode: ExecutionMode;
@@ -337,6 +385,7 @@ export class FakeToolExecutionClient implements ToolExecutionClient {
   }): Promise<ToolExecutionResponse> {
     this.calls.push({
       tool_name: input.tool_name,
+      assistant_message_id: input.assistant_message_id,
       input: input.input,
       trace: input.trace,
       execution_mode: input.execution_mode,

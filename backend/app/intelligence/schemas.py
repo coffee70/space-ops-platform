@@ -23,6 +23,7 @@ class ToolExecutionRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     conversation_id: UUID | None = None
+    assistant_message_id: UUID | None = None
     agent_run_id: UUID
     request_id: UUID
     tool_call_id: UUID

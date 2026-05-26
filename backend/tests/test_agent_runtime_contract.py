@@ -60,6 +60,7 @@ async def test_tool_execution_returns_raw_events_and_keeps_tool_call_record(monk
     response = await tool_execution.execute_tool(
         tool_execution.ToolExecutionRequest(
             conversation_id="11111111-1111-1111-1111-111111111111",
+            assistant_message_id="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
             agent_run_id="22222222-2222-2222-2222-222222222222",
             request_id="33333333-3333-3333-3333-333333333333",
             tool_call_id="44444444-4444-4444-4444-444444444444",
@@ -118,6 +119,7 @@ async def test_tool_execution_returns_started_then_failed_on_mapped_failure(monk
     response = await tool_execution.execute_tool(
         tool_execution.ToolExecutionRequest(
             conversation_id="11111111-1111-1111-1111-111111111111",
+            assistant_message_id="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
             agent_run_id="22222222-2222-2222-2222-222222222222",
             request_id="33333333-3333-3333-3333-333333333333",
             tool_call_id="44444444-4444-4444-4444-444444444444",
@@ -152,6 +154,7 @@ async def test_tool_execution_pre_execution_rejections_do_not_emit_started_or_pe
         await tool_execution.execute_tool(
             tool_execution.ToolExecutionRequest(
                 conversation_id="11111111-1111-1111-1111-111111111111",
+                assistant_message_id="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
                 agent_run_id="22222222-2222-2222-2222-222222222222",
                 request_id="33333333-3333-3333-3333-333333333333",
                 tool_call_id="44444444-4444-4444-4444-444444444444",
@@ -187,6 +190,7 @@ async def test_tool_execution_pre_execution_rejections_do_not_emit_started_or_pe
         await tool_execution.execute_tool(
             tool_execution.ToolExecutionRequest(
                 conversation_id="11111111-1111-1111-1111-111111111111",
+                assistant_message_id="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
                 agent_run_id="22222222-2222-2222-2222-222222222222",
                 request_id="33333333-3333-3333-3333-333333333333",
                 tool_call_id="44444444-4444-4444-4444-444444444444",
@@ -222,6 +226,7 @@ async def test_tool_execution_pre_execution_rejections_do_not_emit_started_or_pe
         await tool_execution.execute_tool(
             tool_execution.ToolExecutionRequest(
                 conversation_id="11111111-1111-1111-1111-111111111111",
+                assistant_message_id="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
                 agent_run_id="22222222-2222-2222-2222-222222222222",
                 request_id="33333333-3333-3333-3333-333333333333",
                 tool_call_id="44444444-4444-4444-4444-444444444444",
@@ -257,6 +262,7 @@ async def test_tool_execution_pre_execution_rejections_do_not_emit_started_or_pe
         await tool_execution.execute_tool(
             tool_execution.ToolExecutionRequest(
                 conversation_id="11111111-1111-1111-1111-111111111111",
+                assistant_message_id="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
                 agent_run_id="22222222-2222-2222-2222-222222222222",
                 request_id="33333333-3333-3333-3333-333333333333",
                 tool_call_id="44444444-4444-4444-4444-444444444444",
@@ -297,6 +303,7 @@ async def test_tool_execution_pre_execution_rejections_do_not_emit_started_or_pe
         await tool_execution.execute_tool(
             tool_execution.ToolExecutionRequest(
                 conversation_id="11111111-1111-1111-1111-111111111111",
+                assistant_message_id="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
                 agent_run_id="22222222-2222-2222-2222-222222222222",
                 request_id="33333333-3333-3333-3333-333333333333",
                 tool_call_id="44444444-4444-4444-4444-444444444444",
@@ -322,6 +329,7 @@ async def test_tool_execution_pre_execution_rejections_do_not_emit_started_or_pe
         await tool_execution.execute_tool(
             tool_execution.ToolExecutionRequest(
                 conversation_id="11111111-1111-1111-1111-111111111111",
+                assistant_message_id="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
                 agent_run_id="22222222-2222-2222-2222-222222222222",
                 request_id="33333333-3333-3333-3333-333333333333",
                 tool_call_id="44444444-4444-4444-4444-444444444444",
@@ -344,6 +352,7 @@ async def test_tool_execution_pre_execution_rejections_do_not_emit_started_or_pe
         await tool_execution.execute_tool(
             tool_execution.ToolExecutionRequest(
                 conversation_id="11111111-1111-1111-1111-111111111111",
+                assistant_message_id="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
                 agent_run_id="22222222-2222-2222-2222-222222222222",
                 request_id="33333333-3333-3333-3333-333333333333",
                 tool_call_id="44444444-4444-4444-4444-444444444444",
@@ -392,6 +401,7 @@ async def test_write_tools_reject_read_only_mode(tool_name: str) -> None:
         await tool_execution.execute_tool(
             tool_execution.ToolExecutionRequest(
                 conversation_id="11111111-1111-1111-1111-111111111111",
+                assistant_message_id="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
                 agent_run_id="22222222-2222-2222-2222-222222222222",
                 request_id="33333333-3333-3333-3333-333333333333",
                 tool_call_id="44444444-4444-4444-4444-444444444444",
@@ -507,6 +517,7 @@ async def test_list_available_tools_returns_filtered_supported_metadata(monkeypa
     response = await tool_execution.execute_tool(
         tool_execution.ToolExecutionRequest(
             conversation_id="11111111-1111-1111-1111-111111111111",
+            assistant_message_id="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
             agent_run_id="22222222-2222-2222-2222-222222222222",
             request_id="33333333-3333-3333-3333-333333333333",
             tool_call_id="44444444-4444-4444-4444-444444444444",
@@ -565,6 +576,7 @@ async def test_trigger_document_reingestion_rejects_non_execute_modes() -> None:
         await tool_execution.execute_tool(
             tool_execution.ToolExecutionRequest(
                 conversation_id="11111111-1111-1111-1111-111111111111",
+                assistant_message_id="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
                 agent_run_id="22222222-2222-2222-2222-222222222222",
                 request_id="33333333-3333-3333-3333-333333333333",
                 tool_call_id="44444444-4444-4444-4444-444444444444",
