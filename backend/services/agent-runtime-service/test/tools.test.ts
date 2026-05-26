@@ -148,7 +148,7 @@ test("filterToolDefinitionsForExecutionMode exposes permission-required tools", 
       category: "deployment",
       layer_target: "layer1",
       read_write_classification: "write",
-      required_execution_mode: "governed_execute",
+      required_execution_mode: "execute",
       enabled: true,
       requires_confirmation: false,
       mode_policy_json: {
@@ -165,13 +165,13 @@ test("filterToolDefinitionsForExecutionMode exposes permission-required tools", 
       category: "resource_delete",
       layer_target: "layer1",
       read_write_classification: "destructive_write",
-      required_execution_mode: "governed_execute",
+      required_execution_mode: "execute",
       enabled: true,
       requires_confirmation: false,
       mode_policy_json: {
         read_only: "disabled",
-        suggest: "disabled",
-        execute: "disabled",
+        suggest: "requires_permission",
+        execute: "requires_permission",
         governed_execute: "requires_permission",
       },
       input_schema_json: { type: "object", properties: {}, additionalProperties: false },
@@ -181,6 +181,11 @@ test("filterToolDefinitionsForExecutionMode exposes permission-required tools", 
   assert.deepEqual(filterToolDefinitionsForExecutionMode(definitions, "read_only").map((tool) => tool.name), []);
   assert.deepEqual(filterToolDefinitionsForExecutionMode(definitions, "suggest").map((tool) => tool.name), [
     "deploy_preview_change",
+    "delete_managed_resources",
+  ]);
+  assert.deepEqual(filterToolDefinitionsForExecutionMode(definitions, "execute").map((tool) => tool.name), [
+    "deploy_preview_change",
+    "delete_managed_resources",
   ]);
   assert.deepEqual(filterToolDefinitionsForExecutionMode(definitions, "governed_execute").map((tool) => tool.name), [
     "deploy_preview_change",
@@ -195,7 +200,7 @@ test("permission-required tool waits, re-executes with permission request id, an
     category: "deployment",
     layer_target: "layer1",
     read_write_classification: "write",
-    required_execution_mode: "governed_execute",
+    required_execution_mode: "execute",
     enabled: true,
     requires_confirmation: false,
     mode_policy_json: {
@@ -295,7 +300,7 @@ test("permission-required tool returns denial result without executing approved 
     category: "resource_delete",
     layer_target: "layer1",
     read_write_classification: "destructive_write",
-    required_execution_mode: "governed_execute",
+    required_execution_mode: "execute",
     enabled: true,
     requires_confirmation: false,
     mode_policy_json: {
@@ -309,7 +314,7 @@ test("permission-required tool returns denial result without executing approved 
   let executionCount = 0;
   const tools = createToolSet({
     toolDefinitions: [definition],
-    executionMode: "governed_execute",
+    executionMode: "execute",
     trace: {
       conversation_id: CONVERSATION_ID,
       agent_run_id: AGENT_RUN_ID,

@@ -155,10 +155,15 @@ def test_phase3_write_deploy_delete_tools_remain_metadata_only_and_discoverable(
     assert seeded["create_working_branch"].required_execution_mode == "execute"
     assert seeded["write_source_file"].required_execution_mode == "execute"
     assert seeded["create_commit"].required_execution_mode == "execute"
-    assert seeded["deploy_service_or_application"].required_execution_mode == "governed_execute"
+    assert seeded["deploy_service_or_application"].required_execution_mode == "execute"
+    assert seeded["deploy_service_or_application"].mode_policy_json["execute"] == "requires_permission"
     assert seeded["deploy_preview_change"].mode_policy_json["execute"] == "requires_permission"
+    assert seeded["deploy_preview_change"].required_execution_mode == "execute"
+    assert seeded["revert_preview_change"].required_execution_mode == "execute"
     assert seeded["revert_preview_change"].mode_policy_json["suggest"] == "requires_permission"
-    assert seeded["delete_managed_resources"].required_execution_mode == "governed_execute"
+    assert seeded["revert_preview_change"].mode_policy_json["execute"] == "requires_permission"
+    assert seeded["delete_managed_resources"].required_execution_mode == "execute"
+    assert seeded["delete_managed_resources"].mode_policy_json["execute"] == "requires_permission"
     assert seeded["delete_managed_resources"].mode_policy_json["governed_execute"] == "requires_permission"
     assert all(seeded[name].enabled is True for name in (
         "create_working_branch",

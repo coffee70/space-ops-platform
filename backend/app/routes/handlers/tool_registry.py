@@ -465,7 +465,7 @@ def seed_tools(db: Session = Depends(get_db)):
     ]
     for name, description, cat, lt, bk in writes:
         read_write = 'destructive_write' if name == 'delete_managed_resources' else 'write'
-        execution_mode = 'governed_execute' if name in {'deploy_service_or_application', 'deploy_preview_change', 'revert_preview_change', 'delete_managed_resources'} else 'execute'
+        execution_mode = 'execute'
         if name in {'deploy_preview_change', 'revert_preview_change', 'deploy_service_or_application'}:
             mode_policy = DEPLOY_REVERT_POLICY
         elif name == 'delete_managed_resources':

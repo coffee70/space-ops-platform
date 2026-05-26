@@ -52,23 +52,23 @@ class _Db:
 
 
 def _tool(**overrides):
-    return SimpleNamespace(
-        name="deploy_preview_change",
-        enabled=True,
-        category="deployment",
-        read_write_classification="write",
-        requires_confirmation=False,
-        required_execution_mode="governed_execute",
-        mode_policy_json={
+    defaults = {
+        "name": "deploy_preview_change",
+        "enabled": True,
+        "category": "deployment",
+        "read_write_classification": "write",
+        "requires_confirmation": False,
+        "required_execution_mode": "execute",
+        "mode_policy_json": {
             "read_only": "disabled",
             "suggest": "requires_permission",
             "execute": "requires_permission",
             "governed_execute": "enabled",
         },
-        permission_prompt_json={},
-        input_schema_json=tool_registry.TOOL_INPUT_SCHEMAS["deploy_preview_change"],
-        **overrides,
-    )
+        "permission_prompt_json": {},
+        "input_schema_json": tool_registry.TOOL_INPUT_SCHEMAS["deploy_preview_change"],
+    }
+    return SimpleNamespace(**{**defaults, **overrides})
 
 
 @pytest.mark.anyio
@@ -479,6 +479,66 @@ async def test_permission_required_tool_does_not_execute_before_approval(monkeyp
     assert [type(item) for item in db.added] == [ToolCall, ToolPermissionRequest]
     assert db.added[0].status == "permission_required"
     assert db.added[1].status == "pending"
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    ("tool_name", "tool_input"),
+    [
+        ("deploy_service_or_application", {"unit_id": "phase3-test-fixture-service", "branch": "feature/phase3-no-llm"}),
+        ("delete_managed_resources", {"mode": "managed_unit", "unit_id": "phase3-test-fixture-service"}),
+    ],
+)
+async def test_direct_deploy_and_delete_require_permission_in_execute_mode(monkeypatch, tool_name: str, tool_input: dict) -> None:
+    mapped_called = False
+
+    async def fake_mapped(*_args, **_kwargs):
+        nonlocal mapped_called
+        mapped_called = True
+        return {}
+
+    mode_policy = {
+        "read_only": "disabled",
+        "suggest": "requires_permission",
+        "execute": "requires_permission",
+        "governed_execute": "requires_permission" if tool_name == "delete_managed_resources" else "enabled",
+    }
+    monkeypatch.setattr(tool_execution, "_execute_mapped_tool", fake_mapped)
+    db = _Db(
+        tool=_tool(
+            name=tool_name,
+            category="resource_delete" if tool_name == "delete_managed_resources" else "deployment",
+            read_write_classification="destructive_write" if tool_name == "delete_managed_resources" else "write",
+            required_execution_mode="execute",
+            mode_policy_json=mode_policy,
+            input_schema_json=tool_registry.TOOL_INPUT_SCHEMAS[tool_name],
+        )
+    )
+
+    response = await tool_execution.execute_tool(
+        tool_execution.ToolExecutionRequest(
+            conversation_id="11111111-1111-1111-1111-111111111111",
+            agent_run_id="22222222-2222-2222-2222-222222222222",
+            request_id="33333333-3333-3333-3333-333333333333",
+            tool_call_id="44444444-4444-4444-4444-444444444444",
+            tool_name=tool_name,
+            input=tool_input,
+            execution_mode="execute",
+        ),
+        request=_request(
+            {
+                "x-agent-run-id": "22222222-2222-2222-2222-222222222222",
+                "x-request-id": "33333333-3333-3333-3333-333333333333",
+                "x-tool-call-id": "44444444-4444-4444-4444-444444444444",
+            }
+        ),
+        db=db,  # type: ignore[arg-type]
+    )
+
+    assert response["status"] == "permission_required"
+    assert response["raw_events"][0]["payload"]["tool_name"] == tool_name
+    assert response["raw_events"][0]["payload"]["execution_mode"] == "execute"
+    assert mapped_called is False
 
 
 def test_approve_permission_marks_request_approved_and_emits_event() -> None:
