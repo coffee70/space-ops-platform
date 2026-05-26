@@ -22,6 +22,9 @@ class Conversation(Base):
     mission_id: Mapped[str | None] = mapped_column(Text, nullable=True)
     vehicle_id: Mapped[str | None] = mapped_column(Text, nullable=True)
     execution_mode: Mapped[str] = mapped_column(Text, nullable=False, default="read_only")
+    selected_model_id: Mapped[str | None] = mapped_column(Text, nullable=True)
+    title_source: Mapped[str | None] = mapped_column(Text, nullable=True)
+    title_model_id: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
 

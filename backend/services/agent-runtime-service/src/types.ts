@@ -36,7 +36,16 @@ export interface ConversationCreateBody {
   mission_id?: string | null;
   vehicle_id?: string | null;
   execution_mode?: ExecutionMode;
+  selected_model_id?: string | null;
   initial_message: ConversationInitialMessageBody;
+}
+
+export interface ConversationUpdateBody {
+  title?: string | null;
+  execution_mode?: ExecutionMode;
+  selected_model_id?: string | null;
+  title_source?: "manual" | "generated" | "initial" | null;
+  title_model_id?: string | null;
 }
 
 export interface ConversationRecord {
@@ -45,6 +54,9 @@ export interface ConversationRecord {
   mission_id: string | null;
   vehicle_id: string | null;
   execution_mode: ExecutionMode;
+  selected_model_id: string | null;
+  title_source: "manual" | "generated" | "initial" | null;
+  title_model_id: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -163,6 +175,7 @@ export interface ConversationStore {
   listConversations(): Promise<ConversationRecord[]>;
   createConversation(input: ConversationCreateBody): Promise<ConversationDetail>;
   getConversation(conversationId: string): Promise<ConversationDetail | null>;
+  updateConversation(conversationId: string, input: ConversationUpdateBody): Promise<ConversationDetail | null>;
   appendMessage(input: {
     conversationId: string;
     role: "user" | "assistant";
@@ -428,6 +441,7 @@ export interface RuntimeConfig {
   openAiApiKey: string | null;
   openAiBaseUrl: string | null;
   modelId: string;
+  titleGenerationModelId: string | null;
   maxSteps: number;
   requestTimeoutMs: number;
   scriptedMode: string | null;

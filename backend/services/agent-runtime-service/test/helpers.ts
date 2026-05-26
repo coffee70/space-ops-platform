@@ -5,6 +5,7 @@ import type {
   ConversationDetail,
   ConversationMessageRecord,
   ConversationRecord,
+  ConversationUpdateBody,
   ConversationStore,
   ExecutionMode,
   ModelRunner,
@@ -32,6 +33,7 @@ export function baseRuntimeConfig(overrides: Partial<RuntimeConfig> = {}): Runti
     openAiApiKey: null,
     openAiBaseUrl: null,
     modelId: "gpt-4o-mini",
+    titleGenerationModelId: null,
     maxSteps: 5,
     requestTimeoutMs: 1000,
     scriptedMode: null,
@@ -147,6 +149,9 @@ export class MemoryConversationStore implements ConversationStore {
       mission_id: input.mission_id ?? null,
       vehicle_id: input.vehicle_id ?? null,
       execution_mode: input.execution_mode ?? "read_only",
+      selected_model_id: input.selected_model_id ?? null,
+      title_source: input.title ? "manual" : "initial",
+      title_model_id: null,
       created_at: now,
       updated_at: now,
       events: [],
@@ -176,6 +181,18 @@ export class MemoryConversationStore implements ConversationStore {
       ...conversation,
       events,
     });
+  }
+
+  async updateConversation(conversationId: string, input: ConversationUpdateBody): Promise<ConversationDetail | null> {
+    const conversation = this.conversations.get(conversationId);
+    if (!conversation) return null;
+    if ("title" in input) conversation.title = input.title ?? null;
+    if ("execution_mode" in input && input.execution_mode) conversation.execution_mode = input.execution_mode;
+    if ("selected_model_id" in input) conversation.selected_model_id = input.selected_model_id ?? null;
+    if ("title_source" in input) conversation.title_source = input.title_source ?? null;
+    if ("title_model_id" in input) conversation.title_model_id = input.title_model_id ?? null;
+    conversation.updated_at = new Date().toISOString();
+    return this.getConversation(conversationId);
   }
 
   async appendMessage(input: {

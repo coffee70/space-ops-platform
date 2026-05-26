@@ -5,6 +5,7 @@ import type {
   ConversationDetail,
   ConversationMessageRecord,
   ConversationRecord,
+  ConversationUpdateBody,
   ConversationStore,
   PersistedEvent,
 } from "../types.js";
@@ -16,6 +17,9 @@ function mapConversation(row: Record<string, unknown>): ConversationRecord {
     mission_id: (row.mission_id as string | null) ?? null,
     vehicle_id: (row.vehicle_id as string | null) ?? null,
     execution_mode: String(row.execution_mode) as ConversationRecord["execution_mode"],
+    selected_model_id: (row.selected_model_id as string | null) ?? null,
+    title_source: (row.title_source as ConversationRecord["title_source"]) ?? null,
+    title_model_id: (row.title_model_id as string | null) ?? null,
     created_at: new Date(String(row.created_at)).toISOString(),
     updated_at: new Date(String(row.updated_at)).toISOString(),
   };
@@ -56,7 +60,7 @@ export class PgConversationStore implements ConversationStore {
 
   async listConversations(): Promise<ConversationRecord[]> {
     const result = await this.#pool.query(
-      `SELECT c.id::text, c.title, c.mission_id, c.vehicle_id, c.execution_mode, c.created_at, c.updated_at
+      `SELECT c.id::text, c.title, c.mission_id, c.vehicle_id, c.execution_mode, c.selected_model_id, c.title_source, c.title_model_id, c.created_at, c.updated_at
        FROM ai_conversations c
        WHERE EXISTS (
          SELECT 1 FROM ai_conversation_messages m WHERE m.conversation_id = c.id
@@ -78,10 +82,18 @@ export class PgConversationStore implements ConversationStore {
     try {
       await client.query("BEGIN");
       const conversationResult = await client.query(
-        `INSERT INTO ai_conversations (id, title, created_by, mission_id, vehicle_id, execution_mode, created_at, updated_at)
-         VALUES ($1::uuid, $2, NULL, $3, $4, $5, now(), now())
-         RETURNING id::text, title, mission_id, vehicle_id, execution_mode, created_at, updated_at`,
-        [id, input.title ?? null, input.mission_id ?? null, input.vehicle_id ?? null, input.execution_mode ?? "read_only"],
+        `INSERT INTO ai_conversations (id, title, created_by, mission_id, vehicle_id, execution_mode, selected_model_id, title_source, created_at, updated_at)
+         VALUES ($1::uuid, $2, NULL, $3, $4, $5, $6, $7, now(), now())
+         RETURNING id::text, title, mission_id, vehicle_id, execution_mode, selected_model_id, title_source, title_model_id, created_at, updated_at`,
+        [
+          id,
+          input.title ?? null,
+          input.mission_id ?? null,
+          input.vehicle_id ?? null,
+          input.execution_mode ?? "read_only",
+          input.selected_model_id ?? null,
+          input.title ? "manual" : "initial",
+        ],
       );
       const messageResult = await client.query(
         `INSERT INTO ai_conversation_messages (id, conversation_id, role, content, metadata_json, created_at)
@@ -105,7 +117,7 @@ export class PgConversationStore implements ConversationStore {
 
   async getConversation(conversationId: string): Promise<ConversationDetail | null> {
     const conversationResult = await this.#pool.query(
-      `SELECT c.id::text, c.title, c.mission_id, c.vehicle_id, c.execution_mode, c.created_at, c.updated_at
+      `SELECT c.id::text, c.title, c.mission_id, c.vehicle_id, c.execution_mode, c.selected_model_id, c.title_source, c.title_model_id, c.created_at, c.updated_at
        FROM ai_conversations c
        WHERE c.id = $1::uuid
          AND EXISTS (
@@ -139,6 +151,33 @@ export class PgConversationStore implements ConversationStore {
       messages: messagesResult.rows.map((row) => mapMessage(row as Record<string, unknown>)),
       events: eventsResult.rows.map((row) => mapEvent(row as Record<string, unknown>)),
     };
+  }
+
+  async updateConversation(conversationId: string, input: ConversationUpdateBody): Promise<ConversationDetail | null> {
+    const assignments: string[] = [];
+    const values: unknown[] = [];
+    const add = (sql: string, value: unknown) => {
+      values.push(value);
+      assignments.push(`${sql} = $${values.length}`);
+    };
+
+    if ("title" in input) add("title", input.title ?? null);
+    if ("execution_mode" in input) add("execution_mode", input.execution_mode);
+    if ("selected_model_id" in input) add("selected_model_id", input.selected_model_id ?? null);
+    if ("title_source" in input) add("title_source", input.title_source ?? null);
+    if ("title_model_id" in input) add("title_model_id", input.title_model_id ?? null);
+
+    if (assignments.length > 0) {
+      values.push(conversationId);
+      await this.#pool.query(
+        `UPDATE ai_conversations
+         SET ${assignments.join(", ")}, updated_at = now()
+         WHERE id = $${values.length}::uuid`,
+        values,
+      );
+    }
+
+    return this.getConversation(conversationId);
   }
 
   async appendMessage(input: {

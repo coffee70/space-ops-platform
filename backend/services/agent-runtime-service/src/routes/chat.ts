@@ -8,6 +8,7 @@ import { AgentEventStream } from "../events/stream.js";
 import { RunSequencer } from "../events/sequencer.js";
 import { runFallback } from "../fallback.js";
 import { completeScriptedRun, resolveScriptedMode, runScriptedMode } from "../scripted.js";
+import { maybeGenerateConversationTitle } from "../title-generation.js";
 import { createTrace } from "../trace.js";
 import type {
   ChatInputMessage,
@@ -249,7 +250,7 @@ export function registerChatRoutes(app: Hono, dependencies: RunDependencies): vo
       latestUserMessage: latestMessage.content.trim(),
       requestMessages: payload.messages,
       trace,
-      modelId: payload.model_id,
+      modelId: payload.model_id ?? conversation.selected_model_id,
       persistedUserMessageId: payload.persisted_user_message_id,
       abortSignal: c.req.raw.signal,
     }).catch((error) => {
@@ -394,6 +395,7 @@ async function orchestrateChat(input: {
         result,
         contextPacketId: context.context_packet_id,
       });
+      await maybeGenerateConversationTitle({ dependencies, conversationId: input.trace.conversation_id });
       await stream.close();
       return;
     }
@@ -440,6 +442,7 @@ async function orchestrateChat(input: {
             },
           }),
       });
+      await maybeGenerateConversationTitle({ dependencies, conversationId: input.trace.conversation_id });
       await stream.close();
       return;
     }
@@ -608,6 +611,7 @@ async function orchestrateChat(input: {
           }
         : {}),
     });
+    await maybeGenerateConversationTitle({ dependencies, conversationId: input.trace.conversation_id });
     await stream.close();
   } catch (error) {
     if (isRunCancelled(error, input.abortSignal)) {

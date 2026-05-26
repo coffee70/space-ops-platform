@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from datetime import datetime, timezone
 
 from fastapi import Depends, HTTPException, Query
@@ -10,6 +11,8 @@ from app.intelligence.tool_metadata import tool_summary
 from app.intelligence.tool_permissions import DEPLOY_REVERT_POLICY, DESTRUCTIVE_POLICY, READ_ONLY_POLICY, WRITE_POLICY
 from app.intelligence.tooling import API_INVENTORY
 from app.models.intelligence import ToolDefinition
+
+logger = logging.getLogger(__name__)
 
 STRICT_EMPTY_INPUT = {'type': 'object', 'properties': {}, 'additionalProperties': False}
 
@@ -349,8 +352,9 @@ def get_tool(tool_name: str, db: Session = Depends(get_db)):
     }
 
 
-def seed_tools(db: Session = Depends(get_db)):
-    seeded = 0
+def reconcile_tool_definitions(db: Session) -> dict:
+    inserted = 0
+    updated = 0
 
     def upsert(
         *,
@@ -365,7 +369,7 @@ def seed_tools(db: Session = Depends(get_db)):
         mode_policy: dict | None = None,
         permission_prompt: dict | None = None,
     ):
-        nonlocal seeded
+        nonlocal inserted, updated
         existing = db.query(ToolDefinition).filter(ToolDefinition.name == name).one_or_none()
         payload = {
             'description': description,
@@ -387,12 +391,17 @@ def seed_tools(db: Session = Depends(get_db)):
             'updated_at': datetime.now(timezone.utc),
         }
         if existing:
+            changed = False
             for key, value in payload.items():
-                setattr(existing, key, value)
+                if getattr(existing, key) != value:
+                    setattr(existing, key, value)
+                    changed = True
+            if changed:
+                updated += 1
             return
         tool = ToolDefinition(name=name, created_at=datetime.now(timezone.utc), **payload)
         db.add(tool)
-        seeded += 1
+        inserted += 1
 
     read_tools = [
         ('list_available_tools', 'List currently registered supported tools.', 'platform_discovery', 'layer2', 'read_only'),
@@ -476,10 +485,24 @@ def seed_tools(db: Session = Depends(get_db)):
 
     stale_removed = _delete_stale_tool_definitions(db)
     db.flush()
-
-    return {
-        'seeded': seeded,
+    total = db.query(ToolDefinition).count()
+    summary = {
+        'seeded': inserted,
+        'inserted': inserted,
+        'updated': updated,
         'removed_stale_definitions': stale_removed,
-        'total': db.query(ToolDefinition).count(),
+        'total': total,
         'inventory_sections': list(API_INVENTORY.keys()),
     }
+    logger.info(
+        "tool definitions reconciled inserted=%s updated=%s removed_stale=%s total=%s",
+        inserted,
+        updated,
+        stale_removed,
+        total,
+    )
+    return summary
+
+
+def seed_tools(db: Session = Depends(get_db)):
+    return reconcile_tool_definitions(db)

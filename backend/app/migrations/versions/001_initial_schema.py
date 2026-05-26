@@ -412,6 +412,9 @@ def upgrade() -> None:
         sa.Column("mission_id", sa.Text(), nullable=True),
         sa.Column("vehicle_id", sa.Text(), nullable=True),
         sa.Column("execution_mode", sa.Text(), nullable=False, server_default="read_only"),
+        sa.Column("selected_model_id", sa.Text(), nullable=True),
+        sa.Column("title_source", sa.Text(), nullable=True),
+        sa.Column("title_model_id", sa.Text(), nullable=True),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
     )

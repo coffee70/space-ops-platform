@@ -81,6 +81,9 @@ test("conversation endpoints create, list, and fetch messages", async () => {
     mission_id: null,
     vehicle_id: null,
     execution_mode: "read_only",
+    selected_model_id: null,
+    title_source: "initial",
+    title_model_id: null,
     created_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
     messages: [],
@@ -170,6 +173,38 @@ test("conversation detail returns scoped persisted events in stable order", asyn
     [1, 2],
   );
   assert.equal(detail.events[0].payload.branch, "preview/example");
+});
+
+test("conversation patch updates persisted settings and manual title", async () => {
+  const store = new MemoryConversationStore();
+  const app = createTestApp(store);
+  const conversation = await store.createConversation({
+    title: null,
+    execution_mode: "read_only",
+    initial_message: { role: "user", content: "Tune the model." },
+  });
+
+  const response = await app.request(`/conversations/${conversation.id}`, {
+    method: "PATCH",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      title: "Model Tuning",
+      execution_mode: "execute",
+      selected_model_id: "openai-gpt-5-1-mini",
+    }),
+  });
+
+  assert.equal(response.status, 200);
+  const updated = (await response.json()) as {
+    title: string;
+    execution_mode: string;
+    selected_model_id: string;
+    title_source: string;
+  };
+  assert.equal(updated.title, "Model Tuning");
+  assert.equal(updated.execution_mode, "execute");
+  assert.equal(updated.selected_model_id, "openai-gpt-5-1-mini");
+  assert.equal(updated.title_source, "manual");
 });
 
 test("chat can run against a pre-created first user message without duplicating it", async () => {
