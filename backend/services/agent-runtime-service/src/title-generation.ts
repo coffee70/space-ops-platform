@@ -41,59 +41,64 @@ async function resolveTitleModelId(dependencies: RunDependencies): Promise<strin
 export async function maybeGenerateConversationTitle(input: {
   dependencies: RunDependencies;
   conversationId: string;
-}): Promise<void> {
+}): Promise<ConversationDetail | null> {
   const conversation = await input.dependencies.store.getConversation(input.conversationId);
   if (!conversation || conversation.title_source === "manual" || conversation.title_source === "generated") {
-    return;
+    return null;
   }
   const hasUser = conversation.messages.some((message) => message.role === "user");
   const hasAssistant = conversation.messages.some((message) => message.role === "assistant");
   if (!hasUser || !hasAssistant) {
-    return;
+    return null;
   }
 
-  let title = fallbackTitleFromConversation(conversation);
   let titleModelId: string | null = null;
+  let title: string | null = null;
   try {
     titleModelId = await resolveTitleModelId(input.dependencies);
-    if (titleModelId) {
-      const selection = await input.dependencies.modelCatalog.resolveForChat(titleModelId, "read_only");
-      let generated = "";
-      const messages = conversation.messages
-        .filter((message) => message.role === "user" || message.role === "assistant")
-        .slice(0, 6)
-        .map((message) => ({ role: message.role, content: message.content })) as ChatInputMessage[];
-      for await (const part of input.dependencies.modelRunner.stream({
-        system: TITLE_PROMPT,
-        messages,
-        tools: {},
-        maxSteps: 1,
-        model: selection.runtime,
-      })) {
-        if (part.type === "text-delta") {
-          const fields = part as Record<string, unknown>;
-          generated +=
-            typeof fields.text === "string"
-              ? fields.text
-              : typeof fields.delta === "string"
-                ? fields.delta
-                : typeof fields.textDelta === "string"
-                  ? fields.textDelta
-                  : "";
-        }
-      }
-      title = cleanTitle(generated) || title;
-      titleModelId = selection.option.id;
+    if (!titleModelId) {
+      return null;
     }
+    const selection = await input.dependencies.modelCatalog.resolveForChat(titleModelId, "read_only");
+    let generated = "";
+    const messages = conversation.messages
+      .filter((message) => message.role === "user" || message.role === "assistant")
+      .slice(0, 6)
+      .map((message) => ({ role: message.role, content: message.content })) as ChatInputMessage[];
+    for await (const part of input.dependencies.modelRunner.stream({
+      system: TITLE_PROMPT,
+      messages,
+      tools: {},
+      maxSteps: 1,
+      model: selection.runtime,
+    })) {
+      if (part.type === "text-delta") {
+        const fields = part as Record<string, unknown>;
+        generated +=
+          typeof fields.text === "string"
+            ? fields.text
+            : typeof fields.delta === "string"
+              ? fields.delta
+              : typeof fields.textDelta === "string"
+                ? fields.textDelta
+                : "";
+      }
+    }
+    title = cleanTitle(generated);
+    if (!title) {
+      return null;
+    }
+    titleModelId = selection.option.id;
   } catch (error) {
-    console.warn("[agent-runtime] falling back to deterministic conversation title", error);
+    console.warn("[agent-runtime] conversation title generation failed", error);
+    return null;
   }
 
   const latest = await input.dependencies.store.getConversation(input.conversationId);
-  if (!latest || latest.title_source === "manual") {
-    return;
+  if (!latest || latest.title_source === "manual" || latest.title_source === "generated") {
+    return null;
   }
-  await input.dependencies.store.updateConversation(input.conversationId, {
+  return input.dependencies.store.updateConversation(input.conversationId, {
     title,
     title_source: "generated",
     title_model_id: titleModelId,

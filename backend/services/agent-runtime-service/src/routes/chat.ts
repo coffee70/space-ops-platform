@@ -80,6 +80,26 @@ function recentConversationHasCodeIntent(messages: ChatInputMessage[]): boolean 
   return messages.slice(-8).some((message) => hasCodeIntent(message.content));
 }
 
+async function maybeGenerateAndEmitConversationTitle(input: {
+  dependencies: RunDependencies;
+  conversationId: string;
+  stream: AgentEventStream;
+}): Promise<void> {
+  const conversation = await maybeGenerateConversationTitle({
+    dependencies: input.dependencies,
+    conversationId: input.conversationId,
+  });
+  if (!conversation || conversation.title_source !== "generated" || !conversation.title) {
+    return;
+  }
+  await input.stream.emitEvent("conversation.title.generated", {
+    conversation_id: conversation.id,
+    title: conversation.title,
+    title_source: "generated",
+    title_model_id: conversation.title_model_id,
+  });
+}
+
 function buildRetrievalPlan(message: string, recentMessages: ChatInputMessage[] = []): {
   documents: boolean;
   code: boolean;
@@ -416,7 +436,7 @@ async function orchestrateChat(input: {
         result,
         contextPacketId: context.context_packet_id,
       });
-      await maybeGenerateConversationTitle({ dependencies, conversationId: input.trace.conversation_id });
+      await maybeGenerateAndEmitConversationTitle({ dependencies, conversationId: input.trace.conversation_id, stream });
       await stream.close();
       return;
     }
@@ -466,7 +486,7 @@ async function orchestrateChat(input: {
             return message;
           }),
       });
-      await maybeGenerateConversationTitle({ dependencies, conversationId: input.trace.conversation_id });
+      await maybeGenerateAndEmitConversationTitle({ dependencies, conversationId: input.trace.conversation_id, stream });
       await stream.close();
       return;
     }
@@ -638,7 +658,7 @@ async function orchestrateChat(input: {
           }
         : {}),
     });
-    await maybeGenerateConversationTitle({ dependencies, conversationId: input.trace.conversation_id });
+    await maybeGenerateAndEmitConversationTitle({ dependencies, conversationId: input.trace.conversation_id, stream });
     await stream.close();
   } catch (error) {
     if (isRunCancelled(error, input.abortSignal)) {
