@@ -5,6 +5,7 @@ import test from "node:test";
 import { existsSync, mkdirSync, readFileSync, writeFileSync, rmSync } from "node:fs";
 
 import { loadConfig } from "../src/config.js";
+import { compileRegistryYamlContent } from "../src/ai/model-registry-config.js";
 import { createApp, ensureModelRegistryConfigFile } from "../src/server.js";
 
 const REASONING_VALID = `version: 1
@@ -39,6 +40,8 @@ defaults:
   codingModel: m1
   fastModel: m1
   restrictedModel: m1
+chat_title_generation:
+  model_id: m1
 providers:
   p1:
     type: openai
@@ -154,6 +157,15 @@ test("POST /model-config/validate accepts valid content", async () => {
   }
 });
 
+test("model registry parses chat title generation config", () => {
+  const compiled = compileRegistryYamlContent(MIN_VALID);
+  assert.equal(compiled.ok, true);
+  if (!compiled.ok) return;
+
+  assert.equal(compiled.registry.chatTitleGeneration.modelId, "m1");
+  assert.equal(compiled.parsed.chat_title_generation?.model_id, "m1");
+});
+
 test("POST /model-config/validate accepts reasoning config", async () => {
   const dir = path.join(os.tmpdir(), `model-registry-reasoning-validate-${Date.now()}`);
   mkdirSync(dir);
@@ -230,8 +242,13 @@ test("GET /models returns list payload", async () => {
     const app = createApp({ config });
     const response = await app.request("/models");
     assert.equal(response.status, 200);
-    const body = (await response.json()) as { default_model_id: string; models: unknown[] };
+    const body = (await response.json()) as {
+      default_model_id: string;
+      chat_title_generation: { model_id: string | null };
+      models: unknown[];
+    };
     assert.equal(body.default_model_id, "m1");
+    assert.deepEqual(body.chat_title_generation, { model_id: "m1" });
     assert.ok(Array.isArray(body.models) && body.models.length === 1);
   } finally {
     rmSync(dir, { recursive: true, force: true });

@@ -234,6 +234,9 @@ export class ModelCatalogService implements ModelCatalogPort {
 
     const payload: ListAiEngineerModelsResponse = {
       default_model_id: this.registry.defaults.chatModel,
+      chat_title_generation: {
+        model_id: this.registry.chatTitleGeneration.modelId,
+      },
       models: sorted,
       metadata: {
         registrySource: "config",

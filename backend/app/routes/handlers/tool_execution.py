@@ -679,6 +679,11 @@ async def execute_tool(body: ToolExecutionRequest, request: Request, db: Session
     if not tool_call_id:
         raise HTTPException(status_code=400, detail="tool_call_id is required")
     conversation_uuid = _uuid_for_storage(conversation_id, "conversation_id")
+    assistant_message_uuid = _uuid_for_storage(
+        str(body.assistant_message_id) if body.assistant_message_id is not None else None,
+        "assistant_message_id",
+        required=True,
+    )
     agent_run_uuid = _uuid_for_storage(agent_run_id, "agent_run_id", required=True)
     request_uuid = _uuid_for_storage(request_id, "request_id", required=True)
     tool_call_uuid = _uuid_for_storage(tool_call_id, "tool_call_id", required=True)
@@ -767,12 +772,18 @@ async def execute_tool(body: ToolExecutionRequest, request: Request, db: Session
                     },
                 )
             permission_request.status = "executing"
-            permission_request.resolved_at = datetime.now(timezone.utc)
+            now = datetime.now(timezone.utc)
+            permission_request.updated_at = now
+            permission_request.resolved_at = now
         else:
             prompt = build_permission_prompt(body.tool_name, body.input, getattr(tool, "permission_prompt_json", {}) or {})
+            call_id = uuid.uuid4()
+            now = datetime.now(timezone.utc)
             permission_request = ToolPermissionRequest(
                 id=uuid.uuid4(),
                 conversation_id=conversation_uuid,
+                assistant_message_id=assistant_message_uuid,
+                tool_call_record_id=call_id,
                 agent_run_id=agent_run_uuid,
                 request_id=request_uuid,
                 tool_call_id=tool_call_uuid,
@@ -783,10 +794,13 @@ async def execute_tool(body: ToolExecutionRequest, request: Request, db: Session
                 prompt_json=prompt,
                 mode_policy_json=getattr(tool, "mode_policy_json", {}) or {},
                 execution_mode=body.execution_mode,
-                created_at=datetime.now(timezone.utc),
+                created_at=now,
+                updated_at=now,
             )
             call = ToolCall(
+                id=call_id,
                 conversation_id=conversation_uuid,
+                assistant_message_id=assistant_message_uuid,
                 agent_run_id=agent_run_uuid,
                 request_id=request_uuid,
                 tool_call_id=tool_call_uuid,
@@ -794,7 +808,9 @@ async def execute_tool(body: ToolExecutionRequest, request: Request, db: Session
                 input_json=body.input,
                 redacted_input_json=redact(body.input),
                 status="permission_required",
-                started_at=datetime.now(timezone.utc),
+                sequence=None,
+                started_at=now,
+                updated_at=now,
             )
             db.add(call)
             db.add(permission_request)
@@ -838,8 +854,12 @@ async def execute_tool(body: ToolExecutionRequest, request: Request, db: Session
     if permission_request:
         call = db.query(ToolCall).filter(ToolCall.tool_call_id == tool_call_uuid).one_or_none()
         if call is None:
+            now = datetime.now(timezone.utc)
+            call_id = uuid.uuid4()
             call = ToolCall(
+                id=call_id,
                 conversation_id=conversation_uuid,
+                assistant_message_id=assistant_message_uuid,
                 agent_run_id=agent_run_uuid,
                 request_id=request_uuid,
                 tool_call_id=tool_call_uuid,
@@ -847,15 +867,31 @@ async def execute_tool(body: ToolExecutionRequest, request: Request, db: Session
                 input_json=body.input,
                 redacted_input_json=redact(body.input),
                 status='running',
-                started_at=datetime.now(timezone.utc),
+                sequence=None,
+                started_at=now,
+                updated_at=now,
             )
             db.add(call)
+            if permission_request:
+                permission_request.assistant_message_id = assistant_message_uuid
+                permission_request.updated_at = now
+                if permission_request.tool_call_record_id is None:
+                    permission_request.tool_call_record_id = call_id
         else:
             call.status = 'running'
-            call.started_at = datetime.now(timezone.utc)
+            call.assistant_message_id = assistant_message_uuid
+            now = datetime.now(timezone.utc)
+            call.updated_at = now
+            call.started_at = now
+            if permission_request:
+                permission_request.assistant_message_id = assistant_message_uuid
+                permission_request.tool_call_record_id = call.id
+                permission_request.updated_at = now
     else:
+        now = datetime.now(timezone.utc)
         call = ToolCall(
             conversation_id=conversation_uuid,
+            assistant_message_id=assistant_message_uuid,
             agent_run_id=agent_run_uuid,
             request_id=request_uuid,
             tool_call_id=tool_call_uuid,
@@ -863,7 +899,9 @@ async def execute_tool(body: ToolExecutionRequest, request: Request, db: Session
             input_json=body.input,
             redacted_input_json=redact(body.input),
             status='running',
-            started_at=datetime.now(timezone.utc),
+            sequence=None,
+            started_at=now,
+            updated_at=now,
         )
         db.add(call)
     db.flush()
@@ -909,13 +947,16 @@ async def execute_tool(body: ToolExecutionRequest, request: Request, db: Session
     except HTTPException:
         raise
     except Exception as exc:
+        now = datetime.now(timezone.utc)
         call.status = 'failed'
         call.error_message = str(exc)
-        call.completed_at = datetime.now(timezone.utc)
+        call.completed_at = now
+        call.updated_at = now
         if permission_request:
             permission_request.status = "failed"
             permission_request.response_json = {'error_code': 'tool_execution_failed', 'message': str(exc)}
-            permission_request.resolved_at = datetime.now(timezone.utc)
+            permission_request.resolved_at = now
+            permission_request.updated_at = now
         return {
             'conversation_id': conversation_id,
             'agent_run_id': agent_run_id,
@@ -935,13 +976,16 @@ async def execute_tool(body: ToolExecutionRequest, request: Request, db: Session
             ],
         }
 
+    now = datetime.now(timezone.utc)
     call.status = 'completed'
     call.output_json = redact(output if isinstance(output, dict) else {'result': output})
-    call.completed_at = datetime.now(timezone.utc)
+    call.completed_at = now
+    call.updated_at = now
     if permission_request:
         permission_request.status = "executed"
         permission_request.response_json = call.output_json
-        permission_request.resolved_at = datetime.now(timezone.utc)
+        permission_request.resolved_at = now
+        permission_request.updated_at = now
     raw_events = [
         *raw_events,
         started_event,
@@ -1013,7 +1057,9 @@ def approve_tool_permission(permission_request_id: str, body: ToolPermissionAppr
     if permission.status not in {"pending", "approved"}:
         raise HTTPException(status_code=409, detail=f"permission request is {permission.status}")
     permission.status = "approved"
-    permission.resolved_at = datetime.now(timezone.utc)
+    now = datetime.now(timezone.utc)
+    permission.resolved_at = now
+    permission.updated_at = now
     event = raw_event(
         event_type="tool.permission_approved",
         payload={
@@ -1044,7 +1090,9 @@ def deny_tool_permission(permission_request_id: str, body: ToolPermissionDenyReq
         "reason": body.reason or "user_denied",
         "message": "The user denied this tool call. No action was taken.",
     }
-    permission.resolved_at = datetime.now(timezone.utc)
+    now = datetime.now(timezone.utc)
+    permission.resolved_at = now
+    permission.updated_at = now
     event = raw_event(
         event_type="tool.permission_denied",
         payload={

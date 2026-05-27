@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { createApp } from "../src/server.js";
+import { maybeGenerateConversationTitle } from "../src/title-generation.js";
 import {
   FakeContextClient,
   FakeModelCatalog,
@@ -10,8 +11,10 @@ import {
   MemoryConversationStore,
   baseRuntimeConfig,
   createStaticModelRunner,
+  modelOption,
   parseNdjson,
 } from "./helpers.js";
+import type { RunDependencies } from "../src/types.js";
 
 function createTestApp(store: MemoryConversationStore) {
   return createApp({
@@ -32,6 +35,38 @@ function createTestApp(store: MemoryConversationStore) {
   });
 }
 
+function createTitleDependencies(
+  store: MemoryConversationStore,
+  overrides: Partial<Pick<RunDependencies, "modelRunner" | "modelCatalog">> = {},
+): RunDependencies {
+  const first = modelOption({ id: "first-available", isDefault: true });
+  return {
+    config: baseRuntimeConfig(),
+    store,
+    contextClient: new FakeContextClient(),
+    toolRegistryClient: new FakeToolRegistryClient([]),
+    toolExecutionClient: new FakeToolExecutionClient({
+      conversation_id: null,
+      agent_run_id: "run",
+      request_id: "req",
+      tool_call_id: "tool",
+      status: "completed",
+      output: {},
+      raw_events: [],
+    }),
+    modelRunner: createStaticModelRunner([{ type: "text-delta", textDelta: "Generated Mission Title" }]),
+    modelCatalog: new FakeModelCatalog({
+      default_model_id: first.id,
+      chat_title_generation: { model_id: first.id },
+      models: [first],
+      metadata: { registrySource: "config", metadataResolvers: ["test"], cached: true, updatedAt: new Date(0).toISOString() },
+    }),
+    createId: crypto.randomUUID,
+    now: () => new Date(),
+    ...overrides,
+  };
+}
+
 test("conversation endpoints create, list, and fetch messages", async () => {
   const store = new MemoryConversationStore();
   const app = createTestApp(store);
@@ -49,7 +84,6 @@ test("conversation endpoints create, list, and fetch messages", async () => {
   const createResponse = await app.request("/conversations", {
     method: "POST",
     body: JSON.stringify({
-      title: "AI Engineer Session",
       execution_mode: "read_only",
       initial_message: { role: "user", content: "Inspect runtime service ownership." },
     }),
@@ -57,8 +91,9 @@ test("conversation endpoints create, list, and fetch messages", async () => {
   });
 
   assert.equal(createResponse.status, 200);
-  const conversation = (await createResponse.json()) as { id: string; title: string; messages: Array<{ content: string }> };
-  assert.equal(conversation.title, "AI Engineer Session");
+  const conversation = (await createResponse.json()) as { id: string; title: string | null; title_source: string; messages: Array<{ content: string }> };
+  assert.equal(conversation.title, null);
+  assert.equal(conversation.title_source, "initial");
   assert.equal(conversation.messages.length, 1);
 
   const listResponse = await app.request("/conversations");
@@ -81,6 +116,9 @@ test("conversation endpoints create, list, and fetch messages", async () => {
     mission_id: null,
     vehicle_id: null,
     execution_mode: "read_only",
+    selected_model_id: null,
+    title_source: "initial",
+    title_model_id: null,
     created_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
     messages: [],
@@ -92,6 +130,26 @@ test("conversation endpoints create, list, and fetch messages", async () => {
 
   const emptyGetResponse = await app.request(`/conversations/${emptyConversationId}`);
   assert.equal(emptyGetResponse.status, 404);
+});
+
+test("conversation creation marks explicit titles as manual", async () => {
+  const store = new MemoryConversationStore();
+  const app = createTestApp(store);
+
+  const response = await app.request("/conversations", {
+    method: "POST",
+    body: JSON.stringify({
+      title: "Operator Chosen Title",
+      execution_mode: "read_only",
+      initial_message: { role: "user", content: "Inspect runtime service ownership." },
+    }),
+    headers: { "content-type": "application/json" },
+  });
+
+  assert.equal(response.status, 200);
+  const conversation = (await response.json()) as { title: string | null; title_source: string };
+  assert.equal(conversation.title, "Operator Chosen Title");
+  assert.equal(conversation.title_source, "manual");
 });
 
 test("conversation detail returns scoped persisted events in stable order", async () => {
@@ -172,6 +230,369 @@ test("conversation detail returns scoped persisted events in stable order", asyn
   assert.equal(detail.events[0].payload.branch, "preview/example");
 });
 
+test("conversation patch updates persisted settings and manual title", async () => {
+  const store = new MemoryConversationStore();
+  const app = createTestApp(store);
+  const conversation = await store.createConversation({
+    title: null,
+    execution_mode: "read_only",
+    initial_message: { role: "user", content: "Tune the model." },
+  });
+
+  const response = await app.request(`/conversations/${conversation.id}`, {
+    method: "PATCH",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      title: "Model Tuning",
+      execution_mode: "execute",
+      selected_model_id: "openai-gpt-5-1-mini",
+    }),
+  });
+
+  assert.equal(response.status, 200);
+  const updated = (await response.json()) as {
+    title: string;
+    execution_mode: string;
+    selected_model_id: string;
+    title_source: string;
+  };
+  assert.equal(updated.title, "Model Tuning");
+  assert.equal(updated.execution_mode, "execute");
+  assert.equal(updated.selected_model_id, "openai-gpt-5-1-mini");
+  assert.equal(updated.title_source, "manual");
+});
+
+test("title generation uses YAML configured available model from catalog", async () => {
+  const store = new MemoryConversationStore();
+  const conversation = await store.createConversation({
+    title: null,
+    execution_mode: "read_only",
+    initial_message: { role: "user", content: "Inspect thermal telemetry drift." },
+  });
+  await store.appendMessage({
+    conversationId: conversation.id,
+    role: "assistant",
+    content: "I found the telemetry drift.",
+  });
+  let resolvedModelId: string | null | undefined;
+  const configured = modelOption({ id: "title-model", isDefault: false });
+  const fallback = modelOption({ id: "fallback-model", isDefault: true });
+  const modelCatalog = new FakeModelCatalog(
+    {
+      default_model_id: "fallback-model",
+      chat_title_generation: { model_id: "title-model" },
+      models: [fallback, configured],
+      metadata: { registrySource: "config", metadataResolvers: ["test"], cached: true, updatedAt: new Date(0).toISOString() },
+    },
+    (modelId, _mode) => {
+      resolvedModelId = modelId;
+      const option = modelId === "title-model" ? configured : fallback;
+      return {
+        option,
+        runtime: { id: option.id, providerType: option.providerType, providerModelId: option.providerModelId, apiKey: "key", baseUrl: null },
+      };
+    },
+  );
+
+  await maybeGenerateConversationTitle({
+    conversationId: conversation.id,
+    dependencies: {
+      config: baseRuntimeConfig(),
+      store,
+      contextClient: new FakeContextClient(),
+      toolRegistryClient: new FakeToolRegistryClient([]),
+      toolExecutionClient: new FakeToolExecutionClient({
+        conversation_id: null,
+        agent_run_id: "run",
+        request_id: "req",
+        tool_call_id: "tool",
+        status: "completed",
+        output: {},
+        raw_events: [],
+      }),
+      modelRunner: createStaticModelRunner([{ type: "text-delta", textDelta: "Thermal Drift Review" }]),
+      modelCatalog,
+      createId: crypto.randomUUID,
+      now: () => new Date(),
+    },
+  });
+
+  const updated = await store.getConversation(conversation.id);
+  assert.equal(resolvedModelId, "title-model");
+  assert.equal(updated?.title, "Thermal Drift Review");
+  assert.equal(updated?.title_model_id, "title-model");
+});
+
+test("title generation falls back to first available model when YAML title model is unset", async () => {
+  const store = new MemoryConversationStore();
+  const conversation = await store.createConversation({
+    title: null,
+    execution_mode: "read_only",
+    initial_message: { role: "user", content: "Inspect battery telemetry." },
+  });
+  await store.appendMessage({ conversationId: conversation.id, role: "assistant", content: "Battery telemetry is stable." });
+  let resolvedModelId: string | null | undefined;
+  const first = modelOption({ id: "first-available", isDefault: false });
+  const second = modelOption({ id: "second-available", isDefault: true });
+  const dependencies = {
+    config: baseRuntimeConfig(),
+    store,
+    contextClient: new FakeContextClient(),
+    toolRegistryClient: new FakeToolRegistryClient([]),
+    toolExecutionClient: new FakeToolExecutionClient({
+      conversation_id: null,
+      agent_run_id: "run",
+      request_id: "req",
+      tool_call_id: "tool",
+      status: "completed",
+      output: {},
+      raw_events: [],
+    }),
+    modelRunner: createStaticModelRunner([{ type: "text-delta", textDelta: "Battery Telemetry" }]),
+    modelCatalog: new FakeModelCatalog(
+      {
+        default_model_id: "second-available",
+        chat_title_generation: { model_id: null },
+        models: [first, second],
+        metadata: { registrySource: "config", metadataResolvers: ["test"], cached: true, updatedAt: new Date(0).toISOString() },
+      },
+      (modelId, _mode) => {
+        resolvedModelId = modelId;
+        return {
+          option: modelId === "second-available" ? second : first,
+          runtime: { id: modelId ?? first.id, providerType: first.providerType, providerModelId: first.providerModelId, apiKey: "key", baseUrl: null },
+        };
+      },
+    ),
+    createId: crypto.randomUUID,
+    now: () => new Date(),
+  };
+
+  await maybeGenerateConversationTitle({ conversationId: conversation.id, dependencies });
+  const generated = await store.getConversation(conversation.id);
+  assert.equal(resolvedModelId, "first-available");
+  assert.equal(generated?.title, "Battery Telemetry");
+});
+
+test("title generation falls back safely when YAML title model is unavailable disabled or missing", async () => {
+  const cases = [
+    {
+      name: "unavailable",
+      models: [
+        modelOption({
+          id: "configured-title",
+          enabled: true,
+          isAvailable: false,
+          disabledReason: "Provider model id is unavailable.",
+          isDefault: false,
+        }),
+      ],
+    },
+    {
+      name: "disabled",
+      models: [
+        modelOption({
+          id: "configured-title",
+          enabled: false,
+          isAvailable: false,
+          disabledReason: "Model is disabled.",
+          isDefault: false,
+        }),
+      ],
+    },
+    {
+      name: "missing",
+      models: [],
+    },
+  ];
+
+  for (const currentCase of cases) {
+    const store = new MemoryConversationStore();
+    const conversation = await store.createConversation({
+      title: null,
+      execution_mode: "read_only",
+      initial_message: { role: "user", content: `Inspect ${currentCase.name} propulsion telemetry.` },
+    });
+    await store.appendMessage({ conversationId: conversation.id, role: "assistant", content: "Propulsion telemetry looks nominal." });
+    let resolvedModelId: string | null | undefined;
+    const first = modelOption({ id: "first-available", isDefault: false });
+
+    await maybeGenerateConversationTitle({
+      conversationId: conversation.id,
+      dependencies: {
+        config: baseRuntimeConfig(),
+        store,
+        contextClient: new FakeContextClient(),
+        toolRegistryClient: new FakeToolRegistryClient([]),
+        toolExecutionClient: new FakeToolExecutionClient({
+          conversation_id: null,
+          agent_run_id: "run",
+          request_id: "req",
+          tool_call_id: "tool",
+          status: "completed",
+          output: {},
+          raw_events: [],
+        }),
+        modelRunner: createStaticModelRunner([{ type: "text-delta", textDelta: "Propulsion Telemetry" }]),
+        modelCatalog: new FakeModelCatalog(
+          {
+            default_model_id: "first-available",
+            chat_title_generation: { model_id: "configured-title" },
+            models: [...currentCase.models, first],
+            metadata: { registrySource: "config", metadataResolvers: ["test"], cached: true, updatedAt: new Date(0).toISOString() },
+          },
+          (modelId, _mode) => {
+            resolvedModelId = modelId;
+            return {
+              option: first,
+              runtime: {
+                id: first.id,
+                providerType: first.providerType,
+                providerModelId: first.providerModelId,
+                apiKey: "key",
+                baseUrl: null,
+              },
+            };
+          },
+        ),
+        createId: crypto.randomUUID,
+        now: () => new Date(),
+      },
+    });
+
+    const generated = await store.getConversation(conversation.id);
+    assert.equal(resolvedModelId, "first-available", currentCase.name);
+    assert.equal(generated?.title, "Propulsion Telemetry", currentCase.name);
+    assert.equal(generated?.title_model_id, "first-available", currentCase.name);
+  }
+});
+
+test("title generation preserves manual titles", async () => {
+  const store = new MemoryConversationStore();
+  const conversation = await store.createConversation({
+    title: null,
+    execution_mode: "read_only",
+    initial_message: { role: "user", content: "Inspect battery telemetry." },
+  });
+  await store.appendMessage({ conversationId: conversation.id, role: "assistant", content: "Battery telemetry is stable." });
+  const first = modelOption({ id: "first-available", isDefault: false });
+  const dependencies = {
+    config: baseRuntimeConfig(),
+    store,
+    contextClient: new FakeContextClient(),
+    toolRegistryClient: new FakeToolRegistryClient([]),
+    toolExecutionClient: new FakeToolExecutionClient({
+      conversation_id: null,
+      agent_run_id: "run",
+      request_id: "req",
+      tool_call_id: "tool",
+      status: "completed",
+      output: {},
+      raw_events: [],
+    }),
+    modelRunner: createStaticModelRunner([{ type: "text-delta", textDelta: "Battery Telemetry" }]),
+    modelCatalog: new FakeModelCatalog({
+      default_model_id: "first-available",
+      chat_title_generation: { model_id: "first-available" },
+      models: [first],
+      metadata: { registrySource: "config", metadataResolvers: ["test"], cached: true, updatedAt: new Date(0).toISOString() },
+    }),
+    createId: crypto.randomUUID,
+    now: () => new Date(),
+  };
+
+  await store.updateConversation(conversation.id, { title: "Manual Battery Name", title_source: "manual" });
+  await maybeGenerateConversationTitle({ conversationId: conversation.id, dependencies });
+  const manual = await store.getConversation(conversation.id);
+  assert.equal(manual?.title, "Manual Battery Name");
+  assert.equal(manual?.title_source, "manual");
+});
+
+test("title generation creates a generated title for an initial conversation", async () => {
+  const store = new MemoryConversationStore();
+  const conversation = await store.createConversation({
+    title: null,
+    execution_mode: "read_only",
+    initial_message: { role: "user", content: "Inspect battery telemetry." },
+  });
+  await store.appendMessage({ conversationId: conversation.id, role: "assistant", content: "Battery telemetry is stable." });
+
+  await maybeGenerateConversationTitle({ conversationId: conversation.id, dependencies: createTitleDependencies(store) });
+
+  const generated = await store.getConversation(conversation.id);
+  assert.equal(generated?.title, "Generated Mission Title");
+  assert.equal(generated?.title_source, "generated");
+  assert.equal(generated?.title_model_id, "first-available");
+});
+
+test("title generation remains retryable after model failure", async () => {
+  const store = new MemoryConversationStore();
+  const conversation = await store.createConversation({
+    title: null,
+    execution_mode: "read_only",
+    initial_message: { role: "user", content: "Inspect propulsion telemetry." },
+  });
+  await store.appendMessage({ conversationId: conversation.id, role: "assistant", content: "Propulsion telemetry is stable." });
+
+  await maybeGenerateConversationTitle({
+    conversationId: conversation.id,
+    dependencies: createTitleDependencies(store, {
+      modelRunner: {
+        async *stream() {
+          throw new Error("model unavailable");
+        },
+      },
+    }),
+  });
+
+  const afterFailure = await store.getConversation(conversation.id);
+  assert.equal(afterFailure?.title, null);
+  assert.equal(afterFailure?.title_source, "initial");
+
+  await maybeGenerateConversationTitle({ conversationId: conversation.id, dependencies: createTitleDependencies(store) });
+
+  const afterRetry = await store.getConversation(conversation.id);
+  assert.equal(afterRetry?.title, "Generated Mission Title");
+  assert.equal(afterRetry?.title_source, "generated");
+});
+
+test("title generation does not overwrite a manual rename made while generation is in progress", async () => {
+  const store = new MemoryConversationStore();
+  const conversation = await store.createConversation({
+    title: null,
+    execution_mode: "read_only",
+    initial_message: { role: "user", content: "Inspect avionics telemetry." },
+  });
+  await store.appendMessage({ conversationId: conversation.id, role: "assistant", content: "Avionics telemetry is stable." });
+  let releaseGeneration!: () => void;
+  const generationStarted = new Promise<void>((resolve) => {
+    const releasePromise = new Promise<void>((release) => {
+      releaseGeneration = release;
+    });
+    void releasePromise.then(resolve);
+  });
+  const titlePromise = maybeGenerateConversationTitle({
+    conversationId: conversation.id,
+    dependencies: createTitleDependencies(store, {
+      modelRunner: {
+        async *stream() {
+          yield { type: "text-delta", textDelta: "Generated Avionics Title" };
+          await generationStarted;
+        },
+      },
+    }),
+  });
+
+  await Promise.resolve();
+  await store.updateConversation(conversation.id, { title: "Manual Avionics Title", title_source: "manual" });
+  releaseGeneration();
+  await titlePromise;
+
+  const manual = await store.getConversation(conversation.id);
+  assert.equal(manual?.title, "Manual Avionics Title");
+  assert.equal(manual?.title_source, "manual");
+});
+
 test("chat can run against a pre-created first user message without duplicating it", async () => {
   const store = new MemoryConversationStore();
   const app = createApp({
@@ -197,7 +618,7 @@ test("chat can run against a pre-created first user message without duplicating 
   });
 
   const conversation = await store.createConversation({
-    title: "AI Engineer Session",
+    title: null,
     execution_mode: "read_only",
     initial_message: { role: "user", content: "Inspect runtime service ownership." },
   });
@@ -217,8 +638,17 @@ test("chat can run against a pre-created first user message without duplicating 
   assert.equal(response.status, 200);
   const chunks = parseNdjson(await response.text());
   assert.ok(chunks.some((chunk) => chunk.kind === "event"));
+  assert.ok(
+    chunks.some(
+      (chunk) =>
+        chunk.kind === "event" &&
+        (chunk as { event: { event_type: string; payload: Record<string, unknown> } }).event.event_type ===
+          "conversation.title.generated",
+    ),
+  );
 
   const detail = await store.getConversation(conversation.id);
   assert.equal(detail?.messages.filter((message) => message.role === "user").length, 1);
   assert.equal(detail?.messages.length, 2);
+  assert.equal(detail?.title_source, "generated");
 });

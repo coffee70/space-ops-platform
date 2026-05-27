@@ -148,6 +148,7 @@ export function createToolSet(input: {
   toolExecutionClient: ToolExecutionClient;
   toolPermissionClient?: ToolPermissionClient;
   trace: TraceEnvelope;
+  assistantMessageId: string;
   executionMode: ExecutionMode;
   abortSignal?: AbortSignal;
   onToolCallRequested?: (definition: ToolDefinition, toolCallId: string, args: Record<string, unknown>) => void | Promise<void>;
@@ -179,6 +180,7 @@ export function createToolSet(input: {
           await input.onToolCallRequested?.(definition, toolCallId, normalizedArgs);
           const response = await input.toolExecutionClient.execute({
             trace: withToolTrace(input.trace, toolCallId),
+            assistant_message_id: input.assistantMessageId,
             tool_name: definition.name,
             input: normalizedArgs,
             execution_mode: input.executionMode,
@@ -210,6 +212,7 @@ export function createToolSet(input: {
             await input.emitRawToolEvents(approvedPermissionOperationEvents(definition.name, toolCallId, normalizedArgs));
             const approvedResponse = await input.toolExecutionClient.execute({
               trace: withToolTrace(input.trace, toolCallId),
+              assistant_message_id: input.assistantMessageId,
               tool_name: definition.name,
               input: normalizedArgs,
               execution_mode: input.executionMode,

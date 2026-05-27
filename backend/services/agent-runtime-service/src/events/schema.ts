@@ -54,6 +54,7 @@ export const AGENT_EVENT_REQUIRED_PAYLOAD_FIELDS = {
   "message.reasoning.completed": ["text_length", "representation"],
   "message.delta": ["text_delta"],
   "message.completed": ["message_id", "content_preview"],
+  "conversation.title.generated": ["conversation_id", "title", "title_source", "title_model_id"],
   "model.selected": [
     "model_id",
     "provider_type",

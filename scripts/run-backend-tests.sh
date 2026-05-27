@@ -49,4 +49,10 @@ esac
 
 echo "==> pytest backend/tests"
 cd "${PLATFORM_ROOT}"
-exec "${VENVDIR}/bin/pytest" "${PYTEST_ARGS[@]}" "$@"
+"${VENVDIR}/bin/pytest" "${PYTEST_ARGS[@]}" "$@"
+
+if [[ -f "${PLATFORM_ROOT}/backend/services/agent-runtime-service/package.json" ]]; then
+  echo "==> npm test backend/services/agent-runtime-service"
+  cd "${PLATFORM_ROOT}/backend/services/agent-runtime-service"
+  npm test
+fi

@@ -15,6 +15,9 @@ defaults:
   fastModel: openai-gpt-5-1-mini
   restrictedModel: baremetal-qwen-coder-32b
 
+chat_title_generation:
+  model_id: gpt-4.1-mini
+
 metadataResolvers:
   openrouter:
     enabled: true
@@ -42,13 +45,21 @@ providers:
 
 models:
 
+  - id: gpt-4.1-mini
+    providerRef: openai-main
+    providerModelId: gpt-4.1-mini
+    enabled: true
+    defaultFor: []
+    governance: { allowedModes: [read_only, suggest, execute], dataBoundary: external_api }
+    metadataOverrides: { recommendedFor: ["chat-title-generation"] }
+
   - id: openai-gpt-5-1
     providerRef: openai-main
     providerModelId: gpt-5.1
     enabled: true
     defaultFor: []
     governance: { allowedModes: [read_only, suggest, execute], dataBoundary: external_api }
-    metadataOverrides: { recommendedFor: ["coding", "deep-reasoning", "demo-safe"] }
+    metadataOverrides: { recommendedFor: ["coding", "deep-reasoning"] }
 
   - id: openai-gpt-5-1-mini
     providerRef: openai-main
@@ -56,7 +67,7 @@ models:
     enabled: true
     defaultFor: [fast]
     governance: { allowedModes: [read_only, suggest, execute], dataBoundary: external_api }
-    metadataOverrides: { recommendedFor: ["fast-chat", "demo-safe"] }
+    metadataOverrides: { recommendedFor: ["fast-chat"] }
 
   - id: openai-gpt-5-1-nano
     providerRef: openai-main
@@ -80,7 +91,7 @@ models:
     enabled: true
     defaultFor: []
     governance: { allowedModes: [read_only, suggest, execute], dataBoundary: external_api }
-    metadataOverrides: { recommendedFor: ["coding", "deep-reasoning", "demo-safe"] }
+    metadataOverrides: { recommendedFor: ["coding", "deep-reasoning"] }
 
   - id: openai-gpt-5-1-codex-max
     providerRef: openai-main
@@ -88,7 +99,7 @@ models:
     enabled: true
     defaultFor: []
     governance: { allowedModes: [read_only, suggest, execute], dataBoundary: external_api }
-    metadataOverrides: { recommendedFor: ["coding", "deep-reasoning", "demo-safe"] }
+    metadataOverrides: { recommendedFor: ["coding", "deep-reasoning"] }
 
   - id: openai-gpt-5-2
     providerRef: openai-main
@@ -96,7 +107,7 @@ models:
     enabled: true
     defaultFor: []
     governance: { allowedModes: [read_only, suggest, execute], dataBoundary: external_api }
-    metadataOverrides: { recommendedFor: ["coding", "deep-reasoning", "demo-safe"] }
+    metadataOverrides: { recommendedFor: ["coding", "deep-reasoning"] }
 
   - id: openai-gpt-5-2-mini
     providerRef: openai-main
@@ -104,7 +115,7 @@ models:
     enabled: true
     defaultFor: []
     governance: { allowedModes: [read_only, suggest, execute], dataBoundary: external_api }
-    metadataOverrides: { recommendedFor: ["fast-chat", "demo-safe"] }
+    metadataOverrides: { recommendedFor: ["fast-chat"] }
 
   - id: openai-gpt-5-2-nano
     providerRef: openai-main
@@ -128,7 +139,7 @@ models:
     enabled: true
     defaultFor: []
     governance: { allowedModes: [read_only, suggest, execute], dataBoundary: external_api }
-    metadataOverrides: { recommendedFor: ["coding", "deep-reasoning", "demo-safe"] }
+    metadataOverrides: { recommendedFor: ["coding", "deep-reasoning"] }
 
   - id: openai-gpt-5-2-codex-max
     providerRef: openai-main
@@ -136,7 +147,7 @@ models:
     enabled: true
     defaultFor: []
     governance: { allowedModes: [read_only, suggest, execute], dataBoundary: external_api }
-    metadataOverrides: { recommendedFor: ["coding", "deep-reasoning", "demo-safe"] }
+    metadataOverrides: { recommendedFor: ["coding", "deep-reasoning"] }
 
   - id: openai-gpt-5-3
     providerRef: openai-main
@@ -144,7 +155,7 @@ models:
     enabled: true
     defaultFor: []
     governance: { allowedModes: [read_only, suggest, execute], dataBoundary: external_api }
-    metadataOverrides: { recommendedFor: ["coding", "deep-reasoning", "demo-safe"] }
+    metadataOverrides: { recommendedFor: ["coding", "deep-reasoning"] }
 
   - id: openai-gpt-5-3-mini
     providerRef: openai-main
@@ -152,7 +163,7 @@ models:
     enabled: true
     defaultFor: []
     governance: { allowedModes: [read_only, suggest, execute], dataBoundary: external_api }
-    metadataOverrides: { recommendedFor: ["fast-chat", "demo-safe"] }
+    metadataOverrides: { recommendedFor: ["fast-chat"] }
 
   - id: openai-gpt-5-3-nano
     providerRef: openai-main
@@ -176,7 +187,7 @@ models:
     enabled: true
     defaultFor: []
     governance: { allowedModes: [read_only, suggest, execute], dataBoundary: external_api }
-    metadataOverrides: { recommendedFor: ["coding", "deep-reasoning", "demo-safe"] }
+    metadataOverrides: { recommendedFor: ["coding", "deep-reasoning"] }
 
   - id: openai-gpt-5-3-codex-max
     providerRef: openai-main
@@ -184,7 +195,7 @@ models:
     enabled: true
     defaultFor: []
     governance: { allowedModes: [read_only, suggest, execute], dataBoundary: external_api }
-    metadataOverrides: { recommendedFor: ["coding", "deep-reasoning", "demo-safe"] }
+    metadataOverrides: { recommendedFor: ["coding", "deep-reasoning"] }
 
   - id: openai-gpt-5-4
     providerRef: openai-main
@@ -192,7 +203,7 @@ models:
     enabled: true
     defaultFor: []
     governance: { allowedModes: [read_only, suggest, execute], dataBoundary: external_api }
-    metadataOverrides: { recommendedFor: ["coding", "deep-reasoning", "demo-safe"] }
+    metadataOverrides: { recommendedFor: ["coding", "deep-reasoning"] }
 
   - id: openai-gpt-5-4-mini
     providerRef: openai-main
@@ -200,7 +211,7 @@ models:
     enabled: true
     defaultFor: []
     governance: { allowedModes: [read_only, suggest, execute], dataBoundary: external_api }
-    metadataOverrides: { recommendedFor: ["fast-chat", "demo-safe"] }
+    metadataOverrides: { recommendedFor: ["fast-chat"] }
 
   - id: openai-gpt-5-4-nano
     providerRef: openai-main
@@ -224,7 +235,7 @@ models:
     enabled: true
     defaultFor: []
     governance: { allowedModes: [read_only, suggest, execute], dataBoundary: external_api }
-    metadataOverrides: { recommendedFor: ["coding", "deep-reasoning", "demo-safe"] }
+    metadataOverrides: { recommendedFor: ["coding", "deep-reasoning"] }
 
   - id: openai-gpt-5-4-codex-max
     providerRef: openai-main
@@ -232,7 +243,7 @@ models:
     enabled: true
     defaultFor: []
     governance: { allowedModes: [read_only, suggest, execute], dataBoundary: external_api }
-    metadataOverrides: { recommendedFor: ["coding", "deep-reasoning", "demo-safe"] }
+    metadataOverrides: { recommendedFor: ["coding", "deep-reasoning"] }
 
   - id: openai-gpt-5-5
     providerRef: openai-main
@@ -243,7 +254,7 @@ models:
     reasoning:
       enabled: true
       representation: reasoning_summary
-    metadataOverrides: { recommendedFor: ["coding", "deep-reasoning", "demo-safe"] }
+    metadataOverrides: { recommendedFor: ["coding", "deep-reasoning"] }
 
   - id: openai-gpt-5-5-mini
     providerRef: openai-main
@@ -251,7 +262,7 @@ models:
     enabled: true
     defaultFor: []
     governance: { allowedModes: [read_only, suggest, execute], dataBoundary: external_api }
-    metadataOverrides: { recommendedFor: ["fast-chat", "demo-safe"] }
+    metadataOverrides: { recommendedFor: ["fast-chat"] }
 
   - id: openai-gpt-5-5-nano
     providerRef: openai-main
@@ -275,7 +286,7 @@ models:
     enabled: true
     defaultFor: []
     governance: { allowedModes: [read_only, suggest, execute], dataBoundary: external_api }
-    metadataOverrides: { recommendedFor: ["coding", "deep-reasoning", "demo-safe"] }
+    metadataOverrides: { recommendedFor: ["coding", "deep-reasoning"] }
 
   - id: openai-gpt-5-5-codex-max
     providerRef: openai-main
@@ -283,7 +294,7 @@ models:
     enabled: true
     defaultFor: []
     governance: { allowedModes: [read_only, suggest, execute], dataBoundary: external_api }
-    metadataOverrides: { recommendedFor: ["coding", "deep-reasoning", "demo-safe"] }
+    metadataOverrides: { recommendedFor: ["coding", "deep-reasoning"] }
 
   - id: anthropic-claude-sonnet-4-6
     providerRef: anthropic-main

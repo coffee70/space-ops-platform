@@ -39,6 +39,7 @@ test("tool execution client posts through tool-execution-service only", async ()
         request_id: "33333333-3333-4333-8333-333333333333",
         tool_call_id: "44444444-4444-4444-8444-444444444444",
       },
+      assistant_message_id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
       tool_name: "get_platform_service",
       input: { service_slug: "agent-runtime-service" },
       execution_mode: "read_only",
@@ -52,6 +53,7 @@ test("tool execution client posts through tool-execution-service only", async ()
   assert.equal(calls[0]?.url, "http://localhost:8100/internal/runtime-services/tool-execution-service/execute");
   const requestBody = JSON.parse(String(calls[0]?.init?.body ?? "{}")) as Record<string, unknown>;
   assert.deepEqual(requestBody.input, { service_slug: "agent-runtime-service" });
+  assert.equal(requestBody.assistant_message_id, "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa");
   assert.equal(requestBody.confirmation_token, null);
   assert.equal(requestBody.permission_request_id, null);
 });
@@ -91,6 +93,7 @@ test("tool execution client forwards top-level confirmation token", async () => 
         request_id: "33333333-3333-4333-8333-333333333333",
         tool_call_id: "44444444-4444-4444-8444-444444444444",
       },
+      assistant_message_id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
       tool_name: "create_working_branch",
       input: {},
       execution_mode: "execute",
@@ -141,6 +144,7 @@ test("tool execution client forwards permission request id for approved permissi
         request_id: "33333333-3333-4333-8333-333333333333",
         tool_call_id: "44444444-4444-4444-8444-444444444444",
       },
+      assistant_message_id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
       tool_name: "deploy_preview_change",
       input: {},
       execution_mode: "execute",
@@ -186,6 +190,7 @@ test("tool execution client rejects malformed response payloads", async () => {
             request_id: "33333333-3333-4333-8333-333333333333",
             tool_call_id: "44444444-4444-4444-8444-444444444444",
           },
+          assistant_message_id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
           tool_name: "get_platform_service",
           input: { service_slug: "agent-runtime-service" },
           execution_mode: "read_only",

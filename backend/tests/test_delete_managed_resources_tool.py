@@ -96,6 +96,7 @@ async def test_delete_managed_resources_execute_tool_records_call_and_events(mon
     response = await tool_execution.execute_tool(
         tool_execution.ToolExecutionRequest(
             conversation_id="11111111-1111-1111-1111-111111111111",
+            assistant_message_id="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
             agent_run_id="22222222-2222-2222-2222-222222222222",
             request_id="33333333-3333-3333-3333-333333333333",
             tool_call_id="44444444-4444-4444-4444-444444444444",
@@ -159,6 +160,7 @@ async def test_execute_tool_rejects_schema_invalid_input_before_mapping(monkeypa
         await tool_execution.execute_tool(
             tool_execution.ToolExecutionRequest(
                 conversation_id="11111111-1111-1111-1111-111111111111",
+                assistant_message_id="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
                 agent_run_id="22222222-2222-2222-2222-222222222222",
                 request_id="33333333-3333-3333-3333-333333333333",
                 tool_call_id="44444444-4444-4444-4444-444444444444",

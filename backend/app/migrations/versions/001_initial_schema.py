@@ -412,6 +412,9 @@ def upgrade() -> None:
         sa.Column("mission_id", sa.Text(), nullable=True),
         sa.Column("vehicle_id", sa.Text(), nullable=True),
         sa.Column("execution_mode", sa.Text(), nullable=False, server_default="read_only"),
+        sa.Column("selected_model_id", sa.Text(), nullable=True),
+        sa.Column("title_source", sa.Text(), nullable=True),
+        sa.Column("title_model_id", sa.Text(), nullable=True),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
     )
@@ -427,6 +430,9 @@ def upgrade() -> None:
         ),
         sa.Column("role", sa.Text(), nullable=False),
         sa.Column("content", sa.Text(), nullable=False),
+        sa.Column("request_id", UUID(as_uuid=True), nullable=True),
+        sa.Column("agent_run_id", UUID(as_uuid=True), nullable=True),
+        sa.Column("sequence", sa.Integer(), nullable=True),
         sa.Column("metadata_json", JSONB(), nullable=False),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
     )
@@ -470,6 +476,12 @@ def upgrade() -> None:
             sa.ForeignKey("ai_conversations.id", ondelete="SET NULL"),
             nullable=True,
         ),
+        sa.Column(
+            "assistant_message_id",
+            UUID(as_uuid=True),
+            sa.ForeignKey("ai_conversation_messages.id", ondelete="CASCADE"),
+            nullable=False,
+        ),
         sa.Column("agent_run_id", UUID(as_uuid=True), nullable=False),
         sa.Column("request_id", UUID(as_uuid=True), nullable=False),
         sa.Column("tool_call_id", UUID(as_uuid=True), nullable=False),
@@ -478,8 +490,10 @@ def upgrade() -> None:
         sa.Column("redacted_input_json", JSONB(), nullable=False),
         sa.Column("output_json", JSONB(), nullable=True),
         sa.Column("status", sa.Text(), nullable=False),
+        sa.Column("sequence", sa.Integer(), nullable=True),
         sa.Column("started_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("completed_at", sa.DateTime(timezone=True), nullable=True),
+        sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("error_message", sa.Text(), nullable=True),
     )
     op.create_index("ix_ai_tool_calls_conversation_started", "ai_tool_calls", ["conversation_id", "started_at"])
@@ -495,6 +509,18 @@ def upgrade() -> None:
             sa.ForeignKey("ai_conversations.id", ondelete="SET NULL"),
             nullable=True,
         ),
+        sa.Column(
+            "assistant_message_id",
+            UUID(as_uuid=True),
+            sa.ForeignKey("ai_conversation_messages.id", ondelete="CASCADE"),
+            nullable=False,
+        ),
+        sa.Column(
+            "tool_call_record_id",
+            UUID(as_uuid=True),
+            sa.ForeignKey("ai_tool_calls.id", ondelete="CASCADE"),
+            nullable=False,
+        ),
         sa.Column("agent_run_id", UUID(as_uuid=True), nullable=False),
         sa.Column("request_id", UUID(as_uuid=True), nullable=False),
         sa.Column("tool_call_id", UUID(as_uuid=True), nullable=False),
@@ -507,6 +533,7 @@ def upgrade() -> None:
         sa.Column("execution_mode", sa.Text(), nullable=False),
         sa.Column("response_json", JSONB(), nullable=True),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
+        sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("resolved_at", sa.DateTime(timezone=True), nullable=True),
     )
     op.create_index(
@@ -709,15 +736,15 @@ def downgrade() -> None:
     op.drop_index("ix_ai_agent_events_conversation_created", table_name="ai_agent_events")
     op.drop_table("ai_agent_events")
 
-    op.drop_index("ix_ai_tool_calls_tool_call_id", table_name="ai_tool_calls")
-    op.drop_index("ix_ai_tool_calls_agent_run_started", table_name="ai_tool_calls")
-    op.drop_index("ix_ai_tool_calls_conversation_started", table_name="ai_tool_calls")
-    op.drop_table("ai_tool_calls")
-
     op.drop_index("ix_ai_tool_permission_requests_tool_call_id", table_name="ai_tool_permission_requests")
     op.drop_index("ix_ai_tool_permission_requests_status_created", table_name="ai_tool_permission_requests")
     op.drop_index("ix_ai_tool_permission_requests_agent_run_created", table_name="ai_tool_permission_requests")
     op.drop_table("ai_tool_permission_requests")
+
+    op.drop_index("ix_ai_tool_calls_tool_call_id", table_name="ai_tool_calls")
+    op.drop_index("ix_ai_tool_calls_agent_run_started", table_name="ai_tool_calls")
+    op.drop_index("ix_ai_tool_calls_conversation_started", table_name="ai_tool_calls")
+    op.drop_table("ai_tool_calls")
 
     op.drop_index("ix_ai_tool_definitions_name", table_name="ai_tool_definitions")
     op.drop_table("ai_tool_definitions")

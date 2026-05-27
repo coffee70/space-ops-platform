@@ -68,6 +68,7 @@ test("createToolSet excludes disabled tools from active model tools", () => {
       request_id: REQUEST_ID,
       tool_call_id: null,
     },
+    assistantMessageId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
     toolExecutionClient: {
       async execute() {
         return {
@@ -112,6 +113,7 @@ test("createToolSet replaces provider tool-call identifiers with platform UUIDs"
       request_id: REQUEST_ID,
       tool_call_id: null,
     },
+    assistantMessageId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
     toolExecutionClient: {
       async execute(input) {
         traces.push({ tool_call_id: input.trace.tool_call_id });
@@ -231,6 +233,7 @@ test("permission-required tool waits, re-executes with permission request id, an
       request_id: REQUEST_ID,
       tool_call_id: null,
     },
+    assistantMessageId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
     toolExecutionClient: {
       async execute(input) {
         executionCalls.push({ permission_request_id: input.permission_request_id });
@@ -321,6 +324,7 @@ test("permission-required tool returns denial result without executing approved 
       request_id: REQUEST_ID,
       tool_call_id: null,
     },
+    assistantMessageId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
     toolExecutionClient: {
       async execute(input) {
         executionCount += 1;

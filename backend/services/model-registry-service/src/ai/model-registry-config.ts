@@ -11,6 +11,7 @@ import type {
   ModelProviderType,
   ModelRegistryEntry,
   ModelRegistryProvider,
+  ChatTitleGenerationConfig,
   RuntimeConfig,
 } from "../types.js";
 
@@ -90,6 +91,18 @@ const providerEntrySchema = z.object({
   baseUrl: z.string().url().optional(),
 });
 
+const optionalModelIdSchema = z.preprocess((value) => {
+  if (typeof value === "string" && value.trim().length === 0) return null;
+  return value;
+}, z.string().min(1).nullable().optional());
+
+const chatTitleGenerationSchema = z
+  .object({
+    model_id: optionalModelIdSchema,
+  })
+  .strict()
+  .optional();
+
 const registryFileSchema = z.object({
   version: z.literal(1),
   defaults: z.object({
@@ -111,6 +124,7 @@ const registryFileSchema = z.object({
         .optional(),
     })
     .optional(),
+  chat_title_generation: chatTitleGenerationSchema,
   providers: z.record(z.string(), providerEntrySchema),
   models: z.array(modelEntrySchema),
 });
@@ -119,6 +133,7 @@ export type ModelRegistryConfigFile = z.infer<typeof registryFileSchema>;
 
 export type LoadedModelRegistry = {
   defaults: ModelRegistryConfigFile["defaults"];
+  chatTitleGeneration: ChatTitleGenerationConfig;
   metadataResolvers: ModelRegistryConfigFile["metadataResolvers"];
   providersById: Map<string, ModelRegistryProvider>;
   models: ModelRegistryEntry[];
@@ -354,6 +369,9 @@ function buildLoadedRegistry(parsed: ModelRegistryConfigFile): LoadedModelRegist
 
   return {
     defaults: parsed.defaults,
+    chatTitleGeneration: {
+      modelId: parsed.chat_title_generation?.model_id?.trim() || null,
+    },
     metadataResolvers: parsed.metadataResolvers,
     providersById,
     models,
