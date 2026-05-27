@@ -28,8 +28,9 @@ export function fallbackTitleFromConversation(conversation: ConversationDetail):
 async function resolveTitleModelId(dependencies: RunDependencies): Promise<string | null> {
   const catalog = await dependencies.modelCatalog.listModelsResponse();
   const available = catalog.models.filter((model) => model.enabled && model.isAvailable);
-  if (dependencies.config.titleGenerationModelId) {
-    const configured = available.find((model) => model.id === dependencies.config.titleGenerationModelId);
+  const configuredModelId = catalog.chat_title_generation?.model_id?.trim() || null;
+  if (configuredModelId) {
+    const configured = available.find((model) => model.id === configuredModelId);
     if (configured) {
       return configured.id;
     }

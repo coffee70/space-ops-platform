@@ -209,7 +209,7 @@ test("conversation patch updates persisted settings and manual title", async () 
   assert.equal(updated.title_source, "manual");
 });
 
-test("title generation uses configured available model", async () => {
+test("title generation uses YAML configured available model from catalog", async () => {
   const store = new MemoryConversationStore();
   const conversation = await store.createConversation({
     title: null,
@@ -227,6 +227,7 @@ test("title generation uses configured available model", async () => {
   const modelCatalog = new FakeModelCatalog(
     {
       default_model_id: "fallback-model",
+      chat_title_generation: { model_id: "title-model" },
       models: [fallback, configured],
       metadata: { registrySource: "config", metadataResolvers: ["test"], cached: true, updatedAt: new Date(0).toISOString() },
     },
@@ -243,7 +244,7 @@ test("title generation uses configured available model", async () => {
   await maybeGenerateConversationTitle({
     conversationId: conversation.id,
     dependencies: {
-      config: baseRuntimeConfig({ titleGenerationModelId: "title-model" }),
+      config: baseRuntimeConfig(),
       store,
       contextClient: new FakeContextClient(),
       toolRegistryClient: new FakeToolRegistryClient([]),
@@ -269,7 +270,7 @@ test("title generation uses configured available model", async () => {
   assert.equal(updated?.title_model_id, "title-model");
 });
 
-test("title generation falls back to first available configured model when unset and preserves manual titles", async () => {
+test("title generation falls back to first available model when YAML title model is unset", async () => {
   const store = new MemoryConversationStore();
   const conversation = await store.createConversation({
     title: null,
@@ -281,7 +282,7 @@ test("title generation falls back to first available configured model when unset
   const first = modelOption({ id: "first-available", isDefault: false });
   const second = modelOption({ id: "second-available", isDefault: true });
   const dependencies = {
-    config: baseRuntimeConfig({ titleGenerationModelId: null }),
+    config: baseRuntimeConfig(),
     store,
     contextClient: new FakeContextClient(),
     toolRegistryClient: new FakeToolRegistryClient([]),
@@ -298,6 +299,7 @@ test("title generation falls back to first available configured model when unset
     modelCatalog: new FakeModelCatalog(
       {
         default_model_id: "second-available",
+        chat_title_generation: { model_id: null },
         models: [first, second],
         metadata: { registrySource: "config", metadataResolvers: ["test"], cached: true, updatedAt: new Date(0).toISOString() },
       },
@@ -317,6 +319,134 @@ test("title generation falls back to first available configured model when unset
   const generated = await store.getConversation(conversation.id);
   assert.equal(resolvedModelId, "first-available");
   assert.equal(generated?.title, "Battery Telemetry");
+});
+
+test("title generation falls back safely when YAML title model is unavailable disabled or missing", async () => {
+  const cases = [
+    {
+      name: "unavailable",
+      models: [
+        modelOption({
+          id: "configured-title",
+          enabled: true,
+          isAvailable: false,
+          disabledReason: "Provider model id is unavailable.",
+          isDefault: false,
+        }),
+      ],
+    },
+    {
+      name: "disabled",
+      models: [
+        modelOption({
+          id: "configured-title",
+          enabled: false,
+          isAvailable: false,
+          disabledReason: "Model is disabled.",
+          isDefault: false,
+        }),
+      ],
+    },
+    {
+      name: "missing",
+      models: [],
+    },
+  ];
+
+  for (const currentCase of cases) {
+    const store = new MemoryConversationStore();
+    const conversation = await store.createConversation({
+      title: null,
+      execution_mode: "read_only",
+      initial_message: { role: "user", content: `Inspect ${currentCase.name} propulsion telemetry.` },
+    });
+    await store.appendMessage({ conversationId: conversation.id, role: "assistant", content: "Propulsion telemetry looks nominal." });
+    let resolvedModelId: string | null | undefined;
+    const first = modelOption({ id: "first-available", isDefault: false });
+
+    await maybeGenerateConversationTitle({
+      conversationId: conversation.id,
+      dependencies: {
+        config: baseRuntimeConfig(),
+        store,
+        contextClient: new FakeContextClient(),
+        toolRegistryClient: new FakeToolRegistryClient([]),
+        toolExecutionClient: new FakeToolExecutionClient({
+          conversation_id: null,
+          agent_run_id: "run",
+          request_id: "req",
+          tool_call_id: "tool",
+          status: "completed",
+          output: {},
+          raw_events: [],
+        }),
+        modelRunner: createStaticModelRunner([{ type: "text-delta", textDelta: "Propulsion Telemetry" }]),
+        modelCatalog: new FakeModelCatalog(
+          {
+            default_model_id: "first-available",
+            chat_title_generation: { model_id: "configured-title" },
+            models: [...currentCase.models, first],
+            metadata: { registrySource: "config", metadataResolvers: ["test"], cached: true, updatedAt: new Date(0).toISOString() },
+          },
+          (modelId, _mode) => {
+            resolvedModelId = modelId;
+            return {
+              option: first,
+              runtime: {
+                id: first.id,
+                providerType: first.providerType,
+                providerModelId: first.providerModelId,
+                apiKey: "key",
+                baseUrl: null,
+              },
+            };
+          },
+        ),
+        createId: crypto.randomUUID,
+        now: () => new Date(),
+      },
+    });
+
+    const generated = await store.getConversation(conversation.id);
+    assert.equal(resolvedModelId, "first-available", currentCase.name);
+    assert.equal(generated?.title, "Propulsion Telemetry", currentCase.name);
+    assert.equal(generated?.title_model_id, "first-available", currentCase.name);
+  }
+});
+
+test("title generation preserves manual titles", async () => {
+  const store = new MemoryConversationStore();
+  const conversation = await store.createConversation({
+    title: null,
+    execution_mode: "read_only",
+    initial_message: { role: "user", content: "Inspect battery telemetry." },
+  });
+  await store.appendMessage({ conversationId: conversation.id, role: "assistant", content: "Battery telemetry is stable." });
+  const first = modelOption({ id: "first-available", isDefault: false });
+  const dependencies = {
+    config: baseRuntimeConfig(),
+    store,
+    contextClient: new FakeContextClient(),
+    toolRegistryClient: new FakeToolRegistryClient([]),
+    toolExecutionClient: new FakeToolExecutionClient({
+      conversation_id: null,
+      agent_run_id: "run",
+      request_id: "req",
+      tool_call_id: "tool",
+      status: "completed",
+      output: {},
+      raw_events: [],
+    }),
+    modelRunner: createStaticModelRunner([{ type: "text-delta", textDelta: "Battery Telemetry" }]),
+    modelCatalog: new FakeModelCatalog({
+      default_model_id: "first-available",
+      chat_title_generation: { model_id: "first-available" },
+      models: [first],
+      metadata: { registrySource: "config", metadataResolvers: ["test"], cached: true, updatedAt: new Date(0).toISOString() },
+    }),
+    createId: crypto.randomUUID,
+    now: () => new Date(),
+  };
 
   await store.updateConversation(conversation.id, { title: "Manual Battery Name", title_source: "manual" });
   await maybeGenerateConversationTitle({ conversationId: conversation.id, dependencies });

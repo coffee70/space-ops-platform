@@ -84,6 +84,10 @@ export type ModelRegistryEntry = {
   };
 };
 
+export type ChatTitleGenerationConfig = {
+  modelId: string | null;
+};
+
 export type AiEngineerModelOption = {
   id: string;
   providerRef: string;
@@ -132,6 +136,9 @@ export type ResolvedChatModel = {
 
 export type ListAiEngineerModelsResponse = {
   default_model_id: string;
+  chat_title_generation: {
+    model_id: string | null;
+  };
   models: AiEngineerModelOption[];
   metadata: {
     registrySource: "config";
@@ -159,4 +166,3 @@ export interface RuntimeConfig {
   openRouterBaseUrl: string | null;
   modelMetadataCacheTtlSeconds: number | null;
 }
-

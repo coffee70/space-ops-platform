@@ -33,7 +33,6 @@ export function baseRuntimeConfig(overrides: Partial<RuntimeConfig> = {}): Runti
     openAiApiKey: null,
     openAiBaseUrl: null,
     modelId: "gpt-4o-mini",
-    titleGenerationModelId: null,
     maxSteps: 5,
     requestTimeoutMs: 1000,
     scriptedMode: null,

@@ -437,6 +437,9 @@ export type ResolvedChatModel = {
 
 export type ListAiEngineerModelsResponse = {
   default_model_id: string;
+  chat_title_generation?: {
+    model_id: string | null;
+  };
   models: AiEngineerModelOption[];
   metadata: {
     registrySource: "config";
@@ -469,7 +472,6 @@ export interface RuntimeConfig {
   openAiApiKey: string | null;
   openAiBaseUrl: string | null;
   modelId: string;
-  titleGenerationModelId: string | null;
   maxSteps: number;
   requestTimeoutMs: number;
   scriptedMode: string | null;
