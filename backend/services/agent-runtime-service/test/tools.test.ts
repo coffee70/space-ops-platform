@@ -33,6 +33,86 @@ test("schemaToZod rejects confirmation_token when tool schema is strict empty ob
   assert.equal(result.success, false);
 });
 
+const CALL_PLATFORM_HTTP_GET_SCHEMA = {
+  type: "object",
+  required: ["path"],
+  additionalProperties: false,
+  properties: {
+    path: {
+      type: "string",
+      description: "Same-origin platform path beginning with /. Absolute URLs are not allowed.",
+    },
+    query: {
+      type: "object",
+      description: "Optional query parameters to append to the request.",
+      additionalProperties: { type: ["string", "number", "boolean"] },
+    },
+    headers: {
+      type: "object",
+      description: "Optional non-sensitive request headers.",
+      additionalProperties: { type: "string" },
+    },
+    timeout_ms: {
+      type: "integer",
+      minimum: 100,
+      maximum: 30000,
+      default: 10000,
+    },
+    expected_status: {
+      oneOf: [
+        { type: "integer", minimum: 100, maximum: 599 },
+        {
+          type: "array",
+          items: { type: "integer", minimum: 100, maximum: 599 },
+        },
+      ],
+      description: "Optional expected HTTP status or list of acceptable statuses.",
+    },
+    max_response_bytes: {
+      type: "integer",
+      minimum: 1024,
+      maximum: 131072,
+      default: 32768,
+    },
+  },
+};
+
+test("schemaToZod accepts call_platform_http_get rich JSON Schema inputs", () => {
+  const schema = schemaToZod(CALL_PLATFORM_HTTP_GET_SCHEMA);
+
+  assert.equal(schema.safeParse({ path: "/apps/overview" }).success, true);
+  assert.equal(
+    schema.safeParse({
+      path: "/apps/overview",
+      query: { source_id: "sim", limit: 10, latest: true },
+    }).success,
+    true,
+  );
+  assert.equal(
+    schema.safeParse({
+      path: "/apps/overview",
+      headers: { "x-request-id": "abc" },
+    }).success,
+    true,
+  );
+  assert.equal(schema.safeParse({ path: "/apps/overview", expected_status: 200 }).success, true);
+  assert.equal(schema.safeParse({ path: "/apps/overview", expected_status: [200, 204] }).success, true);
+});
+
+test("schemaToZod rejects invalid call_platform_http_get inputs", () => {
+  const schema = schemaToZod(CALL_PLATFORM_HTTP_GET_SCHEMA);
+
+  assert.equal(schema.safeParse({ path: "/apps/overview", extra: true }).success, false);
+  assert.equal(
+    schema.safeParse({
+      path: "/apps/overview",
+      headers: { authorization: 123 },
+    }).success,
+    false,
+  );
+  assert.equal(schema.safeParse({ path: "/apps/overview", expected_status: "200" }).success, false);
+});
+
 test("createToolSet excludes disabled tools from active model tools", () => {
   const definitions: ToolDefinition[] = [
     {

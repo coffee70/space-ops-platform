@@ -34,11 +34,13 @@ export function filterToolDefinitionsForExecutionMode(
 }
 
 type JsonSchema = {
-  type?: string;
+  type?: string | string[];
   properties?: Record<string, JsonSchema>;
   required?: string[];
-  additionalProperties?: boolean;
+  additionalProperties?: boolean | JsonSchema;
   items?: JsonSchema;
+  oneOf?: JsonSchema[];
+  anyOf?: JsonSchema[];
   enum?: Array<string | number | boolean>;
   description?: string;
   minLength?: number;
@@ -50,11 +52,13 @@ type JsonSchema = {
 const JsonSchemaSchema: z.ZodType<JsonSchema> = z.lazy(() =>
   z
     .object({
-      type: z.string().optional(),
+      type: z.union([z.string(), z.array(z.string())]).optional(),
       properties: z.record(JsonSchemaSchema).optional(),
       required: z.array(z.string()).optional(),
-      additionalProperties: z.boolean().optional(),
+      additionalProperties: z.union([z.boolean(), JsonSchemaSchema]).optional(),
       items: JsonSchemaSchema.optional(),
+      oneOf: z.array(JsonSchemaSchema).optional(),
+      anyOf: z.array(JsonSchemaSchema).optional(),
       enum: z.array(z.union([z.string(), z.number(), z.boolean()])).optional(),
       description: z.string().optional(),
       minLength: z.number().optional(),
@@ -71,7 +75,36 @@ function applyCommonConstraints(schema: JsonSchema, field: ZodTypeAny): ZodTypeA
   return constrained;
 }
 
+function unionFromSchemas(schemas: ZodTypeAny[]): ZodTypeAny {
+  if (schemas.length === 0) {
+    return z.never();
+  }
+  if (schemas.length === 1) {
+    return schemas[0] ?? z.never();
+  }
+  return z.union(schemas as [ZodTypeAny, ZodTypeAny, ...ZodTypeAny[]]);
+}
+
 function schemaNodeToZod(schema: JsonSchema): ZodTypeAny {
+  if (Array.isArray(schema.oneOf) && schema.oneOf.length > 0) {
+    return applyCommonConstraints(schema, unionFromSchemas(schema.oneOf.map(schemaNodeToZod)));
+  }
+
+  if (Array.isArray(schema.anyOf) && schema.anyOf.length > 0) {
+    return applyCommonConstraints(schema, unionFromSchemas(schema.anyOf.map(schemaNodeToZod)));
+  }
+
+  if (Array.isArray(schema.type)) {
+    return applyCommonConstraints(
+      schema,
+      unionFromSchemas(
+        schema.type.map((type) =>
+          schemaNodeToZod({ ...schema, type, oneOf: undefined, anyOf: undefined }),
+        ),
+      ),
+    );
+  }
+
   switch (schema.type) {
     case "string": {
       let value = z.string();
@@ -107,8 +140,15 @@ function schemaNodeToZod(schema: JsonSchema): ZodTypeAny {
         const prop = schemaNodeToZod(propSchema);
         shape[key] = required.has(key) ? prop : prop.optional();
       }
+
       const objectSchema = z.object(shape);
-      return applyCommonConstraints(schema, schema.additionalProperties === false ? objectSchema.strict() : objectSchema);
+      if (schema.additionalProperties === false) {
+        return applyCommonConstraints(schema, objectSchema.strict());
+      }
+      if (schema.additionalProperties && typeof schema.additionalProperties === "object") {
+        return applyCommonConstraints(schema, objectSchema.catchall(schemaNodeToZod(schema.additionalProperties)));
+      }
+      return applyCommonConstraints(schema, objectSchema);
     }
     default:
       return z.unknown();
