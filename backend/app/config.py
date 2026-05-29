@@ -20,6 +20,9 @@ class Settings(BaseSettings):
     openai_base_url: str = ""
     control_plane_url: str = "http://localhost:8100"
     nats_url: str = "nats://localhost:4222"
+    tool_execution_platform_http_base_url: str = "http://platform-api-gateway:8000"
+    tool_execution_platform_http_timeout_ms: int = 10000
+    tool_execution_platform_http_max_response_bytes: int = 32768
     # Comma-separated list of allowed CORS origins (e.g. https://app.example.com). Default: localhost for dev.
     cors_origins: str = "http://localhost:3000,http://127.0.0.1:3000"
     # Optional full-match regex for browser Origin (e.g. Docker/LAN UI on port 3000). Empty = disabled.

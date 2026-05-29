@@ -2,7 +2,10 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 import asyncio
+import json
+import time
 import uuid
+from urllib.parse import urlsplit
 
 import httpx
 from fastapi import Depends, HTTPException, Request
@@ -98,6 +101,185 @@ async def _cp_put(path: str, json_body: dict) -> dict:
     if resp.status_code >= 400:
         raise HTTPException(status_code=resp.status_code, detail=_detail_from_http_response(resp))
     return resp.json()
+
+
+_PLATFORM_HTTP_ALLOWED_REQUEST_HEADERS = {
+    "accept",
+    "x-request-id",
+    "x-trace-id",
+}
+
+_PLATFORM_HTTP_SENSITIVE_HEADERS = {
+    "authorization",
+    "cookie",
+    "set-cookie",
+    "x-api-key",
+    "x-auth-token",
+    "proxy-authorization",
+}
+
+
+def _platform_http_base_url() -> str:
+    return get_settings().tool_execution_platform_http_base_url.rstrip("/")
+
+
+def _validate_platform_http_path(path: object) -> str:
+    if not isinstance(path, str):
+        raise HTTPException(status_code=400, detail="path must be a string")
+    normalized = path.strip()
+    if not normalized.startswith("/"):
+        raise HTTPException(status_code=400, detail="path must start with /")
+    if normalized.startswith("//"):
+        raise HTTPException(status_code=400, detail="absolute or protocol-relative URLs are not allowed")
+    parsed = urlsplit(normalized)
+    if parsed.scheme or parsed.netloc:
+        raise HTTPException(status_code=400, detail="absolute URLs are not allowed")
+    return normalized
+
+
+def _sanitize_platform_http_request_headers(headers: object | None) -> dict[str, str]:
+    sanitized = {"accept": "application/json, text/plain, */*"}
+    if headers is None:
+        return sanitized
+    if not isinstance(headers, dict):
+        raise HTTPException(status_code=400, detail="headers must be an object")
+    for raw_name, raw_value in headers.items():
+        if not isinstance(raw_name, str) or not isinstance(raw_value, str):
+            raise HTTPException(status_code=400, detail="headers must contain string names and values")
+        name = raw_name.strip().lower()
+        if name in _PLATFORM_HTTP_SENSITIVE_HEADERS:
+            continue
+        if name not in _PLATFORM_HTTP_ALLOWED_REQUEST_HEADERS:
+            continue
+        sanitized[name] = raw_value
+    return sanitized
+
+
+def _redact_platform_http_response_headers(headers: httpx.Headers) -> dict[str, str]:
+    output: dict[str, str] = {}
+    for name, value in headers.items():
+        normalized = name.lower()
+        if normalized in _PLATFORM_HTTP_SENSITIVE_HEADERS:
+            output[name] = "***REDACTED***"
+        else:
+            output[name] = value
+    return output
+
+
+def _expected_status_matches(status: int | None, expected: object | None) -> bool:
+    if status is None:
+        return False
+    if expected is None:
+        return 200 <= status < 400
+    if isinstance(expected, int):
+        return status == expected
+    if isinstance(expected, list):
+        return any(isinstance(item, int) and status == item for item in expected)
+    return False
+
+
+def _bounded_platform_http_timeout_ms(value: object | None) -> int:
+    settings = get_settings()
+    configured = value if value is not None else settings.tool_execution_platform_http_timeout_ms
+    try:
+        timeout_ms = int(configured)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="timeout_ms must be an integer") from None
+    return max(100, min(timeout_ms, 30000))
+
+
+def _bounded_platform_http_max_response_bytes(value: object | None) -> int:
+    settings = get_settings()
+    configured = value if value is not None else settings.tool_execution_platform_http_max_response_bytes
+    try:
+        max_response_bytes = int(configured)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="max_response_bytes must be an integer") from None
+    return max(1024, min(max_response_bytes, 131072))
+
+
+async def _call_platform_http_get(tool_input: dict) -> dict:
+    path = _validate_platform_http_path(tool_input.get("path"))
+    query = tool_input.get("query") if isinstance(tool_input.get("query"), dict) else None
+    headers = _sanitize_platform_http_request_headers(tool_input.get("headers"))
+    timeout_ms = _bounded_platform_http_timeout_ms(tool_input.get("timeout_ms"))
+    max_response_bytes = _bounded_platform_http_max_response_bytes(tool_input.get("max_response_bytes"))
+    expected_status = tool_input.get("expected_status")
+
+    request_summary = {
+        "method": "GET",
+        "path": path,
+        "query": query or {},
+        "resolved_base": "platform_gateway",
+    }
+
+    started = time.perf_counter()
+    try:
+        async with httpx.AsyncClient(timeout=timeout_ms / 1000, follow_redirects=False) as client:
+            resp = await client.get(f"{_platform_http_base_url()}{path}", params=query, headers=headers)
+    except httpx.TimeoutException:
+        return {
+            "ok": False,
+            "request": request_summary,
+            "response": None,
+            "validation": {"expected_status": expected_status, "status_matches": False},
+            "diagnostics": {
+                "trace_id": None,
+                "error_type": "timeout",
+                "error_message": f"GET timed out after {timeout_ms} ms",
+            },
+        }
+    except httpx.RequestError as exc:
+        return {
+            "ok": False,
+            "request": request_summary,
+            "response": None,
+            "validation": {"expected_status": expected_status, "status_matches": False},
+            "diagnostics": {
+                "trace_id": None,
+                "error_type": exc.__class__.__name__,
+                "error_message": str(exc),
+            },
+        }
+
+    duration_ms = int((time.perf_counter() - started) * 1000)
+    raw_body = resp.content
+    truncated = len(raw_body) > max_response_bytes
+    body_bytes = raw_body[:max_response_bytes]
+    body_text = body_bytes.decode(resp.encoding or "utf-8", errors="replace")
+    body_json = None
+    if "application/json" in resp.headers.get("content-type", ""):
+        try:
+            body_json = json.loads(body_text)
+        except ValueError:
+            body_json = None
+
+    status_matches = _expected_status_matches(resp.status_code, expected_status)
+    ok = status_matches
+    result = {
+        "ok": ok,
+        "request": request_summary,
+        "response": {
+            "status": resp.status_code,
+            "status_text": resp.reason_phrase,
+            "headers": _redact_platform_http_response_headers(resp.headers),
+            "body_text": body_text,
+            "body_json": body_json,
+            "truncated": truncated,
+            "duration_ms": duration_ms,
+        },
+        "validation": {
+            "expected_status": expected_status,
+            "status_matches": status_matches if expected_status is not None else None,
+        },
+        "diagnostics": {
+            "trace_id": resp.headers.get("x-request-id") or resp.headers.get("x-trace-id"),
+            "error_type": None,
+            "error_message": None,
+        },
+    }
+    return redact(result)
+
 
 
 def _unit_field(unit: dict, snake: str, camel: str) -> str | None:
@@ -496,6 +678,8 @@ async def _execute_mapped_tool(name: str, tool_input: dict, *, db: Session, trac
         return await _cp_get(f"deployments/{tool_input['deployment_id']}/logs")
     if name == 'wait_for_deployment':
         return await _wait_for_deployment(tool_input)
+    if name == 'call_platform_http_get':
+        return await _call_platform_http_get(tool_input)
 
     if name == 'create_working_branch':
         payload = {'branch': tool_input['branch'], 'from_branch': tool_input.get('from_branch') or 'main'}

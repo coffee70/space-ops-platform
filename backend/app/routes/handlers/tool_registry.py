@@ -59,6 +59,7 @@ SUPPORTED_TOOL_NAMES: frozenset[str] = frozenset(
         'get_deployment_status',
         'get_deployment_logs',
         'wait_for_deployment',
+        'call_platform_http_get',
         'navigate_to_application',
         'create_working_branch',
         'scaffold_service',
@@ -207,6 +208,49 @@ TOOL_INPUT_SCHEMAS: dict[str, dict] = {
         },
         'required': ['deployment_id'],
         'additionalProperties': False,
+    },
+    'call_platform_http_get': {
+        'type': 'object',
+        'required': ['path'],
+        'additionalProperties': False,
+        'properties': {
+            'path': {
+                'type': 'string',
+                'description': 'Same-origin platform path beginning with /. Absolute URLs are not allowed.',
+            },
+            'query': {
+                'type': 'object',
+                'description': 'Optional query parameters to append to the request.',
+                'additionalProperties': {'type': ['string', 'number', 'boolean']},
+            },
+            'headers': {
+                'type': 'object',
+                'description': 'Optional non-sensitive request headers.',
+                'additionalProperties': {'type': 'string'},
+            },
+            'timeout_ms': {
+                'type': 'integer',
+                'minimum': 100,
+                'maximum': 30000,
+                'default': 10000,
+            },
+            'expected_status': {
+                'oneOf': [
+                    {'type': 'integer', 'minimum': 100, 'maximum': 599},
+                    {
+                        'type': 'array',
+                        'items': {'type': 'integer', 'minimum': 100, 'maximum': 599},
+                    },
+                ],
+                'description': 'Optional expected HTTP status or list of acceptable statuses.',
+            },
+            'max_response_bytes': {
+                'type': 'integer',
+                'minimum': 1024,
+                'maximum': 131072,
+                'default': 32768,
+            },
+        },
     },
     'create_working_branch': {
         'type': 'object',
@@ -425,6 +469,7 @@ def reconcile_tool_definitions(db: Session) -> dict:
         ('get_deployment_status', 'Get durable deployment status by deployment id.', 'deployment', 'layer1', 'read_only'),
         ('get_deployment_logs', 'Get deployment logs by deployment id.', 'deployment', 'layer1', 'read_only'),
         ('wait_for_deployment', 'Wait for a deployment to reach a terminal lifecycle state.', 'deployment', 'layer1', 'read_only'),
+        ('call_platform_http_get', 'Call a same-origin platform HTTP GET route through the platform API gateway for diagnostic validation.', 'diagnostics', 'platform', 'read_only'),
         ('navigate_to_application', 'Navigate Mission Control UI to a platform application.', 'navigation', 'layer3', 'read_only'),
     ]
 
@@ -449,6 +494,7 @@ def reconcile_tool_definitions(db: Session) -> dict:
         'get_deployment_status': ('control-plane', 'GET /deployments/{deployment_id}'),
         'get_deployment_logs': ('control-plane', 'GET /deployments/{deployment_id}/logs'),
         'wait_for_deployment': ('control-plane', 'GET /deployments/{deployment_id}'),
+        'call_platform_http_get': ('platform-api-gateway', 'GET {path}'),
     }
 
     for name, description, cat, lt, ej in read_tools:
