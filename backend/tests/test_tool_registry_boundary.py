@@ -22,8 +22,8 @@ def test_supported_tool_inventory_matches_input_schemas() -> None:
     assert not missing
 
 
-def test_supported_registry_has_exactly_thirty_one_tools() -> None:
-    assert len(tool_registry.SUPPORTED_TOOL_NAMES) == 31
+def test_supported_registry_has_exactly_thirty_two_tools() -> None:
+    assert len(tool_registry.SUPPORTED_TOOL_NAMES) == 32
 
 
 def test_write_classification_tools_are_supported() -> None:
@@ -89,6 +89,33 @@ def test_query_recent_telemetry_backing_documents_recent_endpoint() -> None:
     )
 
 
+def test_call_platform_http_get_schema_is_strict_and_validates_expected_status() -> None:
+    schema = tool_registry.TOOL_INPUT_SCHEMAS["call_platform_http_get"]
+    assert schema["required"] == ["path"]
+    assert schema.get("additionalProperties") is False
+    validate_tool_input(schema, {"path": "/telemetry/health"})
+    validate_tool_input(schema, {"path": "/telemetry/health", "expected_status": 200})
+    validate_tool_input(schema, {"path": "/telemetry/health", "expected_status": [200, 204]})
+    validate_tool_input(
+        schema,
+        {
+            "path": "/telemetry/health",
+            "query": {"source_id": "simulator", "limit": 10, "latest": True},
+            "headers": {"x-request-id": "req-1"},
+            "timeout_ms": 30000,
+            "max_response_bytes": 131072,
+        },
+    )
+    with pytest.raises(ToolInputValidationError):
+        validate_tool_input(schema, {})
+    with pytest.raises(ToolInputValidationError):
+        validate_tool_input(schema, {"path": "/telemetry/health", "method": "POST"})
+    with pytest.raises(ToolInputValidationError):
+        validate_tool_input(schema, {"path": "/telemetry/health", "timeout_ms": 99})
+    with pytest.raises(ToolInputValidationError):
+        validate_tool_input(schema, {"path": "/telemetry/health", "max_response_bytes": 131073})
+
+
 @pytest.mark.parametrize("tool_name", ["get_deployment_status", "get_deployment_logs", "wait_for_deployment"])
 def test_deployment_diagnostic_tools_require_deployment_id(tool_name: str) -> None:
     schema = tool_registry.TOOL_INPUT_SCHEMAS[tool_name]
@@ -142,12 +169,20 @@ def test_phase3_write_deploy_delete_tools_remain_metadata_only_and_discoverable(
     assert seeded["get_deployment_status"].backing_api == "GET /deployments/{deployment_id}"
     assert seeded["get_deployment_logs"].backing_api == "GET /deployments/{deployment_id}/logs"
     assert seeded["wait_for_deployment"].backing_api == "GET /deployments/{deployment_id}"
+    assert seeded["call_platform_http_get"].backing_service == "platform-api-gateway"
+    assert seeded["call_platform_http_get"].backing_api == "GET {path}"
     assert seeded["get_deployment_status"].required_execution_mode == "read_only"
     assert seeded["get_deployment_logs"].required_execution_mode == "read_only"
     assert seeded["wait_for_deployment"].required_execution_mode == "read_only"
     assert seeded["get_deployment_status"].read_write_classification == "read"
     assert seeded["get_deployment_logs"].read_write_classification == "read"
     assert seeded["wait_for_deployment"].read_write_classification == "read"
+    assert seeded["call_platform_http_get"].required_execution_mode == "read_only"
+    assert seeded["call_platform_http_get"].read_write_classification == "read"
+    assert seeded["call_platform_http_get"].mode_policy_json["read_only"] == "enabled"
+    assert seeded["call_platform_http_get"].mode_policy_json["suggest"] == "enabled"
+    assert seeded["call_platform_http_get"].mode_policy_json["execute"] == "enabled"
+    assert seeded["call_platform_http_get"].mode_policy_json["governed_execute"] == "enabled"
     assert seeded["resolve_preview_deploy_target"].mode_policy_json["read_only"] == "enabled"
     assert seeded["resolve_preview_deploy_target"].read_write_classification == "read"
     assert seeded["revert_preview_change"].backing_api == "POST /change-previews/revert"
