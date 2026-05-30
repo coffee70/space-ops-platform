@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timezone
+import inspect
 import sys
 import types
 import uuid
@@ -452,6 +453,13 @@ def test_get_code_index_status_tool_is_registered_and_schema_backed() -> None:
     assert schema["properties"]["branch"]["maxLength"] == 256
     assert schema["anyOf"] == [{"required": ["repository"]}, {"required": ["root"]}]
     assert schema["additionalProperties"] is False
+
+    reconcile_source = inspect.getsource(tool_registry.reconcile_tool_definitions)
+    assert "('get_code_index_status', 'Inspect managed repository code index lifecycle readiness before or after indexed search.', 'code_intelligence', 'layer2', 'read_only')" in reconcile_source
+    assert (
+        "'get_code_index_status': ('code-intelligence-service', 'GET /intelligence/code/repositories/status')"
+        in reconcile_source
+    )
 
 
 @pytest.mark.anyio
