@@ -23,7 +23,7 @@ def test_supported_tool_inventory_matches_input_schemas() -> None:
 
 
 def test_supported_registry_has_exactly_thirty_two_tools() -> None:
-    assert len(tool_registry.SUPPORTED_TOOL_NAMES) == 32
+    assert len(tool_registry.SUPPORTED_TOOL_NAMES) == 33
 
 
 def test_write_classification_tools_are_supported() -> None:
