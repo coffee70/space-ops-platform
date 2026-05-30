@@ -22,7 +22,7 @@ def test_supported_tool_inventory_matches_input_schemas() -> None:
     assert not missing
 
 
-def test_supported_registry_has_exactly_thirty_two_tools() -> None:
+def test_supported_registry_has_exactly_thirty_three_tools() -> None:
     assert len(tool_registry.SUPPORTED_TOOL_NAMES) == 33
 
 

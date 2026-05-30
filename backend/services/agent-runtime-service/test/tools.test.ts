@@ -113,6 +113,23 @@ test("schemaToZod rejects invalid call_platform_http_get inputs", () => {
   assert.equal(schema.safeParse({ path: "/apps/overview", expected_status: "200" }).success, false);
 });
 
+test("schemaToZod handles simplified get_code_index_status schema", () => {
+  const schema = schemaToZod({
+    type: "object",
+    properties: {
+      repository: { type: "string", maxLength: 256 },
+      root: { type: "string", maxLength: 512 },
+      branch: { type: "string", maxLength: 256 },
+    },
+    additionalProperties: false,
+  });
+
+  assert.equal(schema.safeParse({ repository: "space-ops-platform" }).success, true);
+  assert.equal(schema.safeParse({ root: "project/space-ops-platform" }).success, true);
+  assert.equal(schema.safeParse({ repository: "x", extra: true }).success, false);
+  assert.equal(schema.safeParse({}).success, true);
+});
+
 test("createToolSet excludes disabled tools from active model tools", () => {
   const definitions: ToolDefinition[] = [
     {
@@ -167,6 +184,77 @@ test("createToolSet excludes disabled tools from active model tools", () => {
 
   assert.ok("enabled_tool" in tools);
   assert.equal("disabled_tool" in tools, false);
+});
+
+test("createToolSet skips malformed tool schema and emits diagnostic", () => {
+  const diagnostics: Array<{ name: string; reason: string }> = [];
+  const emittedEvents: Array<{ event_type: string; payload: Record<string, unknown> }> = [];
+  const definitions: ToolDefinition[] = [
+    {
+      name: "valid_tool",
+      description: "Valid",
+      category: "platform_discovery",
+      layer_target: "layer1",
+      read_write_classification: "read",
+      required_execution_mode: "read_only",
+      enabled: true,
+      requires_confirmation: false,
+      input_schema_json: { type: "object", properties: {}, additionalProperties: false },
+    },
+    {
+      name: "bad_tool",
+      description: "Bad",
+      category: "platform_discovery",
+      layer_target: "layer1",
+      read_write_classification: "read",
+      required_execution_mode: "read_only",
+      enabled: true,
+      requires_confirmation: false,
+      input_schema_json: { type: "None" } as unknown as Record<string, unknown>,
+    },
+  ];
+
+  const tools = createToolSet({
+    toolDefinitions: definitions,
+    executionMode: "read_only",
+    trace: {
+      conversation_id: CONVERSATION_ID,
+      agent_run_id: AGENT_RUN_ID,
+      request_id: REQUEST_ID,
+      tool_call_id: null,
+    },
+    assistantMessageId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+    toolExecutionClient: {
+      async execute() {
+        return {
+          conversation_id: CONVERSATION_ID,
+          agent_run_id: AGENT_RUN_ID,
+          request_id: REQUEST_ID,
+          tool_call_id: TOOL_CALL_ID,
+          status: "completed",
+          output: {},
+          raw_events: [],
+        };
+      },
+    },
+    onToolSchemaInvalid(definition, reason) {
+      diagnostics.push({ name: definition.name, reason });
+    },
+    emitRawToolEvents: async (events) => {
+      emittedEvents.push(...(events ?? []).map((event) => ({ event_type: event.event_type, payload: event.payload })));
+    },
+  });
+
+  assert.ok("valid_tool" in tools);
+  assert.equal("bad_tool" in tools, false);
+  assert.deepEqual(diagnostics, [{ name: "bad_tool", reason: 'tool input schema root type must be "object"' }]);
+  assert.equal(emittedEvents.length, 1);
+  assert.equal(emittedEvents[0]?.event_type, "tool.schema_invalid");
+  assert.deepEqual(emittedEvents[0]?.payload, {
+    tool_name: "bad_tool",
+    reason: 'tool input schema root type must be "object"',
+    action: "omitted_from_model_toolset",
+  });
 });
 
 test("createToolSet replaces provider tool-call identifiers with platform UUIDs", async () => {

@@ -163,6 +163,47 @@ export function schemaToZod(schema: unknown): ZodTypeAny {
   return schemaNodeToZod(parsed.data);
 }
 
+type ToolSchemaValidationResult =
+  | { ok: true; schema: ZodTypeAny }
+  | { ok: false; reason: string };
+
+function validateProviderToolSchema(schema: unknown): JsonSchema {
+  if (typeof schema !== "object" || schema === null || Array.isArray(schema)) {
+    throw new Error("tool input schema must be a JSON object");
+  }
+
+  const raw = schema as Record<string, unknown>;
+  if (raw.type !== "object") {
+    throw new Error('tool input schema root type must be "object"');
+  }
+  if (
+    raw.properties !== undefined &&
+    (typeof raw.properties !== "object" || raw.properties === null || Array.isArray(raw.properties))
+  ) {
+    throw new Error("tool input schema properties must be an object");
+  }
+  if (raw.anyOf !== undefined || raw.oneOf !== undefined) {
+    throw new Error("tool input schema root anyOf/oneOf is not supported for model tools");
+  }
+
+  const parsed = JsonSchemaSchema.safeParse(schema);
+  if (!parsed.success) {
+    throw new Error("tool input schema is not valid JSON Schema");
+  }
+  return parsed.data;
+}
+
+function safeSchemaToZod(schema: unknown): ToolSchemaValidationResult {
+  try {
+    return { ok: true, schema: schemaNodeToZod(validateProviderToolSchema(schema)) };
+  } catch (error) {
+    return {
+      ok: false,
+      reason: error instanceof Error ? error.message : "invalid_tool_input_schema",
+    };
+  }
+}
+
 function approvedPermissionOperationEvents(
   toolName: string,
   toolCallId: string,
@@ -199,77 +240,96 @@ export function createToolSet(input: {
     output: unknown,
     status: "completed" | "failed" | "confirmation_required",
   ) => void | Promise<void>;
+  onToolSchemaInvalid?: (definition: ToolDefinition, reason: string) => void;
   emitRawToolEvents: (events: RawEventFact[] | undefined) => Promise<void>;
 }): ToolSet {
   const toolEntries = filterToolDefinitionsForExecutionMode(input.toolDefinitions, input.executionMode)
-    .map((definition) => {
-      const inputSchema = schemaToZod(definition.input_schema_json);
-      return [
-        definition.name,
-        tool({
-        description: definition.description,
-        inputSchema,
-        execute: async (args: unknown, _options: { toolCallId?: string }) => {
-          const parsedArgs = inputSchema.safeParse(args);
-          const normalizedArgs =
-            parsedArgs.success && typeof parsedArgs.data === "object" && parsedArgs.data !== null
-              ? (parsedArgs.data as Record<string, unknown>)
-              : {};
-          const toolCallId = randomUUID();
-
-          await input.onToolCallRequested?.(definition, toolCallId, normalizedArgs);
-          const response = await input.toolExecutionClient.execute({
-            trace: withToolTrace(input.trace, toolCallId),
-            assistant_message_id: input.assistantMessageId,
-            tool_name: definition.name,
-            input: normalizedArgs,
-            execution_mode: input.executionMode,
-          });
-          await input.emitRawToolEvents(response.raw_events);
-          if (response.status === "permission_required") {
-            const output = response.output && typeof response.output === "object" ? (response.output as Record<string, unknown>) : {};
-            const permissionRequestId =
-              typeof output.permission_request_id === "string" ? output.permission_request_id : null;
-            if (!permissionRequestId || !input.toolPermissionClient) {
-              return response.output;
-            }
-
-            const decision = await input.toolPermissionClient.waitForDecision({
-              permissionRequestId,
-              abortSignal: input.abortSignal,
-            });
-            await input.emitRawToolEvents(decision.raw_events);
-            if (decision.status === "denied") {
-              return {
-                status: "permission_denied",
-                message: "The user denied this tool call. No action was taken.",
-                permission_request_id: permissionRequestId,
-                tool_name: definition.name,
-                reason: decision.reason ?? "user_denied",
-              };
-            }
-
-            await input.emitRawToolEvents(approvedPermissionOperationEvents(definition.name, toolCallId, normalizedArgs));
-            const approvedResponse = await input.toolExecutionClient.execute({
-              trace: withToolTrace(input.trace, toolCallId),
-              assistant_message_id: input.assistantMessageId,
+    .flatMap((definition) => {
+      const schemaResult = safeSchemaToZod(definition.input_schema_json);
+      if (!schemaResult.ok) {
+        input.onToolSchemaInvalid?.(definition, schemaResult.reason);
+        void input.emitRawToolEvents([
+          {
+            event_type: "tool.schema_invalid",
+            emitted_by: "agent-runtime-service",
+            payload: {
               tool_name: definition.name,
-              input: normalizedArgs,
-              execution_mode: input.executionMode,
-              permission_request_id: permissionRequestId,
-            });
-            await input.emitRawToolEvents(approvedResponse.raw_events);
-            if (approvedResponse.status === "completed") {
-              await input.onToolCallCompleted?.(definition, toolCallId, normalizedArgs, approvedResponse.output, approvedResponse.status);
-            }
-            return approvedResponse.output;
-          }
-          if (response.status === "completed") {
-            await input.onToolCallCompleted?.(definition, toolCallId, normalizedArgs, response.output, response.status);
-          }
-          return response.output;
-        },
-      }),
+              reason: schemaResult.reason,
+              action: "omitted_from_model_toolset",
+            },
+          },
+        ]);
+        return [];
+      }
+      const inputSchema = schemaResult.schema;
+      return [
+        [
+          definition.name,
+          tool({
+            description: definition.description,
+            inputSchema,
+            execute: async (args: unknown, _options: { toolCallId?: string }) => {
+              const parsedArgs = inputSchema.safeParse(args);
+              const normalizedArgs =
+                parsedArgs.success && typeof parsedArgs.data === "object" && parsedArgs.data !== null
+                  ? (parsedArgs.data as Record<string, unknown>)
+                  : {};
+              const toolCallId = randomUUID();
+
+              await input.onToolCallRequested?.(definition, toolCallId, normalizedArgs);
+              const response = await input.toolExecutionClient.execute({
+                trace: withToolTrace(input.trace, toolCallId),
+                assistant_message_id: input.assistantMessageId,
+                tool_name: definition.name,
+                input: normalizedArgs,
+                execution_mode: input.executionMode,
+              });
+              await input.emitRawToolEvents(response.raw_events);
+              if (response.status === "permission_required") {
+                const output = response.output && typeof response.output === "object" ? (response.output as Record<string, unknown>) : {};
+                const permissionRequestId =
+                  typeof output.permission_request_id === "string" ? output.permission_request_id : null;
+                if (!permissionRequestId || !input.toolPermissionClient) {
+                  return response.output;
+                }
+
+                const decision = await input.toolPermissionClient.waitForDecision({
+                  permissionRequestId,
+                  abortSignal: input.abortSignal,
+                });
+                await input.emitRawToolEvents(decision.raw_events);
+                if (decision.status === "denied") {
+                  return {
+                    status: "permission_denied",
+                    message: "The user denied this tool call. No action was taken.",
+                    permission_request_id: permissionRequestId,
+                    tool_name: definition.name,
+                    reason: decision.reason ?? "user_denied",
+                  };
+                }
+
+                await input.emitRawToolEvents(approvedPermissionOperationEvents(definition.name, toolCallId, normalizedArgs));
+                const approvedResponse = await input.toolExecutionClient.execute({
+                  trace: withToolTrace(input.trace, toolCallId),
+                  assistant_message_id: input.assistantMessageId,
+                  tool_name: definition.name,
+                  input: normalizedArgs,
+                  execution_mode: input.executionMode,
+                  permission_request_id: permissionRequestId,
+                });
+                await input.emitRawToolEvents(approvedResponse.raw_events);
+                if (approvedResponse.status === "completed") {
+                  await input.onToolCallCompleted?.(definition, toolCallId, normalizedArgs, approvedResponse.output, approvedResponse.status);
+                }
+                return approvedResponse.output;
+              }
+              if (response.status === "completed") {
+                await input.onToolCallCompleted?.(definition, toolCallId, normalizedArgs, response.output, response.status);
+              }
+              return response.output;
+            },
+          }),
+        ],
       ];
     });
 

@@ -7,9 +7,18 @@ function validPayload(eventType: keyof typeof AGENT_EVENT_REQUIRED_PAYLOAD_FIELD
   return Object.fromEntries(AGENT_EVENT_REQUIRED_PAYLOAD_FIELDS[eventType].map((field) => [field, `${field}-value`]));
 }
 
+const TOOL_CALL_EVENT_TYPES = new Set([
+  "tool.started",
+  "tool.completed",
+  "tool.failed",
+  "tool.permission_required",
+  "tool.permission_approved",
+  "tool.permission_denied",
+]);
+
 test("every fixed event type validates required payload fields", () => {
   for (const eventType of Object.keys(AGENT_EVENT_REQUIRED_PAYLOAD_FIELDS) as Array<keyof typeof AGENT_EVENT_REQUIRED_PAYLOAD_FIELDS>) {
-    assert.equal(validateAgentEventPayload(eventType, validPayload(eventType), eventType.startsWith("tool.") ? "tool-call-1" : null), eventType);
+    assert.equal(validateAgentEventPayload(eventType, validPayload(eventType), TOOL_CALL_EVENT_TYPES.has(eventType) ? "tool-call-1" : null), eventType);
   }
 });
 
@@ -20,6 +29,21 @@ test("missing required payload fields and unsupported event types are rejected",
 
 test("tool lifecycle events require tool_call_id", () => {
   assert.throws(() => validateAgentEventPayload("tool.completed", validPayload("tool.completed"), null), /requires tool_call_id/);
+});
+
+test("tool schema diagnostics do not require a tool_call_id", () => {
+  assert.equal(
+    validateAgentEventPayload(
+      "tool.schema_invalid",
+      {
+        tool_name: "bad_tool",
+        reason: 'tool input schema root type must be "object"',
+        action: "omitted_from_model_toolset",
+      },
+      null,
+    ),
+    "tool.schema_invalid",
+  );
 });
 
 test("permission tool events validate required payloads and event-level tool_call_id", () => {

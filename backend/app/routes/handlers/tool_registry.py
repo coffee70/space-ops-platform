@@ -151,7 +151,6 @@ TOOL_INPUT_SCHEMAS: dict[str, dict] = {
             'root': {'type': 'string', 'maxLength': 512},
             'branch': {'type': 'string', 'maxLength': 256},
         },
-        'anyOf': [{'required': ['repository']}, {'required': ['root']}],
         'additionalProperties': False,
     },
     'search_codebase': {

@@ -674,6 +674,14 @@ async def _execute_mapped_tool(name: str, tool_input: dict, *, db: Session, trac
         branch = tool_input.get('branch') or 'main'
         root = tool_input.get('root')
         repository = tool_input.get('repository')
+        if not root and not repository:
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    'error_code': 'missing_code_index_target',
+                    'message': 'repository or root is required',
+                },
+            )
         if not root and repository:
             root = REPOSITORY_TO_MANAGED_PREFIX.get(repository, repository)
         try:

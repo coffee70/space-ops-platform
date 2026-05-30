@@ -448,11 +448,13 @@ def test_get_code_index_status_tool_is_registered_and_schema_backed() -> None:
     assert "get_code_index_status" in tool_registry.SUPPORTED_TOOL_NAMES
 
     schema = tool_registry.TOOL_INPUT_SCHEMAS["get_code_index_status"]
+    assert schema["type"] == "object"
+    assert set(schema["properties"]) == {"repository", "root", "branch"}
     assert schema["properties"]["repository"]["maxLength"] == 256
     assert schema["properties"]["root"]["maxLength"] == 512
     assert schema["properties"]["branch"]["maxLength"] == 256
-    assert schema["anyOf"] == [{"required": ["repository"]}, {"required": ["root"]}]
     assert schema["additionalProperties"] is False
+    assert "anyOf" not in schema
 
     reconcile_source = inspect.getsource(tool_registry.reconcile_tool_definitions)
     assert "('get_code_index_status', 'Inspect managed repository code index lifecycle readiness before or after indexed search.', 'code_intelligence', 'layer2', 'read_only')" in reconcile_source
@@ -460,6 +462,22 @@ def test_get_code_index_status_tool_is_registered_and_schema_backed() -> None:
         "'get_code_index_status': ('code-intelligence-service', 'GET /intelligence/code/repositories/status')"
         in reconcile_source
     )
+
+
+@pytest.mark.anyio
+async def test_get_code_index_status_tool_rejects_missing_target() -> None:
+    with pytest.raises(HTTPException) as exc_info:
+        await tool_execution._execute_mapped_tool(
+            "get_code_index_status",
+            {},
+            db=_SessionDouble(),
+        )
+
+    assert exc_info.value.status_code == 400
+    assert exc_info.value.detail == {
+        "error_code": "missing_code_index_target",
+        "message": "repository or root is required",
+    }
 
 
 @pytest.mark.anyio

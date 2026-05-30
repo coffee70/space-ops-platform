@@ -11,6 +11,7 @@ export const AGENT_EVENT_REQUIRED_PAYLOAD_FIELDS = {
   "tool.started": ["tool_name", "category", "read_write_classification", "input_preview"],
   "tool.completed": ["tool_name", "status", "result_preview", "duration_ms"],
   "tool.failed": ["tool_name", "error_code", "message", "duration_ms"],
+  "tool.schema_invalid": ["tool_name", "reason", "action"],
   "tool.permission_required": [
     "tool_name",
     "tool_call_id",
@@ -71,7 +72,14 @@ export type AgentEventType = keyof typeof AGENT_EVENT_REQUIRED_PAYLOAD_FIELDS;
 
 const agentEventTypeSchema = z.enum(Object.keys(AGENT_EVENT_REQUIRED_PAYLOAD_FIELDS) as [AgentEventType, ...AgentEventType[]]);
 
-const TOOL_EVENT_PREFIX = "tool.";
+const TOOL_CALL_EVENT_TYPES = new Set<AgentEventType>([
+  "tool.started",
+  "tool.completed",
+  "tool.failed",
+  "tool.permission_required",
+  "tool.permission_approved",
+  "tool.permission_denied",
+]);
 const SENSITIVE_KEYS = new Set(["authorization", "api_key", "token", "password", "cookie", "set-cookie", "secret"]);
 const STRING_LIMIT = 2000;
 const ARRAY_LIMIT = 20;
@@ -112,7 +120,7 @@ export function validateAgentEventPayload(eventType: string, payload: Record<str
   if (missingFields.length > 0) {
     throw new Error(`event ${eventType} missing required payload field(s): ${missingFields.join(", ")}`);
   }
-  if (parsedEventType.startsWith(TOOL_EVENT_PREFIX) && !toolCallId) {
+  if (TOOL_CALL_EVENT_TYPES.has(parsedEventType) && !toolCallId) {
     throw new Error(`event ${eventType} requires tool_call_id`);
   }
   return parsedEventType;
