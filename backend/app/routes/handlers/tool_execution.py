@@ -693,7 +693,19 @@ async def _execute_mapped_tool(name: str, tool_input: dict, *, db: Session, trac
             else:
                 raise
         raw_status = status.get('index_status') if isinstance(status, dict) else None
-        index_status = 'indexing' if raw_status == 'queued' else raw_status or 'not_indexed'
+        indexed_commit_sha = status.get('indexed_commit_sha') if isinstance(status, dict) else None
+        current_commit_sha = status.get('current_commit_sha') if isinstance(status, dict) else None
+        if raw_status == 'queued':
+            index_status = 'indexing'
+        elif (
+            raw_status == 'ready'
+            and isinstance(indexed_commit_sha, str)
+            and isinstance(current_commit_sha, str)
+            and indexed_commit_sha != current_commit_sha
+        ):
+            index_status = 'stale'
+        else:
+            index_status = raw_status or 'not_indexed'
         retry_after = 20 if index_status == 'indexing' else 30 if index_status in {'not_indexed', 'stale'} else None
         return {
             'repositories': [

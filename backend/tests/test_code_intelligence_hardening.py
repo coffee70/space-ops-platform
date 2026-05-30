@@ -442,6 +442,8 @@ def test_related_context_returns_same_file_chunks_for_canonical_path() -> None:
 
 
 def test_get_code_index_status_tool_is_registered_and_schema_backed() -> None:
+    from app.routes.handlers import tool_registry
+
     assert "get_code_index_status" in tool_registry.SUPPORTED_TOOL_NAMES
 
     schema = tool_registry.TOOL_INPUT_SCHEMAS["get_code_index_status"]
@@ -487,6 +489,38 @@ async def test_get_code_index_status_tool_calls_status_endpoint_and_normalizes_q
     assert repo["index_status"] == "indexing"
     assert repo["temporary"] is True
     assert repo["retry_after_seconds"] == 20
+
+
+@pytest.mark.anyio
+async def test_get_code_index_status_tool_marks_ready_mismatched_commit_as_stale(monkeypatch) -> None:
+    async def fake_runtime_get(slug: str, path: str, params: dict | None = None):
+        assert slug == "code-intelligence-service"
+        assert path == "repositories/status"
+        assert params == {"root": "project/space-ops-platform", "branch": "main"}
+        return {
+            "repository": "space-ops-platform",
+            "root": "project/space-ops-platform",
+            "branch": "main",
+            "index_status": "ready",
+            "indexed_commit_sha": "old1234",
+            "current_commit_sha": "new5678",
+        }
+
+    monkeypatch.setattr(tool_execution, "_runtime_get", fake_runtime_get)
+
+    out = await tool_execution._execute_mapped_tool(
+        "get_code_index_status",
+        {"repository": "space-ops-platform"},
+        db=_SessionDouble(),
+    )
+
+    repo = out["repositories"][0]
+    assert repo["raw_index_status"] == "ready"
+    assert repo["index_status"] == "stale"
+    assert repo["indexed_commit_sha"] == "old1234"
+    assert repo["current_commit_sha"] == "new5678"
+    assert repo["temporary"] is True
+    assert repo["retry_after_seconds"] == 30
 
 
 @pytest.mark.anyio
