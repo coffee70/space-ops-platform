@@ -3,7 +3,7 @@ import { z } from "zod";
 
 import { buildSystemPrompt } from "../ai/prompts.js";
 import { ModelSelectionError } from "../ai/model-errors.js";
-import { createToolSet, filterToolDefinitionsForExecutionMode } from "../ai/tools.js";
+import { createToolSet, toolSchemaInvalidDiagnosticEvent, validateToolDefinitionsForModel } from "../ai/tools.js";
 import { AgentEventStream } from "../events/stream.js";
 import { RunSequencer } from "../events/sequencer.js";
 import { runFallback } from "../fallback.js";
@@ -378,9 +378,13 @@ async function orchestrateChat(input: {
     contextPacketId = context.context_packet_id;
 
     const toolDefinitions = await dependencies.toolRegistryClient.listTools(input.trace);
-    const toolsForMode = filterToolDefinitionsForExecutionMode(toolDefinitions, input.executionMode);
-    const tools = createToolSet({
+    const { validToolDefinitions, skippedToolSchemaDiagnostics } = validateToolDefinitionsForModel({
       toolDefinitions,
+      executionMode: input.executionMode,
+    });
+    await stream.emitRawEvents(skippedToolSchemaDiagnostics.map(toolSchemaInvalidDiagnosticEvent));
+    const tools = createToolSet({
+      toolDefinitions: validToolDefinitions,
       toolExecutionClient: dependencies.toolExecutionClient,
       toolPermissionClient: dependencies.toolPermissionClient,
       trace: input.trace,
@@ -405,7 +409,7 @@ async function orchestrateChat(input: {
       executionMode: input.executionMode,
       retrievalPlan,
       context,
-      tools: toolsForMode,
+      tools: validToolDefinitions,
       messages: modelMessages,
     });
 
@@ -422,7 +426,7 @@ async function orchestrateChat(input: {
         trace: input.trace,
         executionMode: input.executionMode,
         abortSignal: input.abortSignal,
-        toolDefinitions,
+        toolDefinitions: validToolDefinitions,
         toolExecutionClient: dependencies.toolExecutionClient,
         toolPermissionClient: dependencies.toolPermissionClient,
         assistantMessageId: activeAssistantMessageId,

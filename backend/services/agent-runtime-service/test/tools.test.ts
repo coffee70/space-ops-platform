@@ -1,8 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { createToolSet, filterToolDefinitionsForExecutionMode, schemaToZod } from "../src/ai/tools.js";
-import type { ToolDefinition } from "../src/types.js";
+import { buildSystemPrompt } from "../src/ai/prompts.js";
+import { createToolSet, filterToolDefinitionsForExecutionMode, schemaToZod, validateToolDefinitionsForModel } from "../src/ai/tools.js";
+import type { ContextPacketResponse, RetrievalPlan, ToolDefinition } from "../src/types.js";
 
 const CONVERSATION_ID = "11111111-1111-4111-8111-111111111111";
 const AGENT_RUN_ID = "22222222-2222-4222-8222-222222222222";
@@ -255,6 +256,98 @@ test("createToolSet skips malformed tool schema and emits diagnostic", () => {
     reason: 'tool input schema root type must be "object"',
     action: "omitted_from_model_toolset",
   });
+});
+
+test("validated tool definitions drive both provider toolset and prompt-visible tools", () => {
+  const definitions: ToolDefinition[] = [
+    {
+      name: "valid_tool",
+      description: "Visible valid tool",
+      category: "platform_discovery",
+      layer_target: "layer1",
+      read_write_classification: "read",
+      required_execution_mode: "read_only",
+      enabled: true,
+      requires_confirmation: false,
+      input_schema_json: { type: "object", properties: {}, additionalProperties: false },
+    },
+    {
+      name: "bad_tool",
+      description: "Should not be visible",
+      category: "platform_discovery",
+      layer_target: "layer1",
+      read_write_classification: "read",
+      required_execution_mode: "read_only",
+      enabled: true,
+      requires_confirmation: false,
+      input_schema_json: { type: "None" } as unknown as Record<string, unknown>,
+    },
+  ];
+  const { validToolDefinitions, skippedToolSchemaDiagnostics } = validateToolDefinitionsForModel({
+    toolDefinitions: definitions,
+    executionMode: "read_only",
+  });
+  const tools = createToolSet({
+    toolDefinitions: validToolDefinitions,
+    executionMode: "read_only",
+    trace: {
+      conversation_id: CONVERSATION_ID,
+      agent_run_id: AGENT_RUN_ID,
+      request_id: REQUEST_ID,
+      tool_call_id: null,
+    },
+    assistantMessageId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+    toolExecutionClient: {
+      async execute() {
+        return {
+          conversation_id: CONVERSATION_ID,
+          agent_run_id: AGENT_RUN_ID,
+          request_id: REQUEST_ID,
+          tool_call_id: TOOL_CALL_ID,
+          status: "completed",
+          output: {},
+          raw_events: [],
+        };
+      },
+    },
+    emitRawToolEvents: async () => {},
+  });
+  const retrievalPlan: RetrievalPlan = {
+    documents: false,
+    code: false,
+    platform: true,
+    tools: true,
+    summary: "documents=false, code=false, platform=true, tools=true",
+  };
+  const context: ContextPacketResponse = {
+    conversation_id: CONVERSATION_ID,
+    agent_run_id: AGENT_RUN_ID,
+    request_id: REQUEST_ID,
+    context_packet_id: "ctx-1",
+    document_chunk_count: 0,
+    code_chunk_count: 0,
+    platform_metadata_bytes: 0,
+    tool_definition_count: validToolDefinitions.length,
+    truncated: false,
+    truncation_reasons: [],
+    data: {},
+    raw_events: [],
+  };
+  const prompt = buildSystemPrompt({
+    executionMode: "read_only",
+    retrievalPlan,
+    context,
+    tools: validToolDefinitions,
+    messages: [{ role: "user", content: "inspect tools" }],
+  });
+
+  assert.deepEqual(validToolDefinitions.map((definition) => definition.name), ["valid_tool"]);
+  assert.deepEqual(skippedToolSchemaDiagnostics.map((diagnostic) => diagnostic.definition.name), ["bad_tool"]);
+  assert.ok("valid_tool" in tools);
+  assert.equal("bad_tool" in tools, false);
+  assert.match(prompt, /valid_tool: Visible valid tool/);
+  assert.doesNotMatch(prompt, /bad_tool/);
+  assert.doesNotMatch(prompt, /Should not be visible/);
 });
 
 test("createToolSet replaces provider tool-call identifiers with platform UUIDs", async () => {

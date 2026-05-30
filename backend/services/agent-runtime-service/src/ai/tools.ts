@@ -167,6 +167,11 @@ type ToolSchemaValidationResult =
   | { ok: true; schema: ZodTypeAny }
   | { ok: false; reason: string };
 
+export type SkippedToolSchemaDiagnostic = {
+  definition: ToolDefinition;
+  reason: string;
+};
+
 function validateProviderToolSchema(schema: unknown): JsonSchema {
   if (typeof schema !== "object" || schema === null || Array.isArray(schema)) {
     throw new Error("tool input schema must be a JSON object");
@@ -202,6 +207,40 @@ function safeSchemaToZod(schema: unknown): ToolSchemaValidationResult {
       reason: error instanceof Error ? error.message : "invalid_tool_input_schema",
     };
   }
+}
+
+export function validateToolDefinitionsForModel(input: {
+  toolDefinitions: ToolDefinition[];
+  executionMode: ExecutionMode;
+}): {
+  validToolDefinitions: ToolDefinition[];
+  skippedToolSchemaDiagnostics: SkippedToolSchemaDiagnostic[];
+} {
+  const validToolDefinitions: ToolDefinition[] = [];
+  const skippedToolSchemaDiagnostics: SkippedToolSchemaDiagnostic[] = [];
+
+  for (const definition of filterToolDefinitionsForExecutionMode(input.toolDefinitions, input.executionMode)) {
+    const schemaResult = safeSchemaToZod(definition.input_schema_json);
+    if (schemaResult.ok) {
+      validToolDefinitions.push(definition);
+      continue;
+    }
+    skippedToolSchemaDiagnostics.push({ definition, reason: schemaResult.reason });
+  }
+
+  return { validToolDefinitions, skippedToolSchemaDiagnostics };
+}
+
+export function toolSchemaInvalidDiagnosticEvent(diagnostic: SkippedToolSchemaDiagnostic): RawEventFact {
+  return {
+    event_type: "tool.schema_invalid",
+    emitted_by: "agent-runtime-service",
+    payload: {
+      tool_name: diagnostic.definition.name,
+      reason: diagnostic.reason,
+      action: "omitted_from_model_toolset",
+    },
+  };
 }
 
 function approvedPermissionOperationEvents(
@@ -243,24 +282,20 @@ export function createToolSet(input: {
   onToolSchemaInvalid?: (definition: ToolDefinition, reason: string) => void;
   emitRawToolEvents: (events: RawEventFact[] | undefined) => Promise<void>;
 }): ToolSet {
-  const toolEntries = filterToolDefinitionsForExecutionMode(input.toolDefinitions, input.executionMode)
+  const { validToolDefinitions, skippedToolSchemaDiagnostics } = validateToolDefinitionsForModel({
+    toolDefinitions: input.toolDefinitions,
+    executionMode: input.executionMode,
+  });
+
+  for (const diagnostic of skippedToolSchemaDiagnostics) {
+    input.onToolSchemaInvalid?.(diagnostic.definition, diagnostic.reason);
+    void input.emitRawToolEvents([toolSchemaInvalidDiagnosticEvent(diagnostic)]);
+  }
+
+  const toolEntries = validToolDefinitions
     .flatMap((definition) => {
       const schemaResult = safeSchemaToZod(definition.input_schema_json);
-      if (!schemaResult.ok) {
-        input.onToolSchemaInvalid?.(definition, schemaResult.reason);
-        void input.emitRawToolEvents([
-          {
-            event_type: "tool.schema_invalid",
-            emitted_by: "agent-runtime-service",
-            payload: {
-              tool_name: definition.name,
-              reason: schemaResult.reason,
-              action: "omitted_from_model_toolset",
-            },
-          },
-        ]);
-        return [];
-      }
+      if (!schemaResult.ok) return [];
       const inputSchema = schemaResult.schema;
       return [
         [
