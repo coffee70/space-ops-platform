@@ -17,7 +17,7 @@ from app.intelligence.events import raw_event
 from app.intelligence.redaction import redact
 from app.intelligence.tool_metadata import tool_summary
 from app.intelligence.tool_permissions import build_permission_prompt, policy_for_mode
-from app.intelligence.managed_code_paths import canonicalize_managed_code_path
+from app.intelligence.managed_code_paths import REPOSITORY_TO_MANAGED_PREFIX, canonicalize_managed_code_path
 from app.routes.handlers.tool_registry import SUPPORTED_TOOL_NAMES
 from app.intelligence.schemas import ToolExecutionRequest, ToolPermissionApproveRequest, ToolPermissionDenyRequest
 from app.intelligence.tool_validation import ToolInputValidationError, ToolSchemaDefinitionError, validate_tool_input
@@ -670,6 +670,42 @@ async def _execute_mapped_tool(name: str, tool_input: dict, *, db: Session, trac
         return await _cp_get('registry/units')
     if name == 'list_managed_repositories':
         return await _cp_get('code/roots')
+    if name == 'get_code_index_status':
+        branch = tool_input.get('branch') or 'main'
+        root = tool_input.get('root')
+        repository = tool_input.get('repository')
+        if not root and repository:
+            root = REPOSITORY_TO_MANAGED_PREFIX.get(repository, repository)
+        try:
+            status = await _runtime_get(
+                'code-intelligence-service',
+                'repositories/status',
+                params={'root': root, 'branch': branch},
+            )
+        except HTTPException as exc:
+            if exc.status_code == 404:
+                status = {
+                    'repository': repository,
+                    'root': root,
+                    'branch': branch,
+                    'index_status': 'not_indexed',
+                }
+            else:
+                raise
+        raw_status = status.get('index_status') if isinstance(status, dict) else None
+        index_status = 'indexing' if raw_status == 'queued' else raw_status or 'not_indexed'
+        retry_after = 20 if index_status == 'indexing' else 30 if index_status in {'not_indexed', 'stale'} else None
+        return {
+            'repositories': [
+                {
+                    **status,
+                    'raw_index_status': raw_status,
+                    'index_status': index_status,
+                    'temporary': index_status in {'indexing', 'not_indexed', 'stale'},
+                    'retry_after_seconds': retry_after,
+                }
+            ]
+        }
     if name == 'resolve_preview_deploy_target':
         return await _resolve_preview_deploy_target(tool_input)
     if name == 'get_deployment_status':
@@ -819,16 +855,49 @@ async def _execute_mapped_tool(name: str, tool_input: dict, *, db: Session, trac
 
     # --- Code intelligence ---
     if name == 'search_codebase':
-        return await _runtime_post(
-            'code-intelligence-service',
-            'search',
-            {
-                'query': tool_input['query'],
-                'repository': tool_input.get('repository'),
-                'branch': tool_input.get('branch') or 'main',
-                'limit': tool_input.get('limit') or 6,
-            },
-        )
+        payload = {
+            'query': tool_input['query'],
+            'repository': tool_input.get('repository'),
+            'branch': tool_input.get('branch') or 'main',
+            'limit': tool_input.get('limit') or 6,
+        }
+        try:
+            return await _runtime_post('code-intelligence-service', 'search', payload)
+        except httpx.TimeoutException:
+            repository = payload.get('repository')
+            root = REPOSITORY_TO_MANAGED_PREFIX.get(repository or '') if repository else None
+            return {
+                'ok': False,
+                'status': 'unavailable',
+                'error_code': 'code_index_search_timeout',
+                'message': 'Indexed code search timed out. Treat this as temporary unless index status says failed.',
+                'repository': repository,
+                'root': root,
+                'branch': payload['branch'],
+                'temporary': True,
+                'retry_after_seconds': 30,
+                'next_diagnostic_tools': [{'tool_name': 'get_code_index_status', 'input': {'repository': repository, 'root': root, 'branch': payload['branch']}}],
+            }
+        except HTTPException as exc:
+            detail = exc.detail if isinstance(exc.detail, dict) else {'message': str(exc.detail)}
+            if detail.get('error_code') in {'code_index_not_ready', 'code_index_failed'}:
+                status = detail.get('index_status') if isinstance(detail.get('index_status'), str) else 'not_indexed'
+                if status == 'queued':
+                    status = 'indexing'
+                repository = detail.get('repository') if isinstance(detail.get('repository'), str) else payload.get('repository')
+                root = detail.get('root') if isinstance(detail.get('root'), str) else (REPOSITORY_TO_MANAGED_PREFIX.get(repository or '') if repository else None)
+                branch = detail.get('branch') if isinstance(detail.get('branch'), str) else payload['branch']
+                retry_after = detail.get('retry_after_seconds') or (20 if status == 'indexing' else 30 if status in {'not_indexed', 'stale'} else None)
+                return {
+                    'ok': False,
+                    'status': 'unavailable' if detail.get('error_code') == 'code_index_not_ready' else 'failed',
+                    **detail,
+                    'index_status': status,
+                    'temporary': detail.get('temporary', status in {'indexing', 'not_indexed', 'stale'}),
+                    'retry_after_seconds': retry_after,
+                    'next_diagnostic_tools': detail.get('next_diagnostic_tools') or [{'tool_name': 'get_code_index_status', 'input': {'repository': repository, 'root': root, 'branch': branch}}],
+                }
+            raise
     if name == 'get_related_code_context':
         try:
             fp = canonicalize_managed_code_path(tool_input['repository'], tool_input['path'])

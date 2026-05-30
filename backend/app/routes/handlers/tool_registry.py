@@ -52,6 +52,7 @@ SUPPORTED_TOOL_NAMES: frozenset[str] = frozenset(
         'get_document',
         'search_documents',
         'trigger_document_reingestion',
+        'get_code_index_status',
         'search_codebase',
         'read_source_file',
         'get_related_code_context',
@@ -141,6 +142,16 @@ TOOL_INPUT_SCHEMAS: dict[str, dict] = {
         'type': 'object',
         'properties': {'document_id': {'type': 'string', 'format': 'uuid'}},
         'required': ['document_id'],
+        'additionalProperties': False,
+    },
+    'get_code_index_status': {
+        'type': 'object',
+        'properties': {
+            'repository': {'type': 'string', 'maxLength': 256},
+            'root': {'type': 'string', 'maxLength': 512},
+            'branch': {'type': 'string', 'maxLength': 256},
+        },
+        'anyOf': [{'required': ['repository']}, {'required': ['root']}],
         'additionalProperties': False,
     },
     'search_codebase': {

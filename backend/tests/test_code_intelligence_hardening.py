@@ -441,6 +441,75 @@ def test_related_context_returns_same_file_chunks_for_canonical_path() -> None:
     assert all(row["start_line"] is not None for row in out)
 
 
+def test_get_code_index_status_tool_is_registered_and_schema_backed() -> None:
+    assert "get_code_index_status" in tool_registry.SUPPORTED_TOOL_NAMES
+
+    schema = tool_registry.TOOL_INPUT_SCHEMAS["get_code_index_status"]
+    assert schema["properties"]["repository"]["maxLength"] == 256
+    assert schema["properties"]["root"]["maxLength"] == 512
+    assert schema["properties"]["branch"]["maxLength"] == 256
+    assert schema["anyOf"] == [{"required": ["repository"]}, {"required": ["root"]}]
+    assert schema["additionalProperties"] is False
+
+
+@pytest.mark.anyio
+async def test_get_code_index_status_tool_calls_status_endpoint_and_normalizes_queued(monkeypatch) -> None:
+    called: dict = {}
+
+    async def fake_runtime_get(slug: str, path: str, params: dict | None = None):
+        called["slug"] = slug
+        called["path"] = path
+        called["params"] = params or {}
+        return {
+            "repository": "space-ops-platform",
+            "root": "project/space-ops-platform",
+            "branch": "main",
+            "index_status": "queued",
+            "indexed_commit_sha": None,
+            "current_commit_sha": "abc1234",
+        }
+
+    monkeypatch.setattr(tool_execution, "_runtime_get", fake_runtime_get)
+
+    out = await tool_execution._execute_mapped_tool(
+        "get_code_index_status",
+        {"repository": "space-ops-platform"},
+        db=_SessionDouble(),
+    )
+
+    assert called == {
+        "slug": "code-intelligence-service",
+        "path": "repositories/status",
+        "params": {"root": "project/space-ops-platform", "branch": "main"},
+    }
+    repo = out["repositories"][0]
+    assert repo["raw_index_status"] == "queued"
+    assert repo["index_status"] == "indexing"
+    assert repo["temporary"] is True
+    assert repo["retry_after_seconds"] == 20
+
+
+@pytest.mark.anyio
+async def test_get_code_index_status_tool_returns_not_indexed_on_missing_repository(monkeypatch) -> None:
+    async def fake_runtime_get(_slug: str, _path: str, params: dict | None = None):
+        raise HTTPException(status_code=404, detail="repository not found")
+
+    monkeypatch.setattr(tool_execution, "_runtime_get", fake_runtime_get)
+
+    out = await tool_execution._execute_mapped_tool(
+        "get_code_index_status",
+        {"root": "project/space-ops-apps", "branch": "main"},
+        db=_SessionDouble(),
+    )
+
+    repo = out["repositories"][0]
+    assert repo["root"] == "project/space-ops-apps"
+    assert repo["branch"] == "main"
+    assert repo["index_status"] == "not_indexed"
+    assert repo["temporary"] is True
+    assert repo["retry_after_seconds"] == 30
+
+
 @pytest.mark.anyio
 async def test_get_related_code_context_tool_keeps_canonical_path(monkeypatch) -> None:
     posted: dict = {}
