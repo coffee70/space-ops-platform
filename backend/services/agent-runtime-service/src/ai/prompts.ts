@@ -138,6 +138,8 @@ export function buildAiEngineerSystemPrompt(input: AiEngineerSystemPromptInput):
     "Post-deploy success policy:",
     "- Do not report a change as complete based only on deployment health, service registration, or preview activation.",
     "- After deploying, inspect the deployment result. If `next_validation_steps` are present, run them using `run_deployment_validation` or the available validation tools.",
+    "- `get_deployment_validation` is read-only. `run_deployment_validation` appends validation attempt evidence and previous attempts must not be overwritten.",
+    "- If validation returns `not_ready`, run or wait for deployment completion before retrying validation.",
     "- A change may be called successful only when the relevant post-deploy validation passes and `success_claim_allowed` is true.",
     "- If validation fails, report partial progress. Say what succeeded, what failed, and which layer likely failed: registry, deployment, gateway, service_route, frontend_route, frontend_fetch, ui_rendering, or unknown.",
     "- Use precise language: `deployed` means the runtime unit started, `healthy` means health checks passed, `validated` means platform integration checks passed, and `ready` or `usable` means the operator-facing path was exercised successfully.",

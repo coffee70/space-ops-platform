@@ -53,6 +53,8 @@ const FIXTURE_FILES: Array<{ path: string; content: string }> = [
   },
 ];
 
+type ValidationStatus = "not_run" | "not_ready" | "running" | "passed" | "failed";
+
 type ScriptedRunResult =
   | { status: "completed"; assistantText: string; toolCallCount: number }
   | { status: "failed"; toolCallCount: number };
@@ -182,7 +184,7 @@ async function emitChangeSummary(input: {
   targetApplicationId?: string;
   affectedCapability: string;
   riskLevel?: "low" | "medium" | "high";
-  validationStatus?: "not_run" | "running" | "passed" | "failed";
+  validationStatus?: ValidationStatus;
 }): Promise<void> {
   await input.stream.emitEvent("change.summary", {
     branch: input.branch,
@@ -309,14 +311,17 @@ export async function runScriptedMode(input: {
     await execute("create_commit", { branch: FIXTURE_BRANCH, message: "Add deterministic Phase 3 fixture service" });
     const deploymentResponse = await execute("deploy_service_or_application", { unit_id: FIXTURE_UNIT_ID, branch: FIXTURE_BRANCH });
     const deploymentId = extractDeploymentId(deploymentResponse.output);
-    let validationStatus: "not_run" | "running" | "passed" | "failed" = "not_run";
+    let validationStatus: ValidationStatus = "not_run";
     if (deploymentId) {
       const validationResponse = await execute("run_deployment_validation", { deployment_id: deploymentId });
       const rawValidationStatus =
         typeof validationResponse.output === "object" && validationResponse.output !== null
           ? (validationResponse.output as Record<string, unknown>).validation_status
           : null;
-      validationStatus = rawValidationStatus === "passed" ? "passed" : rawValidationStatus === "failed" ? "failed" : "not_run";
+      validationStatus =
+        rawValidationStatus === "passed" || rawValidationStatus === "failed" || rawValidationStatus === "not_ready"
+          ? rawValidationStatus
+          : "not_run";
     }
     await emitChangeSummary({
       stream: input.stream,

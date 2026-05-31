@@ -484,7 +484,7 @@ def reconcile_tool_definitions(db: Session) -> dict:
         ('get_deployment_status', 'Get durable deployment status by deployment id.', 'deployment', 'layer1', 'read_only'),
         ('get_deployment_logs', 'Get deployment logs by deployment id.', 'deployment', 'layer1', 'read_only'),
         ('wait_for_deployment', 'Wait for a deployment to reach a terminal lifecycle state.', 'deployment', 'layer1', 'read_only'),
-        ('run_deployment_validation', 'Run post-deploy validation checks for a deployment.', 'deployment', 'layer1', 'read_only'),
+        ('run_deployment_validation', 'Run post-deploy validation checks and append validation evidence for a deployment.', 'deployment', 'layer1', 'read_only'),
         ('get_deployment_validation', 'Get persisted post-deploy validation evidence for a deployment.', 'deployment', 'layer1', 'read_only'),
         ('call_platform_http_get', 'Call a same-origin platform HTTP GET route through the platform API gateway for diagnostic validation.', 'diagnostics', 'platform', 'read_only'),
         ('navigate_to_application', 'Navigate Mission Control UI to a platform application.', 'navigation', 'layer3', 'read_only'),
@@ -519,7 +519,8 @@ def reconcile_tool_definitions(db: Session) -> dict:
 
     for name, description, cat, lt, ej in read_tools:
         svc, api = backing_read.get(name, (None, None))
-        upsert(name=name, description=description, category=cat, layer_target=lt, read_write='read', execution_mode='read_only', backing_service=svc, backing_api=api, mode_policy=READ_ONLY_POLICY)
+        read_write = 'write' if name == 'run_deployment_validation' else 'read'
+        upsert(name=name, description=description, category=cat, layer_target=lt, read_write=read_write, execution_mode='read_only', backing_service=svc, backing_api=api, mode_policy=READ_ONLY_POLICY)
 
     writes = [
         (

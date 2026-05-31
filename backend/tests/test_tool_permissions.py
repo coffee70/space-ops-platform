@@ -186,6 +186,32 @@ async def test_wait_for_deployment_returns_immediate_healthy(monkeypatch) -> Non
 
 
 @pytest.mark.anyio
+async def test_deploy_service_result_attaches_post_deploy_success_policy(monkeypatch) -> None:
+    async def fake_cp_post(path: str, payload: dict) -> dict:
+        assert path == "deployments"
+        assert payload == {"unit_id": "phase3-test-fixture-service", "branch": "feature/phase3-no-llm"}
+        return {
+            "deployment_id": "dep_policy",
+            "unit_id": "phase3-test-fixture-service",
+            "status": "healthy",
+            "health_status": "passing",
+            "success_claim_allowed": False,
+            "next_validation_steps": [{"check_type": "service_health_gateway", "path": "/internal/runtime-services/x/health"}],
+        }
+
+    monkeypatch.setattr(tool_execution, "_cp_post", fake_cp_post)
+
+    response = await tool_execution._execute_mapped_tool(
+        "deploy_service_or_application",
+        {"unit_id": "phase3-test-fixture-service", "branch": "feature/phase3-no-llm"},
+        db=object(),
+    )
+
+    assert response["post_deploy_success_policy"]["success_claim_allowed"] is False
+    assert "next_validation_steps" in response["post_deploy_success_policy"]["message"]
+
+
+@pytest.mark.anyio
 async def test_wait_for_deployment_returns_failed_with_log_hint(monkeypatch) -> None:
     async def fake_cp_get(path: str, params: dict | None = None) -> dict:
         assert path == "deployments/dep_failed"

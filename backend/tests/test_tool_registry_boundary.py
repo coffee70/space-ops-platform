@@ -181,7 +181,8 @@ def test_phase3_write_deploy_delete_tools_remain_metadata_only_and_discoverable(
     assert seeded["get_deployment_status"].read_write_classification == "read"
     assert seeded["get_deployment_logs"].read_write_classification == "read"
     assert seeded["wait_for_deployment"].read_write_classification == "read"
-    assert seeded["run_deployment_validation"].read_write_classification == "read"
+    assert seeded["run_deployment_validation"].read_write_classification == "write"
+    assert "append validation evidence" in seeded["run_deployment_validation"].description
     assert seeded["get_deployment_validation"].read_write_classification == "read"
     assert seeded["call_platform_http_get"].required_execution_mode == "read_only"
     assert seeded["call_platform_http_get"].read_write_classification == "read"

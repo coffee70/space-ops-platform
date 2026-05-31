@@ -17,7 +17,7 @@ const WRITE_TOOL_DEFINITIONS: ToolDefinition[] = [
   description: name,
   category: "phase3-test",
   layer_target: "layer1",
-  read_write_classification: name === "run_deployment_validation" ? "read" : "write",
+  read_write_classification: "write",
   required_execution_mode: name === "run_deployment_validation" ? "read_only" : "execute",
   mode_policy_json:
     name === "run_deployment_validation"
@@ -30,7 +30,11 @@ const WRITE_TOOL_DEFINITIONS: ToolDefinition[] = [
   input_schema_json: { type: "object", properties: {}, additionalProperties: true },
 }));
 
-function toolResponse(toolName: string, trace: { conversation_id: string; agent_run_id: string; request_id: string; tool_call_id?: string | null }): ToolExecutionResponse {
+function toolResponse(
+  toolName: string,
+  trace: { conversation_id: string; agent_run_id: string; request_id: string; tool_call_id?: string | null },
+  options: { validationStatus?: "passed" | "failed" | "not_ready" } = {},
+): ToolExecutionResponse {
   const toolCallId = trace.tool_call_id ?? crypto.randomUUID();
   return {
     conversation_id: trace.conversation_id,
@@ -42,7 +46,9 @@ function toolResponse(toolName: string, trace: { conversation_id: string; agent_
       ok: true,
       tool_name: toolName,
       ...(toolName === "deploy_service_or_application" ? { deployment_id: "dep_scripted_fixture" } : {}),
-      ...(toolName === "run_deployment_validation" ? { deployment_id: "dep_scripted_fixture", validation_status: "passed" } : {}),
+      ...(toolName === "run_deployment_validation"
+        ? { deployment_id: "dep_scripted_fixture", validation_status: options.validationStatus ?? "passed" }
+        : {}),
     },
     raw_events: [
       {
@@ -192,6 +198,59 @@ test("scripted_write_deploy runs in execute mode and resumes direct deployment a
   assert.equal(toolExecution.calls[7]?.tool_name, "run_deployment_validation");
   assert.deepEqual(toolExecution.calls[7]?.input, { deployment_id: "dep_scripted_fixture" });
   assert.equal(changeSummary?.event.payload.validation_status, "passed");
+});
+
+async function runScriptedDeployWithValidationStatus(validationStatus: "failed" | "not_ready") {
+  const store = new MemoryConversationStore();
+  const conversation = await store.createConversation({
+    title: "AI Engineer Session",
+    execution_mode: "execute",
+    initial_message: { role: "user", content: "Start AI Engineer session." },
+  });
+  const toolExecution = new FakeToolExecutionClient((input) => toolResponse(input.tool_name, input.trace, { validationStatus }));
+  const app = createApp({
+    config: baseRuntimeConfig({
+      maxSteps: 3,
+      requestTimeoutMs: 1000,
+      scriptedMode: "scripted_write_deploy",
+    }),
+    store,
+    contextClient: new FakeContextClient([contextResolvedEvent()]),
+    toolRegistryClient: new FakeToolRegistryClient(WRITE_TOOL_DEFINITIONS),
+    toolExecutionClient: toolExecution,
+    modelRunner: {
+      async *stream(input) {
+        void input.model;
+        throw new Error("model runner should not be invoked in scripted mode");
+      },
+    },
+  });
+
+  const response = await app.request("/chat", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      conversation_id: conversation.id,
+      execution_mode: "execute",
+      messages: [{ role: "user", content: "Deploy the deterministic Phase 3 fixture." }],
+    }),
+  });
+
+  assert.equal(response.status, 200);
+  const chunks = parseNdjson(await response.text());
+  const changeSummary = chunks.find(
+    (chunk) => chunk.kind === "event" && (chunk as { event: { event_type: string } }).event.event_type === "change.summary",
+  ) as { event: { payload: Record<string, unknown> } } | undefined;
+  assert.equal(changeSummary?.event.payload.validation_status, validationStatus);
+  assert.equal(toolExecution.calls.at(-1)?.tool_name, "run_deployment_validation");
+}
+
+test("scripted_write_deploy preserves failed validation status", async () => {
+  await runScriptedDeployWithValidationStatus("failed");
+});
+
+test("scripted_write_deploy preserves not-ready validation status", async () => {
+  await runScriptedDeployWithValidationStatus("not_ready");
 });
 
 test("scripted_write_deploy fails before mutation when execution mode is read_only", async () => {
