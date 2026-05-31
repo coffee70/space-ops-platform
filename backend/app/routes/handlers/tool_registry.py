@@ -60,6 +60,8 @@ SUPPORTED_TOOL_NAMES: frozenset[str] = frozenset(
         'get_deployment_status',
         'get_deployment_logs',
         'wait_for_deployment',
+        'run_deployment_validation',
+        'get_deployment_validation',
         'call_platform_http_get',
         'navigate_to_application',
         'create_working_branch',
@@ -209,6 +211,8 @@ TOOL_INPUT_SCHEMAS: dict[str, dict] = {
     },
     'get_deployment_status': DEPLOYMENT_ID_INPUT,
     'get_deployment_logs': DEPLOYMENT_ID_INPUT,
+    'run_deployment_validation': DEPLOYMENT_ID_INPUT,
+    'get_deployment_validation': DEPLOYMENT_ID_INPUT,
     'wait_for_deployment': {
         'type': 'object',
         'properties': {
@@ -480,6 +484,8 @@ def reconcile_tool_definitions(db: Session) -> dict:
         ('get_deployment_status', 'Get durable deployment status by deployment id.', 'deployment', 'layer1', 'read_only'),
         ('get_deployment_logs', 'Get deployment logs by deployment id.', 'deployment', 'layer1', 'read_only'),
         ('wait_for_deployment', 'Wait for a deployment to reach a terminal lifecycle state.', 'deployment', 'layer1', 'read_only'),
+        ('run_deployment_validation', 'Run post-deploy validation checks for a deployment.', 'deployment', 'layer1', 'read_only'),
+        ('get_deployment_validation', 'Get persisted post-deploy validation evidence for a deployment.', 'deployment', 'layer1', 'read_only'),
         ('call_platform_http_get', 'Call a same-origin platform HTTP GET route through the platform API gateway for diagnostic validation.', 'diagnostics', 'platform', 'read_only'),
         ('navigate_to_application', 'Navigate Mission Control UI to a platform application.', 'navigation', 'layer3', 'read_only'),
     ]
@@ -506,6 +512,8 @@ def reconcile_tool_definitions(db: Session) -> dict:
         'get_deployment_status': ('control-plane', 'GET /deployments/{deployment_id}'),
         'get_deployment_logs': ('control-plane', 'GET /deployments/{deployment_id}/logs'),
         'wait_for_deployment': ('control-plane', 'GET /deployments/{deployment_id}'),
+        'run_deployment_validation': ('control-plane', 'POST /validation/deployments/{deployment_id}/run'),
+        'get_deployment_validation': ('control-plane', 'GET /validation/deployments/{deployment_id}'),
         'call_platform_http_get': ('platform-api-gateway', 'GET {path}'),
     }
 

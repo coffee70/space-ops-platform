@@ -165,6 +165,12 @@ function extractCommitSha(output: unknown): string | undefined {
   return typeof value === "string" && value.length > 0 ? value : undefined;
 }
 
+function extractDeploymentId(output: unknown): string | undefined {
+  if (typeof output !== "object" || output === null) return undefined;
+  const value = (output as Record<string, unknown>).deployment_id;
+  return typeof value === "string" && value.length > 0 ? value : undefined;
+}
+
 async function emitChangeSummary(input: {
   stream: AgentEventStream;
   branch: string;
@@ -301,18 +307,32 @@ export async function runScriptedMode(input: {
       });
     }
     await execute("create_commit", { branch: FIXTURE_BRANCH, message: "Add deterministic Phase 3 fixture service" });
-    await execute("deploy_service_or_application", { unit_id: FIXTURE_UNIT_ID, branch: FIXTURE_BRANCH });
+    const deploymentResponse = await execute("deploy_service_or_application", { unit_id: FIXTURE_UNIT_ID, branch: FIXTURE_BRANCH });
+    const deploymentId = extractDeploymentId(deploymentResponse.output);
+    let validationStatus: "not_run" | "running" | "passed" | "failed" = "not_run";
+    if (deploymentId) {
+      const validationResponse = await execute("run_deployment_validation", { deployment_id: deploymentId });
+      const rawValidationStatus =
+        typeof validationResponse.output === "object" && validationResponse.output !== null
+          ? (validationResponse.output as Record<string, unknown>).validation_status
+          : null;
+      validationStatus = rawValidationStatus === "passed" ? "passed" : rawValidationStatus === "failed" ? "failed" : "not_run";
+    }
     await emitChangeSummary({
       stream: input.stream,
       branch: FIXTURE_BRANCH,
       changedFiles: FIXTURE_FILES.map((file) => file.path),
       targetUnitId: FIXTURE_UNIT_ID,
       affectedCapability: "phase3-test-fixture",
+      validationStatus,
     });
     return {
       status: "completed",
       toolCallCount,
-      assistantText: "Deterministic scripted write/deploy workflow completed through the managed fork and deployment path.",
+      assistantText:
+        validationStatus === "passed"
+          ? "Deterministic scripted write/deploy workflow deployed and passed post-deploy validation."
+          : "Deterministic scripted write/deploy workflow deployed, but post-deploy validation did not pass.",
     };
   }
 

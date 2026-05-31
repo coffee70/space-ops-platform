@@ -734,6 +734,10 @@ async def _execute_mapped_tool(name: str, tool_input: dict, *, db: Session, trac
         return await _cp_get(f"deployments/{tool_input['deployment_id']}/logs")
     if name == 'wait_for_deployment':
         return await _wait_for_deployment(tool_input)
+    if name == 'run_deployment_validation':
+        return await _cp_post(f"validation/deployments/{tool_input['deployment_id']}/run", {})
+    if name == 'get_deployment_validation':
+        return await _cp_get(f"validation/deployments/{tool_input['deployment_id']}")
     if name == 'call_platform_http_get':
         return await _call_platform_http_get(tool_input)
 
@@ -777,6 +781,13 @@ async def _execute_mapped_tool(name: str, tool_input: dict, *, db: Session, trac
         if not isinstance(result, dict):
             return {'deployment': result}
         result["next_diagnostic_tools"] = _deployment_next_diagnostic_tools(result)
+        result["post_deploy_success_policy"] = {
+            "success_claim_allowed": bool(result.get("success_claim_allowed", False)),
+            "message": (
+                "Deployment health is not enough to claim completion. Run the returned "
+                "next_validation_steps or run_deployment_validation before reporting success."
+            ),
+        }
         return result
 
     if name == 'deploy_preview_change':

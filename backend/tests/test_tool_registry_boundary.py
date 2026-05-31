@@ -22,8 +22,8 @@ def test_supported_tool_inventory_matches_input_schemas() -> None:
     assert not missing
 
 
-def test_supported_registry_has_exactly_thirty_three_tools() -> None:
-    assert len(tool_registry.SUPPORTED_TOOL_NAMES) == 33
+def test_supported_registry_has_exactly_thirty_five_tools() -> None:
+    assert len(tool_registry.SUPPORTED_TOOL_NAMES) == 35
 
 
 def test_write_classification_tools_are_supported() -> None:
@@ -116,7 +116,7 @@ def test_call_platform_http_get_schema_is_strict_and_validates_expected_status()
         validate_tool_input(schema, {"path": "/telemetry/health", "max_response_bytes": 131073})
 
 
-@pytest.mark.parametrize("tool_name", ["get_deployment_status", "get_deployment_logs", "wait_for_deployment"])
+@pytest.mark.parametrize("tool_name", ["get_deployment_status", "get_deployment_logs", "wait_for_deployment", "run_deployment_validation", "get_deployment_validation"])
 def test_deployment_diagnostic_tools_require_deployment_id(tool_name: str) -> None:
     schema = tool_registry.TOOL_INPUT_SCHEMAS[tool_name]
     assert schema["required"] == ["deployment_id"]
@@ -169,14 +169,20 @@ def test_phase3_write_deploy_delete_tools_remain_metadata_only_and_discoverable(
     assert seeded["get_deployment_status"].backing_api == "GET /deployments/{deployment_id}"
     assert seeded["get_deployment_logs"].backing_api == "GET /deployments/{deployment_id}/logs"
     assert seeded["wait_for_deployment"].backing_api == "GET /deployments/{deployment_id}"
+    assert seeded["run_deployment_validation"].backing_api == "POST /validation/deployments/{deployment_id}/run"
+    assert seeded["get_deployment_validation"].backing_api == "GET /validation/deployments/{deployment_id}"
     assert seeded["call_platform_http_get"].backing_service == "platform-api-gateway"
     assert seeded["call_platform_http_get"].backing_api == "GET {path}"
     assert seeded["get_deployment_status"].required_execution_mode == "read_only"
     assert seeded["get_deployment_logs"].required_execution_mode == "read_only"
     assert seeded["wait_for_deployment"].required_execution_mode == "read_only"
+    assert seeded["run_deployment_validation"].required_execution_mode == "read_only"
+    assert seeded["get_deployment_validation"].required_execution_mode == "read_only"
     assert seeded["get_deployment_status"].read_write_classification == "read"
     assert seeded["get_deployment_logs"].read_write_classification == "read"
     assert seeded["wait_for_deployment"].read_write_classification == "read"
+    assert seeded["run_deployment_validation"].read_write_classification == "read"
+    assert seeded["get_deployment_validation"].read_write_classification == "read"
     assert seeded["call_platform_http_get"].required_execution_mode == "read_only"
     assert seeded["call_platform_http_get"].read_write_classification == "read"
     assert seeded["call_platform_http_get"].mode_policy_json["read_only"] == "enabled"
