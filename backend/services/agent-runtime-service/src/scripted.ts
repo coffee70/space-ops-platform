@@ -313,6 +313,7 @@ export async function runScriptedMode(input: {
     const deploymentId = extractDeploymentId(deploymentResponse.output);
     let validationStatus: ValidationStatus = "not_run";
     if (deploymentId) {
+      await execute("wait_for_deployment", { deployment_id: deploymentId });
       const validationResponse = await execute("run_deployment_validation", { deployment_id: deploymentId });
       const rawValidationStatus =
         typeof validationResponse.output === "object" && validationResponse.output !== null

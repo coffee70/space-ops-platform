@@ -11,6 +11,7 @@ const WRITE_TOOL_DEFINITIONS: ToolDefinition[] = [
   "write_source_file",
   "create_commit",
   "deploy_service_or_application",
+  "wait_for_deployment",
   "run_deployment_validation",
 ].map((name) => ({
   name,
@@ -46,6 +47,9 @@ function toolResponse(
       ok: true,
       tool_name: toolName,
       ...(toolName === "deploy_service_or_application" ? { deployment_id: "dep_scripted_fixture" } : {}),
+      ...(toolName === "wait_for_deployment"
+        ? { deployment_id: "dep_scripted_fixture", status: "healthy", health_status: "passing" }
+        : {}),
       ...(toolName === "run_deployment_validation"
         ? { deployment_id: "dep_scripted_fixture", validation_status: options.validationStatus ?? "passed" }
         : {}),
@@ -184,6 +188,7 @@ test("scripted_write_deploy runs in execute mode and resumes direct deployment a
     "create_commit",
     "deploy_service_or_application",
     "deploy_service_or_application",
+    "wait_for_deployment",
     "run_deployment_validation",
   ]);
   assert.ok(chunks.some((chunk) => chunk.kind === "event" && (chunk as { event: { event_type: string } }).event.event_type === "tool.permission_required"));
@@ -195,8 +200,10 @@ test("scripted_write_deploy runs in execute mode and resumes direct deployment a
   assert.equal(toolExecution.calls[5]?.permission_request_id, undefined);
   assert.equal(toolExecution.calls[6]?.tool_name, "deploy_service_or_application");
   assert.equal(toolExecution.calls[6]?.permission_request_id, "permission-deploy-1");
-  assert.equal(toolExecution.calls[7]?.tool_name, "run_deployment_validation");
+  assert.equal(toolExecution.calls[7]?.tool_name, "wait_for_deployment");
   assert.deepEqual(toolExecution.calls[7]?.input, { deployment_id: "dep_scripted_fixture" });
+  assert.equal(toolExecution.calls[8]?.tool_name, "run_deployment_validation");
+  assert.deepEqual(toolExecution.calls[8]?.input, { deployment_id: "dep_scripted_fixture" });
   assert.equal(changeSummary?.event.payload.validation_status, "passed");
 });
 
@@ -243,6 +250,14 @@ async function runScriptedDeployWithValidationStatus(validationStatus: "failed" 
   ) as { event: { payload: Record<string, unknown> } } | undefined;
   assert.equal(changeSummary?.event.payload.validation_status, validationStatus);
   assert.equal(toolExecution.calls.at(-1)?.tool_name, "run_deployment_validation");
+  const deployCallIndex = toolExecution.calls.findIndex((call) => call.tool_name === "deploy_service_or_application");
+  const waitCallIndex = toolExecution.calls.findIndex((call) => call.tool_name === "wait_for_deployment");
+  const validationCallIndex = toolExecution.calls.findIndex((call) => call.tool_name === "run_deployment_validation");
+  assert.ok(deployCallIndex >= 0);
+  assert.equal(waitCallIndex, deployCallIndex + 1);
+  assert.equal(validationCallIndex, waitCallIndex + 1);
+  assert.deepEqual(toolExecution.calls[waitCallIndex]?.input, { deployment_id: "dep_scripted_fixture" });
+  assert.deepEqual(toolExecution.calls[validationCallIndex]?.input, { deployment_id: "dep_scripted_fixture" });
 }
 
 test("scripted_write_deploy preserves failed validation status", async () => {
