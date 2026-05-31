@@ -11,15 +11,19 @@ const WRITE_TOOL_DEFINITIONS: ToolDefinition[] = [
   "write_source_file",
   "create_commit",
   "deploy_service_or_application",
+  "wait_for_deployment",
+  "run_deployment_validation",
 ].map((name) => ({
   name,
   description: name,
   category: "phase3-test",
   layer_target: "layer1",
   read_write_classification: "write",
-  required_execution_mode: "execute",
+  required_execution_mode: name === "run_deployment_validation" ? "read_only" : "execute",
   mode_policy_json:
-    name === "deploy_service_or_application"
+    name === "run_deployment_validation"
+      ? { read_only: "enabled", suggest: "enabled", execute: "enabled", governed_execute: "enabled" }
+      : name === "deploy_service_or_application"
       ? { read_only: "disabled", suggest: "requires_permission", execute: "requires_permission", governed_execute: "enabled" }
       : { read_only: "disabled", suggest: "enabled", execute: "enabled", governed_execute: "enabled" },
   enabled: true,
@@ -27,7 +31,11 @@ const WRITE_TOOL_DEFINITIONS: ToolDefinition[] = [
   input_schema_json: { type: "object", properties: {}, additionalProperties: true },
 }));
 
-function toolResponse(toolName: string, trace: { conversation_id: string; agent_run_id: string; request_id: string; tool_call_id?: string | null }): ToolExecutionResponse {
+function toolResponse(
+  toolName: string,
+  trace: { conversation_id: string; agent_run_id: string; request_id: string; tool_call_id?: string | null },
+  options: { validationStatus?: "passed" | "failed" | "not_ready" } = {},
+): ToolExecutionResponse {
   const toolCallId = trace.tool_call_id ?? crypto.randomUUID();
   return {
     conversation_id: trace.conversation_id,
@@ -35,7 +43,17 @@ function toolResponse(toolName: string, trace: { conversation_id: string; agent_
     request_id: trace.request_id,
     tool_call_id: toolCallId,
     status: "completed",
-    output: { ok: true, tool_name: toolName },
+    output: {
+      ok: true,
+      tool_name: toolName,
+      ...(toolName === "deploy_service_or_application" ? { deployment_id: "dep_scripted_fixture" } : {}),
+      ...(toolName === "wait_for_deployment"
+        ? { deployment_id: "dep_scripted_fixture", status: "healthy", health_status: "passing" }
+        : {}),
+      ...(toolName === "run_deployment_validation"
+        ? { deployment_id: "dep_scripted_fixture", validation_status: options.validationStatus ?? "passed" }
+        : {}),
+    },
     raw_events: [
       {
         event_type: "tool.started",
@@ -170,6 +188,8 @@ test("scripted_write_deploy runs in execute mode and resumes direct deployment a
     "create_commit",
     "deploy_service_or_application",
     "deploy_service_or_application",
+    "wait_for_deployment",
+    "run_deployment_validation",
   ]);
   assert.ok(chunks.some((chunk) => chunk.kind === "event" && (chunk as { event: { event_type: string } }).event.event_type === "tool.permission_required"));
   assert.ok(chunks.some((chunk) => chunk.kind === "event" && (chunk as { event: { event_type: string } }).event.event_type === "tool.permission_approved"));
@@ -180,6 +200,72 @@ test("scripted_write_deploy runs in execute mode and resumes direct deployment a
   assert.equal(toolExecution.calls[5]?.permission_request_id, undefined);
   assert.equal(toolExecution.calls[6]?.tool_name, "deploy_service_or_application");
   assert.equal(toolExecution.calls[6]?.permission_request_id, "permission-deploy-1");
+  assert.equal(toolExecution.calls[7]?.tool_name, "wait_for_deployment");
+  assert.deepEqual(toolExecution.calls[7]?.input, { deployment_id: "dep_scripted_fixture" });
+  assert.equal(toolExecution.calls[8]?.tool_name, "run_deployment_validation");
+  assert.deepEqual(toolExecution.calls[8]?.input, { deployment_id: "dep_scripted_fixture" });
+  assert.equal(changeSummary?.event.payload.validation_status, "passed");
+});
+
+async function runScriptedDeployWithValidationStatus(validationStatus: "failed" | "not_ready") {
+  const store = new MemoryConversationStore();
+  const conversation = await store.createConversation({
+    title: "AI Engineer Session",
+    execution_mode: "execute",
+    initial_message: { role: "user", content: "Start AI Engineer session." },
+  });
+  const toolExecution = new FakeToolExecutionClient((input) => toolResponse(input.tool_name, input.trace, { validationStatus }));
+  const app = createApp({
+    config: baseRuntimeConfig({
+      maxSteps: 3,
+      requestTimeoutMs: 1000,
+      scriptedMode: "scripted_write_deploy",
+    }),
+    store,
+    contextClient: new FakeContextClient([contextResolvedEvent()]),
+    toolRegistryClient: new FakeToolRegistryClient(WRITE_TOOL_DEFINITIONS),
+    toolExecutionClient: toolExecution,
+    modelRunner: {
+      async *stream(input) {
+        void input.model;
+        throw new Error("model runner should not be invoked in scripted mode");
+      },
+    },
+  });
+
+  const response = await app.request("/chat", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      conversation_id: conversation.id,
+      execution_mode: "execute",
+      messages: [{ role: "user", content: "Deploy the deterministic Phase 3 fixture." }],
+    }),
+  });
+
+  assert.equal(response.status, 200);
+  const chunks = parseNdjson(await response.text());
+  const changeSummary = chunks.find(
+    (chunk) => chunk.kind === "event" && (chunk as { event: { event_type: string } }).event.event_type === "change.summary",
+  ) as { event: { payload: Record<string, unknown> } } | undefined;
+  assert.equal(changeSummary?.event.payload.validation_status, validationStatus);
+  assert.equal(toolExecution.calls.at(-1)?.tool_name, "run_deployment_validation");
+  const deployCallIndex = toolExecution.calls.findIndex((call) => call.tool_name === "deploy_service_or_application");
+  const waitCallIndex = toolExecution.calls.findIndex((call) => call.tool_name === "wait_for_deployment");
+  const validationCallIndex = toolExecution.calls.findIndex((call) => call.tool_name === "run_deployment_validation");
+  assert.ok(deployCallIndex >= 0);
+  assert.equal(waitCallIndex, deployCallIndex + 1);
+  assert.equal(validationCallIndex, waitCallIndex + 1);
+  assert.deepEqual(toolExecution.calls[waitCallIndex]?.input, { deployment_id: "dep_scripted_fixture" });
+  assert.deepEqual(toolExecution.calls[validationCallIndex]?.input, { deployment_id: "dep_scripted_fixture" });
+}
+
+test("scripted_write_deploy preserves failed validation status", async () => {
+  await runScriptedDeployWithValidationStatus("failed");
+});
+
+test("scripted_write_deploy preserves not-ready validation status", async () => {
+  await runScriptedDeployWithValidationStatus("not_ready");
 });
 
 test("scripted_write_deploy fails before mutation when execution mode is read_only", async () => {

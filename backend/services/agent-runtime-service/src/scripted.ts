@@ -53,6 +53,8 @@ const FIXTURE_FILES: Array<{ path: string; content: string }> = [
   },
 ];
 
+type ValidationStatus = "not_run" | "not_ready" | "running" | "passed" | "failed";
+
 type ScriptedRunResult =
   | { status: "completed"; assistantText: string; toolCallCount: number }
   | { status: "failed"; toolCallCount: number };
@@ -165,6 +167,12 @@ function extractCommitSha(output: unknown): string | undefined {
   return typeof value === "string" && value.length > 0 ? value : undefined;
 }
 
+function extractDeploymentId(output: unknown): string | undefined {
+  if (typeof output !== "object" || output === null) return undefined;
+  const value = (output as Record<string, unknown>).deployment_id;
+  return typeof value === "string" && value.length > 0 ? value : undefined;
+}
+
 async function emitChangeSummary(input: {
   stream: AgentEventStream;
   branch: string;
@@ -176,7 +184,7 @@ async function emitChangeSummary(input: {
   targetApplicationId?: string;
   affectedCapability: string;
   riskLevel?: "low" | "medium" | "high";
-  validationStatus?: "not_run" | "running" | "passed" | "failed";
+  validationStatus?: ValidationStatus;
 }): Promise<void> {
   await input.stream.emitEvent("change.summary", {
     branch: input.branch,
@@ -301,18 +309,36 @@ export async function runScriptedMode(input: {
       });
     }
     await execute("create_commit", { branch: FIXTURE_BRANCH, message: "Add deterministic Phase 3 fixture service" });
-    await execute("deploy_service_or_application", { unit_id: FIXTURE_UNIT_ID, branch: FIXTURE_BRANCH });
+    const deploymentResponse = await execute("deploy_service_or_application", { unit_id: FIXTURE_UNIT_ID, branch: FIXTURE_BRANCH });
+    const deploymentId = extractDeploymentId(deploymentResponse.output);
+    let validationStatus: ValidationStatus = "not_run";
+    if (deploymentId) {
+      await execute("wait_for_deployment", { deployment_id: deploymentId });
+      const validationResponse = await execute("run_deployment_validation", { deployment_id: deploymentId });
+      const rawValidationStatus =
+        typeof validationResponse.output === "object" && validationResponse.output !== null
+          ? (validationResponse.output as Record<string, unknown>).validation_status
+          : null;
+      validationStatus =
+        rawValidationStatus === "passed" || rawValidationStatus === "failed" || rawValidationStatus === "not_ready"
+          ? rawValidationStatus
+          : "not_run";
+    }
     await emitChangeSummary({
       stream: input.stream,
       branch: FIXTURE_BRANCH,
       changedFiles: FIXTURE_FILES.map((file) => file.path),
       targetUnitId: FIXTURE_UNIT_ID,
       affectedCapability: "phase3-test-fixture",
+      validationStatus,
     });
     return {
       status: "completed",
       toolCallCount,
-      assistantText: "Deterministic scripted write/deploy workflow completed through the managed fork and deployment path.",
+      assistantText:
+        validationStatus === "passed"
+          ? "Deterministic scripted write/deploy workflow deployed and passed post-deploy validation."
+          : "Deterministic scripted write/deploy workflow deployed, but post-deploy validation did not pass.",
     };
   }
 
