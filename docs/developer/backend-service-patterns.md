@@ -66,4 +66,4 @@ Container health can pass while the gateway route fails because registry metadat
 
 - [Telemetry API Contracts](./telemetry-api-contracts.md)
 - [Platform HTTP Validation](../ai-engineer/platform-http-validation.md)
-- [Deployment Lifecycle](../../../space-ops-kernel/docs/platform/deployment-lifecycle.md)
+- Related canonical doc: `space-ops-kernel/docs/platform/deployment-lifecycle.md`
