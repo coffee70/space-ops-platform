@@ -44,6 +44,7 @@ def ingest_document_now(
     db.query(DocumentChunk).filter(DocumentChunk.document_id == document.id).delete(synchronize_session=False)
 
     chunks = chunk_text(raw_content, max_chars=1200, overlap=120)
+    document_metadata = document.metadata_json or {}
     for idx, chunk in enumerate(chunks):
         db.add(
             DocumentChunk(
@@ -52,11 +53,13 @@ def ingest_document_now(
                 content=chunk,
                 metadata_json={
                     "filename": (document.source_uri or "").removeprefix("upload://"),
+                    "source_uri": document.source_uri,
                     "document_type": document.document_type,
                     "mission_id": document.mission_id,
                     "vehicle_id": document.vehicle_id,
                     "subsystem_id": document.subsystem_id,
                     "tags": document.tags_json,
+                    **document_metadata,
                 },
                 embedding=provider.embed(chunk),
                 embedding_model=DEFAULT_EMBEDDING_MODEL,

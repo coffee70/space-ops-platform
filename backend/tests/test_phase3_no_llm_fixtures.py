@@ -26,7 +26,8 @@ if "sentence_transformers" not in sys.modules:
 from app.intelligence.chunking import chunk_text
 from app.intelligence import document_ingestion
 from app.intelligence import indexing
-from app.models.intelligence import AgentEvent, CodeChunk, CodeIndexJob, CodeRepository, Document, DocumentChunk, DocumentIngestionJob
+from app.intelligence import platform_docs_indexing
+from app.models.intelligence import AgentEvent, CodeChunk, CodeIndexJob, CodeRepository, Document, DocumentChunk, DocumentIngestionJob, PlatformDocsIndexJob
 from app.routes.handlers import code_intelligence, document_knowledge
 from services.document_ingestion_worker import main as document_ingestion_worker
 
@@ -129,7 +130,15 @@ class _ModelQuery:
         if self._model is Document:
             rows = list(self._session.documents)
             document_id = self._id_filter()
-            return [document for document in rows if document.id == document_id] if document_id else rows
+            source_uri = self._text_filter_value("source_uri")
+            document_type = self._text_filter_value("document_type")
+            if document_id:
+                rows = [document for document in rows if document.id == document_id]
+            if source_uri:
+                rows = [document for document in rows if document.source_uri == source_uri]
+            if document_type:
+                rows = [document for document in rows if document.document_type == document_type]
+            return rows
         if self._model is DocumentChunk:
             rows = list(self._session.document_chunks)
             document_id = self._document_id_filter()
@@ -152,9 +161,26 @@ class _ModelQuery:
             return list(self._session.code_chunks)
         if self._model is CodeIndexJob:
             return list(self._session.code_index_jobs)
+        if self._model is PlatformDocsIndexJob:
+            rows = list(self._session.platform_docs_index_jobs)
+            job_id = self._id_filter()
+            statuses = self._status_filter_values()
+            if job_id:
+                rows = [job for job in rows if job.id == job_id]
+            if statuses:
+                rows = [job for job in rows if job.status in statuses]
+            return rows
         return []
 
     def _uuid_filter_value(self, column_name: str):
+        for expression in self._filters:
+            left = getattr(expression, "left", None)
+            right = getattr(expression, "right", None)
+            if getattr(left, "name", None) == column_name:
+                return getattr(right, "value", None)
+        return None
+
+    def _text_filter_value(self, column_name: str):
         for expression in self._filters:
             left = getattr(expression, "left", None)
             right = getattr(expression, "right", None)
@@ -189,6 +215,7 @@ class _SessionDouble:
         self.code_repositories: list[CodeRepository] = []
         self.code_chunks: list[CodeChunk] = []
         self.code_index_jobs: list[CodeIndexJob] = []
+        self.platform_docs_index_jobs: list[PlatformDocsIndexJob] = []
         self.events: list[AgentEvent] = []
 
     def add(self, obj):
@@ -206,6 +233,8 @@ class _SessionDouble:
             self.code_chunks.append(obj)
         elif isinstance(obj, CodeIndexJob):
             self.code_index_jobs.append(obj)
+        elif isinstance(obj, PlatformDocsIndexJob):
+            self.platform_docs_index_jobs.append(obj)
         elif isinstance(obj, AgentEvent):
             self.events.append(obj)
 
@@ -453,6 +482,110 @@ async def test_document_search_accepts_non_none_embedding_objects_without_bool_c
     assert results
     assert results[0]["title"] == "battery-note.md"
     assert "battery efficiency" in results[0]["content"].lower()
+
+
+def test_platform_docs_indexer_only_indexes_allowed_docs_and_queues_ingestion(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(platform_docs_indexing, "platform_root", lambda: tmp_path / "space-ops-platform")
+    monkeypatch.setattr(platform_docs_indexing, "_current_commit_sha", lambda _repo_root: "abc123")
+    platform_root = tmp_path / "space-ops-platform"
+    docs_root = platform_root / "docs"
+    docs_root.mkdir(parents=True)
+    (docs_root / "deployment.md").write_text(
+        "\n".join(
+            [
+                "---",
+                "title: Deployment Lifecycle",
+                "layer: platform",
+                "audience: ai-engineer",
+                "topics:",
+                "  - deployment",
+                "  - validation",
+                "status: mvp",
+                "last_verified: 2026-06-01",
+                "---",
+                "# Fallback Title",
+                "Deployment health validation route notes.",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    (platform_root / "README.md").write_text("root readme should not be indexed", encoding="utf-8")
+
+    session = _SessionDouble()
+    result = platform_docs_indexing.index_platform_docs_repository(session, repository="space-ops-platform")
+
+    assert result.status == "ready"
+    assert result.document_count == 1
+    assert result.queued_document_count == 1
+    assert len(session.documents) == 1
+    doc = session.documents[0]
+    assert doc.document_type == "platform_doc"
+    assert doc.source_uri == "repo://space-ops-platform/docs/deployment.md"
+    assert doc.title == "Deployment Lifecycle"
+    assert doc.metadata_json["repository"] == "space-ops-platform"
+    assert doc.metadata_json["topics"] == ["deployment", "validation"]
+    assert doc.metadata_json["last_verified"] == "2026-06-01"
+    assert len(session.document_ingestion_jobs) == 1
+
+
+def test_platform_docs_endpoints_filter_and_search_platform_docs_only(monkeypatch) -> None:
+    monkeypatch.setattr(document_ingestion, "get_embedding_provider", lambda: _Provider())
+    session = _SessionDouble()
+    platform_doc = Document(
+        id=uuid.uuid4(),
+        title="Deployment Lifecycle",
+        document_type="platform_doc",
+        source_uri="repo://space-ops-platform/docs/deployment.md",
+        tags_json=["platform-doc", "platform", "deployment"],
+        metadata_json={
+            "source_type": "platform_doc",
+            "repository": "space-ops-platform",
+            "repo_path": "docs/deployment.md",
+            "indexed_commit_sha": "abc123",
+            "layer": "platform",
+            "audience": "ai-engineer",
+            "topics": ["deployment", "validation"],
+            "status": "mvp",
+            "last_verified": "2026-06-01",
+            "stale": False,
+        },
+        raw_content="# Deployment Lifecycle\nDeployment health validation route notes.",
+        content_hash="hash1",
+        ingestion_status="pending",
+        ingestion_error=None,
+    )
+    mission_doc = Document(
+        id=uuid.uuid4(),
+        title="Mission Deployment Notes",
+        document_type="md",
+        source_uri="upload://mission.md",
+        tags_json=["deployment"],
+        raw_content="Deployment text from mission upload.",
+        content_hash="hash2",
+        ingestion_status="pending",
+        ingestion_error=None,
+    )
+    session.add(platform_doc)
+    session.add(mission_doc)
+    document_ingestion.ingest_document_now(db=session, document=platform_doc)
+    document_ingestion.ingest_document_now(db=session, document=mission_doc)
+
+    rows = document_knowledge.list_platform_docs(repository="space-ops-platform", topic="deployment", db=session)
+    assert len(rows) == 1
+    assert rows[0]["repo_path"] == "docs/deployment.md"
+
+    results = document_knowledge.search_platform_docs(
+        {
+            "query": "deployment health validation",
+            "repository": "space-ops-platform",
+            "audience": "ai-engineer",
+            "topics": ["deployment"],
+        },
+        db=session,
+    )
+    assert results
+    assert {result["title"] for result in results} == {"Deployment Lifecycle"}
+    assert results[0]["repository"] == "space-ops-platform"
 
 
 @pytest.mark.anyio

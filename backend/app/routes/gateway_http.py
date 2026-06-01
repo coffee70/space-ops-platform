@@ -78,7 +78,7 @@ def _resolve_intelligence_service(path: str) -> tuple[str, str]:
         return "agent-runtime-service", path[len("agent/") :] if path.startswith("agent/") else ""
     if path == "context" or path.startswith("context/"):
         return "context-retrieval-service", path[len("context/") :] if path.startswith("context/") else ""
-    if path == "documents" or path == "documents/search":
+    if path == "documents" or path == "documents/search" or path == "documents/platform-docs" or path.startswith("documents/platform-docs/"):
         return "document-knowledge-service", path[len("documents/") :] if path.startswith("documents/") else ""
     if re.fullmatch(r"documents/[^/]+", path) or re.fullmatch(r"documents/[^/]+/chunks", path):
         return "document-knowledge-service", path[len("documents/") :]

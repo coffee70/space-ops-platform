@@ -584,6 +584,7 @@ def upgrade() -> None:
         sa.Column("vehicle_id", sa.Text(), nullable=True),
         sa.Column("subsystem_id", sa.Text(), nullable=True),
         sa.Column("tags_json", JSONB(), nullable=False),
+        sa.Column("metadata_json", JSONB(), nullable=False),
         sa.Column("description", sa.Text(), nullable=True),
         sa.Column("raw_content", sa.Text(), nullable=False),
         sa.Column("content_hash", sa.Text(), nullable=False),
@@ -634,6 +635,22 @@ def upgrade() -> None:
     )
     op.create_index("ix_ai_document_ingestion_jobs_status_requested", "ai_document_ingestion_jobs", ["status", "requested_at"])
     op.create_index("ix_ai_document_ingestion_jobs_document", "ai_document_ingestion_jobs", ["document_id"])
+
+    op.create_table(
+        "ai_platform_docs_index_jobs",
+        sa.Column("id", UUID(as_uuid=True), primary_key=True, nullable=False),
+        sa.Column("job_type", sa.Text(), nullable=False, server_default="platform_docs_index"),
+        sa.Column("status", sa.Text(), nullable=False),
+        sa.Column("repositories_json", JSONB(), nullable=False),
+        sa.Column("force", sa.Boolean(), nullable=False, server_default=sa.text("false")),
+        sa.Column("trigger", sa.Text(), nullable=False, server_default="manual"),
+        sa.Column("requested_at", sa.DateTime(timezone=True), nullable=False),
+        sa.Column("started_at", sa.DateTime(timezone=True), nullable=True),
+        sa.Column("completed_at", sa.DateTime(timezone=True), nullable=True),
+        sa.Column("error", sa.Text(), nullable=True),
+        sa.Column("result_json", JSONB(), nullable=False),
+    )
+    op.create_index("ix_ai_platform_docs_index_jobs_status_requested", "ai_platform_docs_index_jobs", ["status", "requested_at"])
 
     op.create_table(
         "ai_code_repositories",
@@ -724,6 +741,8 @@ def downgrade() -> None:
     op.drop_index("ix_ai_document_ingestion_jobs_document", table_name="ai_document_ingestion_jobs")
     op.drop_index("ix_ai_document_ingestion_jobs_status_requested", table_name="ai_document_ingestion_jobs")
     op.drop_table("ai_document_ingestion_jobs")
+    op.drop_index("ix_ai_platform_docs_index_jobs_status_requested", table_name="ai_platform_docs_index_jobs")
+    op.drop_table("ai_platform_docs_index_jobs")
 
     op.drop_index("ix_ai_document_chunks_document_chunk", table_name="ai_document_chunks")
     op.drop_table("ai_document_chunks")
