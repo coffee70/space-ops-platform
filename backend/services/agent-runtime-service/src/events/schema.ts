@@ -65,6 +65,18 @@ export const AGENT_EVENT_REQUIRED_PAYLOAD_FIELDS = {
     "data_boundary",
     "capabilities",
   ],
+  "model.provider_error": ["provider_type", "provider_model_id", "category", "retryable", "retry_after_ms", "message"],
+  "model.retry_scheduled": [
+    "provider_type",
+    "provider_model_id",
+    "category",
+    "attempt",
+    "max_attempts",
+    "retry_after_ms",
+    "retry_at",
+    "safe_to_retry",
+  ],
+  "model.retrying": ["provider_type", "provider_model_id", "attempt", "max_attempts"],
   error: ["error_code", "message", "source"],
 } as const;
 
