@@ -8,6 +8,12 @@
 | `space-ops-kernel` | [../space-ops-kernel/README.md](../space-ops-kernel/README.md) | [../space-ops-kernel/AGENTS.md](../space-ops-kernel/AGENTS.md) |
 | `space-ops-apps` | [../space-ops-apps/README.md](../space-ops-apps/README.md) | [../space-ops-apps/AGENTS.md](../space-ops-apps/AGENTS.md) |
 
+## Indexed documentation
+
+For platform behavior, implementation workflows, deployment procedures, runbooks, and AI Engineer retrieval, use the curated docs under `docs/`.
+
+This AGENTS.md file is local repo guidance and should not be indexed as the canonical AI Engineer knowledge corpus.
+
 ## Repo role (Layer 2)
 
 Keep changes scoped to platform APIs, schemas, data models, migrations, realtime processing, source/stream registry behavior, watchlist primitives, vehicle config validation/registry behavior, orbit framework code, position APIs, provider interfaces, Layer 2 telemetry adapters, and the Layer 2 telemetry simulator runtime.

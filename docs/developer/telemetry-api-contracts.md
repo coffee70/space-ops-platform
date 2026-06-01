@@ -1,4 +1,26 @@
-# Telemetry API Contracts (source_id and backward compatibility)
+---
+title: Telemetry API Contracts
+layer: platform
+audience: developer
+topics:
+  - telemetry-api
+  - source-scoping
+  - websockets
+status: mvp
+last_verified: 2026-06-01
+---
+
+# Telemetry API Contracts
+
+## Purpose
+
+This is the canonical Layer 2 telemetry API contract. Layer 3 apps consume this contract through REST and WebSocket APIs; Layer 2 owns the implementation and this document.
+
+## Applies To
+
+Telemetry samples, channel discovery, source registry behavior, feed status, operations timeline, realtime ingest, and WebSocket subscriptions.
+
+## Core Concepts
 
 This document describes the `source_id` parameter added to telemetry endpoints for multi-source operations. All `source_id` parameters default to `"default"` for backward compatibility.
 
@@ -51,3 +73,24 @@ This document describes the `source_id` parameter added to telemetry endpoints f
 - **subscribe_alerts**: `{ source_id?: "default" }`
 
 All realtime snapshots and updates are already source-scoped via `source_id` in the subscription.
+
+## Procedure
+
+Prefer source-scoped requests when showing live or historical telemetry for a selected source. Use explicit stream selections only for pinned historical or per-run views.
+
+## Do Not Assume
+
+Do not maintain duplicate canonical telemetry API contract docs in Layer 3. Do not infer source behavior from the frontend alone.
+
+## Validation
+
+Confirm endpoint status code, response shape, source filtering, and WebSocket subscription behavior through the platform gateway.
+
+## Failure Modes
+
+Missing or wrong `source_id` values can mix sources in watchlists, history, anomalies, and feed status views.
+
+## Related Docs
+
+- [Backend Service Patterns](./backend-service-patterns.md)
+- [Platform HTTP Validation](../ai-engineer/platform-http-validation.md)
