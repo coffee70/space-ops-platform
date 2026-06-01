@@ -144,6 +144,7 @@ class Document(Base):
     vehicle_id: Mapped[str | None] = mapped_column(Text, nullable=True)
     subsystem_id: Mapped[str | None] = mapped_column(Text, nullable=True)
     tags_json: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
+    metadata_json: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     raw_content: Mapped[str] = mapped_column(Text, nullable=False)
     content_hash: Mapped[str] = mapped_column(Text, nullable=False)
@@ -170,6 +171,23 @@ class DocumentIngestionJob(Base):
     conversation_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
     agent_run_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
     request_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+
+
+class PlatformDocsIndexJob(Base):
+    __tablename__ = "ai_platform_docs_index_jobs"
+    __table_args__ = (Index("ix_ai_platform_docs_index_jobs_status_requested", "status", "requested_at"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    job_type: Mapped[str] = mapped_column(Text, nullable=False, default="platform_docs_index")
+    status: Mapped[str] = mapped_column(Text, nullable=False)
+    repositories_json: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
+    force: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    trigger: Mapped[str] = mapped_column(Text, nullable=False, default="manual")
+    requested_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    result_json: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
 
 
 class DocumentChunk(Base):

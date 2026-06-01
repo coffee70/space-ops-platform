@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 import re
+import subprocess
 import uuid
 
 from fastapi import Depends, File, Form, HTTPException, UploadFile
@@ -10,7 +11,17 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.intelligence.events import emit_event
 from app.intelligence.hashing import sha256_text
-from app.models.intelligence import Document, DocumentChunk, DocumentIngestionJob
+from app.intelligence.platform_docs_indexing import (
+    ALLOWED_PLATFORM_DOC_ROOTS,
+    PLATFORM_DOC_DOCUMENT_TYPE,
+    enqueue_platform_docs_index_job,
+    get_platform_doc_metadata,
+    is_platform_doc,
+    latest_platform_index_jobs_by_repo,
+    normalize_repositories,
+    resolve_docs_root,
+)
+from app.models.intelligence import Document, DocumentChunk, DocumentIngestionJob, PlatformDocsIndexJob
 
 _TOKEN_SPLIT_PATTERN = re.compile(r"[^a-z0-9]+")
 _CAMEL_SPLIT_PATTERN = re.compile(r"(?<=[a-z0-9])(?=[A-Z])")
@@ -68,6 +79,11 @@ def _document_metadata_text(document: Document, chunk: DocumentChunk) -> str:
         str(document.subsystem_id or ""),
         str(document.document_type or ""),
         str(metadata.get("filename") or ""),
+        str(metadata.get("repository") or ""),
+        str(metadata.get("repo_path") or ""),
+        str(metadata.get("layer") or ""),
+        str(metadata.get("audience") or ""),
+        " ".join(str(topic) for topic in (metadata.get("topics") or []) if topic is not None),
         " ".join(str(tag) for tag in tags if tag is not None),
     ]
     return " ".join(metadata_values)
@@ -129,12 +145,65 @@ def _serialize_document(doc: Document) -> dict:
         "vehicle_id": doc.vehicle_id,
         "subsystem_id": doc.subsystem_id,
         "tags": doc.tags_json,
+        "metadata": doc.metadata_json,
         "description": doc.description,
         "ingestion_status": doc.ingestion_status,
         "ingestion_error": doc.ingestion_error,
         "created_at": doc.created_at,
         "updated_at": doc.updated_at,
     }
+
+
+def _platform_doc_row(doc: Document, chunk_count: int) -> dict:
+    metadata = get_platform_doc_metadata(doc)
+    return {
+        "document_id": str(doc.id),
+        "title": doc.title,
+        "repository": metadata.get("repository"),
+        "repo_path": metadata.get("repo_path"),
+        "audience": metadata.get("audience"),
+        "layer": metadata.get("layer"),
+        "topics": metadata.get("topics") or [],
+        "status": metadata.get("status"),
+        "last_verified": metadata.get("last_verified"),
+        "indexed_commit_sha": metadata.get("indexed_commit_sha"),
+        "content_hash": doc.content_hash,
+        "ingestion_status": doc.ingestion_status,
+        "chunk_count": chunk_count,
+        "stale": bool(metadata.get("stale")),
+    }
+
+
+def _platform_doc_chunk_count(db: Session, document_id: uuid.UUID) -> int:
+    return db.query(DocumentChunk).filter(DocumentChunk.document_id == document_id).count()
+
+
+def _matches_platform_filters(
+    doc: Document,
+    *,
+    repository: str | None = None,
+    layer: str | None = None,
+    audience: str | None = None,
+    topic: str | None = None,
+    status: str | None = None,
+    stale: bool | None = None,
+) -> bool:
+    if not is_platform_doc(doc):
+        return False
+    metadata = get_platform_doc_metadata(doc)
+    if repository and metadata.get("repository") != repository:
+        return False
+    if layer and metadata.get("layer") != layer:
+        return False
+    if audience and metadata.get("audience") != audience:
+        return False
+    if topic and topic not in (metadata.get("topics") or []):
+        return False
+    if status and metadata.get("status") != status:
+        return False
+    if stale is not None and bool(metadata.get("stale")) is not stale:
+        return False
+    return True
 
 
 def _parse_trace_id(value: str | None) -> uuid.UUID | None:
@@ -220,6 +289,7 @@ async def create_document(
         vehicle_id=vehicle_id,
         subsystem_id=subsystem_id,
         tags_json=[t.strip() for t in tags.split(",")] if tags else [],
+        metadata_json={},
         description=description,
         raw_content=raw,
         content_hash=sha256_text(raw),
@@ -323,6 +393,191 @@ def search_documents(body: dict, db: Session = Depends(get_db)):
         )
     scored.sort(key=lambda item: item["score"], reverse=True)
     return scored[:limit]
+
+
+def _current_commit_sha_for_repo(repository: str) -> str | None:
+    try:
+        repo_root = resolve_docs_root(repository).parent
+        result = subprocess.run(
+            ["git", "-C", str(repo_root), "rev-parse", "HEAD"],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        return result.stdout.strip()
+    except Exception:
+        return None
+
+
+def _repo_status_from_job(job: PlatformDocsIndexJob | None, repository: str, docs: list[Document], chunk_count: int) -> dict:
+    errors: list[str] = []
+    indexed_commit_sha = None
+    last_indexed_at = None
+    raw_status = None
+    if job:
+        raw_status = job.status
+        last_indexed_at = job.completed_at or job.started_at or job.requested_at
+        result_repos = (job.result_json or {}).get("repositories") or []
+        repo_result = next((item for item in result_repos if item.get("repository") == repository), None)
+        if repo_result:
+            errors = repo_result.get("errors") or []
+            indexed_commit_sha = repo_result.get("indexed_commit_sha")
+    if not indexed_commit_sha and docs:
+        indexed_commit_sha = get_platform_doc_metadata(docs[0]).get("indexed_commit_sha")
+
+    stale_count = sum(1 for doc in docs if get_platform_doc_metadata(doc).get("stale"))
+    if raw_status in {"queued", "running"}:
+        status = raw_status
+    elif raw_status == "failed":
+        status = "degraded" if docs else "error"
+    elif errors:
+        status = "degraded" if docs else "error"
+    elif docs:
+        status = "ready"
+    else:
+        status = "not_indexed"
+    return {
+        "repository": repository,
+        "status": status,
+        "indexed_commit_sha": indexed_commit_sha,
+        "current_commit_sha": _current_commit_sha_for_repo(repository),
+        "document_count": len(docs),
+        "chunk_count": chunk_count,
+        "stale_document_count": stale_count,
+        "last_indexed_at": last_indexed_at,
+        "last_job_id": str(job.id) if job else None,
+        "errors": errors,
+    }
+
+
+def _overall_platform_docs_status(repo_statuses: list[dict]) -> str:
+    statuses = [item["status"] for item in repo_statuses]
+    if any(status in {"queued", "running"} for status in statuses):
+        return "running"
+    if all(status == "ready" for status in statuses):
+        return "ready"
+    if all(status in {"error", "degraded"} for status in statuses):
+        return "error"
+    if all(status == "not_indexed" for status in statuses):
+        return "not_indexed"
+    if any(status == "ready" for status in statuses):
+        return "degraded"
+    if any(status in {"error", "degraded"} for status in statuses):
+        return "degraded"
+    return "not_indexed"
+
+
+def get_platform_docs_index_status(db: Session = Depends(get_db)):
+    latest_jobs = latest_platform_index_jobs_by_repo(db)
+    docs = [doc for doc in db.query(Document).all() if is_platform_doc(doc)]
+    chunks = db.query(DocumentChunk).all()
+    repo_statuses = []
+    for repository in ALLOWED_PLATFORM_DOC_ROOTS:
+        repo_docs = [doc for doc in docs if get_platform_doc_metadata(doc).get("repository") == repository]
+        doc_ids = {doc.id for doc in repo_docs}
+        chunk_count = len([chunk for chunk in chunks if chunk.document_id in doc_ids])
+        repo_statuses.append(_repo_status_from_job(latest_jobs.get(repository), repository, repo_docs, chunk_count))
+    return {"status": _overall_platform_docs_status(repo_statuses), "repositories": repo_statuses}
+
+
+def rebuild_platform_docs_index(body: dict, db: Session = Depends(get_db)):
+    repository = body.get("repository")
+    repositories = normalize_repositories([repository] if repository else None)
+    force = bool(body.get("force", False))
+    job = enqueue_platform_docs_index_job(db, repositories=repositories, force=force, trigger="manual")
+    return {"job_id": str(job.id), "status": job.status, "repositories": repositories, "force": force}
+
+
+def list_platform_docs(
+    repository: str | None = None,
+    layer: str | None = None,
+    audience: str | None = None,
+    topic: str | None = None,
+    status: str | None = None,
+    stale: bool | None = None,
+    db: Session = Depends(get_db),
+):
+    docs = db.query(Document).order_by(Document.created_at.desc()).all()
+    rows = []
+    for doc in docs:
+        if not _matches_platform_filters(doc, repository=repository, layer=layer, audience=audience, topic=topic, status=status, stale=stale):
+            continue
+        rows.append(_platform_doc_row(doc, _platform_doc_chunk_count(db, doc.id)))
+    return rows
+
+
+def search_platform_docs(body: dict, db: Session = Depends(get_db)):
+    query = (body.get("query") or "").strip()
+    if not query:
+        raise HTTPException(status_code=400, detail="query is required")
+    limit = min(max(int(body.get("limit", 8)), 1), 12)
+    topics = body.get("topics") or []
+    stale = bool(body.get("stale", False))
+
+    docs = db.query(DocumentChunk, Document).join(Document, Document.id == DocumentChunk.document_id).filter(Document.ingestion_status == "ready").all()
+    scored: list[dict] = []
+    for chunk, document in docs:
+        metadata = get_platform_doc_metadata(document)
+        if not _matches_platform_filters(
+            document,
+            repository=body.get("repository"),
+            layer=body.get("layer"),
+            audience=body.get("audience"),
+            stale=stale,
+        ):
+            continue
+        if body.get("status") and metadata.get("status") != body.get("status"):
+            continue
+        if topics and not set(topics).issubset(set(metadata.get("topics") or [])):
+            continue
+        if chunk.embedding is None:
+            continue
+        score, ranking_signals = _score_document_chunk(query, chunk, document)
+        if score <= 0:
+            continue
+        scored.append(
+            {
+                "document_id": str(document.id),
+                "title": document.title,
+                "repository": metadata.get("repository"),
+                "repo_path": metadata.get("repo_path"),
+                "chunk_index": chunk.chunk_index,
+                "section_path": (chunk.metadata_json or {}).get("section_path"),
+                "content": chunk.content[:1500],
+                "score": float(score),
+                "metadata": {
+                    **(chunk.metadata_json or {}),
+                    "ranking_signals": ranking_signals,
+                },
+            }
+        )
+    scored.sort(key=lambda item: item["score"], reverse=True)
+    return scored[:limit]
+
+
+def get_platform_doc(document_id: str, db: Session = Depends(get_db)):
+    doc = db.query(Document).filter(Document.id == uuid.UUID(document_id)).one_or_none()
+    if not doc or not is_platform_doc(doc):
+        raise HTTPException(status_code=404, detail="platform document not found")
+    return {**_platform_doc_row(doc, _platform_doc_chunk_count(db, doc.id)), "metadata": get_platform_doc_metadata(doc), "raw_markdown": doc.raw_content}
+
+
+def list_platform_doc_chunks(document_id: str, db: Session = Depends(get_db)):
+    doc = db.query(Document).filter(Document.id == uuid.UUID(document_id)).one_or_none()
+    if not doc or not is_platform_doc(doc):
+        raise HTTPException(status_code=404, detail="platform document not found")
+    chunks = db.query(DocumentChunk).filter(DocumentChunk.document_id == doc.id).order_by(DocumentChunk.chunk_index.asc()).all()
+    return [
+        {
+            "chunk_index": chunk.chunk_index,
+            "section_path": (chunk.metadata_json or {}).get("section_path"),
+            "content": chunk.content,
+            "metadata": chunk.metadata_json,
+            "embedding_status": "ready" if chunk.embedding is not None else "missing",
+        }
+        for chunk in chunks
+    ]
 
 
 def list_document_chunks(document_id: str, db: Session = Depends(get_db)):

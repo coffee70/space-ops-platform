@@ -15,7 +15,8 @@ from app.database import get_db_context
 from app.intelligence.document_ingestion import ingest_document_now
 from app.intelligence.embedding import DEFAULT_EMBEDDING_MODEL, get_embedding_provider
 from app.intelligence.events import emit_event
-from app.models.intelligence import Document, DocumentIngestionJob
+from app.intelligence.platform_docs_indexing import run_platform_docs_index_job
+from app.models.intelligence import Document, DocumentIngestionJob, PlatformDocsIndexJob
 from platform_common.web import create_service_app
 
 logger = logging.getLogger(__name__)
@@ -33,6 +34,41 @@ def _claim_next_job(db) -> DocumentIngestionJob | None:
         .with_for_update(skip_locked=True)
         .first()
     )
+
+
+def _claim_next_platform_docs_job(db) -> PlatformDocsIndexJob | None:
+    return (
+        db.query(PlatformDocsIndexJob)
+        .filter(PlatformDocsIndexJob.status == "queued")
+        .order_by(PlatformDocsIndexJob.requested_at.asc())
+        .with_for_update(skip_locked=True)
+        .first()
+    )
+
+
+def process_one_platform_docs_job() -> bool:
+    with get_db_context() as db:
+        job = _claim_next_platform_docs_job(db)
+        if not job:
+            return False
+        job.status = "running"
+        job.started_at = datetime.now(timezone.utc)
+        job_id = job.id
+
+    try:
+        with get_db_context() as db:
+            job = db.query(PlatformDocsIndexJob).filter(PlatformDocsIndexJob.id == job_id).one()
+            run_platform_docs_index_job(db, job)
+    except Exception as exc:
+        settings = get_settings()
+        logger.exception("platform docs index job failed job_id=%s", job_id)
+        with get_db_context() as db:
+            job = db.query(PlatformDocsIndexJob).filter(PlatformDocsIndexJob.id == job_id).one_or_none()
+            if job:
+                job.status = "failed"
+                job.completed_at = datetime.now(timezone.utc)
+                job.error = str(exc)[: max(1, int(settings.document_ingestion_max_error_length))]
+    return True
 
 
 def _claim_and_mark_running() -> uuid.UUID | None:
@@ -95,6 +131,8 @@ def _mark_job_failed(job_id: uuid.UUID, exc: BaseException) -> None:
 
 
 def process_one_job() -> None:
+    if process_one_platform_docs_job():
+        return
     job_id = _claim_and_mark_running()
     if not job_id:
         return

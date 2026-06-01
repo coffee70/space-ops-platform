@@ -36,6 +36,8 @@ class Settings(BaseSettings):
     code_indexer_startup_enqueue_attempts: int = 60
     document_ingestion_poll_interval_seconds: int = 2
     document_ingestion_max_error_length: int = 2000
+    platform_docs_index_on_startup: bool = True
+    platform_docs_index_startup_strict: bool = False
 
     def get_cors_origins_list(self) -> list[str]:
         """Return CORS origins as a list, stripping whitespace."""
