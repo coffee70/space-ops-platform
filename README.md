@@ -4,6 +4,12 @@ Layer 2 platform APIs, data models, services, schemas, telemetry adapters, and r
 
 Extraction baseline: `c2-infra` commit `7b4f15ace9895c440ad89a9a460566c78135c57b` (`phase1-layer-split-baseline-2026-04-20`).
 
+## Documentation
+
+The curated documentation corpus for AI Engineer retrieval lives under this repository's `docs/` directory.
+
+This README is repo-local orientation and is not intended to be indexed as the canonical AI Engineer knowledge source.
+
 ## Documentation map (split checkout)
 
 | Area | Humans | Agents / automation |
@@ -28,7 +34,7 @@ backend/app/adapters/satnogs   SatNOGS Layer 2 telemetry adapter
 backend/app/simulator          Layer 2 telemetry simulator runtime
 backend/resources/             Layer 2 operational resources packaged with services
 telemetry_catalog/             Shared telemetry schema/config package source
-docs/API_TELEMETRY_CONTRACTS.md
+docs/developer/telemetry-api-contracts.md
 ```
 
 The platform runtime reads concrete vehicle configs from `VEHICLE_CONFIG_ROOT`. Managed Layer 2 services default this to `backend/resources/vehicle-configurations`.
