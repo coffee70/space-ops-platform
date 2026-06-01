@@ -254,6 +254,12 @@ models:
     reasoning:
       enabled: true
       representation: reasoning_summary
+    runtimeBudget:
+      contextWindowTokens: 1000000
+      maxOutputTokens: 128000
+      tokensPerMinute: 500000
+      requestsPerMinute: null
+      rollingWindowSeconds: 60
     metadataOverrides: { recommendedFor: ["coding", "deep-reasoning"] }
 
   - id: openai-gpt-5-5-mini

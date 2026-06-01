@@ -1,4 +1,7 @@
 import type { ToolSet } from "ai";
+import { z } from "zod";
+
+import type { ModelUsageStore } from "./storage/model-usage-store.js";
 
 export type ExecutionMode = "read_only" | "suggest" | "execute" | "governed_execute";
 export type ToolModePolicy = "disabled" | "requires_permission" | "enabled";
@@ -305,15 +308,18 @@ export type ModelStreamPart =
   | { type: "error"; error: unknown }
   | { type: string; [key: string]: unknown };
 
-export type ModelProviderType =
-  | "openai"
-  | "anthropic"
-  | "openai-compatible"
-  | "google"
-  | "azure-openai"
-  | "bedrock"
-  | "vertex"
-  | "vercel-gateway";
+export const ModelProviderTypeSchema = z.enum([
+  "openai",
+  "anthropic",
+  "openai-compatible",
+  "google",
+  "azure-openai",
+  "bedrock",
+  "vertex",
+  "vercel-gateway",
+]);
+
+export type ModelProviderType = z.infer<typeof ModelProviderTypeSchema>;
 
 export type ModelDataBoundary = "external_api" | "private_cloud" | "local_airgapped" | "unknown";
 
@@ -335,6 +341,27 @@ export type RuntimeReasoningConfig = {
   source: "provider_exposed";
   providerOptions: Record<string, unknown>;
 };
+
+export const RuntimeReasoningConfigSchema = z
+  .object({
+    enabled: z.boolean(),
+    representation: z.enum(["reasoning", "reasoning_summary", "thinking"]),
+    source: z.literal("provider_exposed"),
+    providerOptions: z.record(z.unknown()),
+  })
+  .strict();
+
+export const RuntimeBudgetConfigSchema = z
+  .object({
+    contextWindowTokens: z.number().int().positive().nullable(),
+    maxOutputTokens: z.number().int().positive().nullable(),
+    tokensPerMinute: z.number().int().positive().nullable(),
+    requestsPerMinute: z.number().int().positive().nullable(),
+    rollingWindowSeconds: z.number().int().positive().nullable(),
+  })
+  .strict();
+
+export type RuntimeBudgetConfig = z.infer<typeof RuntimeBudgetConfigSchema>;
 
 export type ModelRegistryReasoningConfig = {
   enabled: boolean;
@@ -408,6 +435,7 @@ export type AiEngineerModelOption = {
   };
   contextWindow: number | null;
   maxOutputTokens: number | null;
+  runtimeBudget?: RuntimeBudgetConfig | null;
   inputModalities: string[];
   outputModalities: string[];
   supportedParameters: string[];
@@ -421,14 +449,19 @@ export type AiEngineerModelOption = {
   metadataSources: string[];
 };
 
-export type ResolvedRuntimeModel = {
-  id: string;
-  providerType: ModelProviderType;
-  providerModelId: string;
-  apiKey: string | null;
-  baseUrl: string | null;
-  reasoning?: RuntimeReasoningConfig | null;
-};
+export const ResolvedRuntimeModelSchema = z
+  .object({
+    id: z.string().min(1),
+    providerType: ModelProviderTypeSchema,
+    providerModelId: z.string().min(1),
+    apiKey: z.string().min(1).nullable(),
+    baseUrl: z.string().url().nullable(),
+    reasoning: RuntimeReasoningConfigSchema.nullable().optional(),
+    budget: RuntimeBudgetConfigSchema.nullable().optional(),
+  })
+  .strict();
+
+export type ResolvedRuntimeModel = z.infer<typeof ResolvedRuntimeModelSchema>;
 
 export type ResolvedChatModel = {
   option: AiEngineerModelOption;
@@ -462,6 +495,8 @@ export interface ModelRunner {
     maxSteps: number;
     model: ResolvedRuntimeModel;
     abortSignal?: AbortSignal;
+    trace?: TraceEnvelope;
+    onRuntimeEvent?: (eventType: string, payload: Record<string, unknown>) => Promise<void>;
   }): AsyncIterable<ModelStreamPart>;
 }
 
@@ -482,6 +517,13 @@ export interface RuntimeConfig {
   openRouterBaseUrl: string | null;
   modelMetadataCacheTtlSeconds: number | null;
   logModelStreamParts: boolean;
+  modelRetryMaxAttempts: number;
+  modelRetryBaseDelayMs: number;
+  modelRetryMaxDelayMs: number;
+  modelRetryJitterMs: number;
+  modelBudgetWarningThreshold: number;
+  modelBudgetDangerThreshold: number;
+  modelBudgetExhaustedThreshold: number;
 }
 
 export interface RunDependencies {
@@ -492,6 +534,7 @@ export interface RunDependencies {
   toolPermissionClient: ToolPermissionClient;
   modelRunner: ModelRunner;
   modelCatalog: ModelCatalogPort;
+  modelUsageStore: ModelUsageStore;
   config: RuntimeConfig;
   now: () => Date;
   createId: () => string;

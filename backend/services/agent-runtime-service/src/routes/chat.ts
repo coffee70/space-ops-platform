@@ -3,6 +3,10 @@ import { z } from "zod";
 
 import { buildSystemPrompt } from "../ai/prompts.js";
 import { ModelSelectionError } from "../ai/model-errors.js";
+import { ModelBudgetTracker, warningFromSnapshot } from "../ai/model-budget.js";
+import { LanguageModelUsageSnapshotSchema } from "../ai/model-usage.js";
+import { ModelProviderRuntimeError, normalizeModelProviderError } from "../ai/provider-errors.js";
+import { estimatedUsageSnapshot, estimateTokensFromMessages } from "../ai/token-estimation.js";
 import { createToolSet, toolSchemaInvalidDiagnosticEvent, validateToolDefinitionsForModel } from "../ai/tools.js";
 import { AgentEventStream } from "../events/stream.js";
 import { RunSequencer } from "../events/sequencer.js";
@@ -506,6 +510,36 @@ async function orchestrateChat(input: {
     });
 
     const selectedRuntime = selection.runtime;
+    const budgetTelemetryEnabled = Boolean(
+      selectedRuntime.budget?.contextWindowTokens || selectedRuntime.budget?.tokensPerMinute || selectedRuntime.budget?.maxOutputTokens,
+    );
+    const budgetTracker = budgetTelemetryEnabled ? new ModelBudgetTracker(dependencies.modelUsageStore, dependencies.config) : null;
+    const emitBudgetSnapshot = async (snapshot: Awaited<ReturnType<ModelBudgetTracker["snapshot"]>>) => {
+      await stream.emitEvent("model.budget.snapshot", snapshot);
+      const warning = warningFromSnapshot(snapshot);
+      if (warning) {
+        await stream.emitEvent("model.budget.warning", warning);
+      }
+    };
+    const preflightUsage = estimatedUsageSnapshot({
+      inputTokens: estimateTokensFromMessages({ system: systemPrompt, messages: modelMessages }),
+      source: "estimated_preflight",
+    });
+    if (budgetTracker) {
+      await emitBudgetSnapshot(
+        await budgetTracker.recordEstimatedRequest({
+          conversationId: input.trace.conversation_id,
+          agentRunId: input.trace.agent_run_id,
+          providerType: selectedRuntime.providerType,
+          providerModelId: selectedRuntime.providerModelId,
+          modelId: selectedRuntime.id,
+          budget: selectedRuntime.budget,
+          usage: preflightUsage,
+          requestId: input.trace.request_id,
+          nowMs: dependencies.now().getTime(),
+        }),
+      );
+    }
     const reasoningRepresentation = reasoningRepresentationForProvider(selectedRuntime.providerType);
 
     const emitReasoningStarted = async () => {
@@ -529,6 +563,45 @@ async function orchestrateChat(input: {
       maxSteps: dependencies.config.maxSteps,
       model: selection.runtime,
       abortSignal: input.abortSignal,
+      trace: input.trace,
+      onRuntimeEvent: async (eventType, eventPayload) => {
+        await stream.emitEvent(eventType, eventPayload);
+        if (budgetTracker && (eventType === "model.usage.step" || eventType === "model.usage.total")) {
+          const parsedUsage = LanguageModelUsageSnapshotSchema.safeParse(eventPayload.usage);
+          if (parsedUsage.success) {
+            await emitBudgetSnapshot(
+              await budgetTracker.recordActualUsage({
+                conversationId: input.trace.conversation_id,
+                agentRunId: input.trace.agent_run_id,
+                providerType: selectedRuntime.providerType,
+                providerModelId: selectedRuntime.providerModelId,
+                modelId: selectedRuntime.id,
+                budget: selectedRuntime.budget,
+                usage: parsedUsage.data,
+                requestId: input.trace.request_id,
+                stepType: typeof eventPayload.step_type === "string" ? eventPayload.step_type : null,
+                stepIndex: typeof eventPayload.step_index === "number" ? eventPayload.step_index : parsedUsage.data.step_index ?? null,
+                nowMs: dependencies.now().getTime(),
+              }),
+            );
+          }
+        }
+        if (budgetTracker && eventType === "model.provider_error") {
+          const category = eventPayload.category;
+          if (category === "rate_limited") {
+            await emitBudgetSnapshot(
+              await budgetTracker.markRateLimited({
+                providerType: selectedRuntime.providerType,
+                providerModelId: selectedRuntime.providerModelId,
+                modelId: selectedRuntime.id,
+                budget: selectedRuntime.budget,
+                retryAfterMs: typeof eventPayload.retry_after_ms === "number" ? eventPayload.retry_after_ms : null,
+                nowMs: dependencies.now().getTime(),
+              }),
+            );
+          }
+        }
+      },
     })) {
       if (part.type === "abort") {
         throw new ChatRunCancelledError(cancellationReasonForSignal(input.abortSignal));
@@ -539,7 +612,13 @@ async function orchestrateChat(input: {
       if (part.type === "error") {
         const fields = part as Record<string, unknown>;
         const error = fields.error;
-        throw error instanceof Error ? error : new Error(typeof error === "string" ? error : "Model stream failed");
+        throw new ModelProviderRuntimeError(
+          normalizeModelProviderError({
+            error,
+            providerType: selectedRuntime.providerType,
+            providerModelId: selectedRuntime.providerModelId,
+          }),
+        );
       }
 
       if (part.type === "step-finish") {
@@ -724,7 +803,48 @@ async function orchestrateChat(input: {
       return;
     }
 
-    if (assistantMessageId && assistantText.trim().length === 0 && reasoningText.trim().length === 0 && toolCallCount === 0) {
+    if (error instanceof ModelProviderRuntimeError && assistantMessageId) {
+      const normalized = error.normalized;
+      const hasUsefulPartialState = assistantText.trim().length > 0 || reasoningText.trim().length > 0 || toolCallCount > 0 || normalized.retryable;
+      if (hasUsefulPartialState) {
+        const providerMetadata: Record<string, unknown> = {
+          agent_run_id: input.trace.agent_run_id,
+          request_id: input.trace.request_id,
+          completion_status: normalized.retryable ? "interrupted_provider_retryable" : "interrupted_provider_failed",
+          failure_category: normalized.category,
+          retryable: normalized.retryable,
+          can_continue: normalized.retryable,
+          provider_type: normalized.provider_type,
+          provider_model_id: normalized.provider_model_id,
+          context_packet_id: contextPacketId,
+          tool_call_count: toolCallCount,
+        };
+        if (selection) {
+          providerMetadata.model_id = selection.option.id;
+          providerMetadata.provider = selection.option.provider;
+          providerMetadata.data_boundary = selection.option.governance.dataBoundary;
+        }
+        if (reasoningText.trim().length > 0 && selection) {
+          providerMetadata.reasoning = {
+            text: reasoningText,
+            representation: reasoningRepresentationForProvider(selection.runtime.providerType),
+            source: "provider_exposed",
+            provider_type: selection.runtime.providerType,
+            provider_model_id: selection.runtime.providerModelId,
+            streamed: true,
+            completion_status: "interrupted",
+          };
+        }
+        await dependencies.store.updateMessage(assistantMessageId, {
+          content: assistantText,
+          requestId: input.trace.request_id,
+          agentRunId: input.trace.agent_run_id,
+          metadata: providerMetadata,
+        });
+      } else {
+        await dependencies.store.deleteMessage(assistantMessageId);
+      }
+    } else if (assistantMessageId && assistantText.trim().length === 0 && reasoningText.trim().length === 0 && toolCallCount === 0) {
       await dependencies.store.deleteMessage(assistantMessageId);
     }
     await stream.fail(error);

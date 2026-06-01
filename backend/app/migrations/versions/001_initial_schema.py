@@ -575,6 +575,73 @@ def upgrade() -> None:
     op.create_index("ix_ai_agent_events_agent_sequence", "ai_agent_events", ["agent_run_id", "sequence"], unique=True)
 
     op.create_table(
+        "agent_model_step_usage",
+        sa.Column("id", UUID(as_uuid=True), primary_key=True, nullable=False, server_default=sa.text("gen_random_uuid()")),
+        sa.Column("conversation_id", UUID(as_uuid=True), nullable=True),
+        sa.Column("agent_run_id", UUID(as_uuid=True), nullable=False),
+        sa.Column("request_id", sa.Text(), nullable=True),
+        sa.Column("step_index", sa.Integer(), nullable=False),
+        sa.Column("step_type", sa.Text(), nullable=True),
+        sa.Column("provider_type", sa.Text(), nullable=False),
+        sa.Column("provider_model_id", sa.Text(), nullable=False),
+        sa.Column("model_id", sa.Text(), nullable=True),
+        sa.Column("input_tokens", sa.Integer(), nullable=True),
+        sa.Column("output_tokens", sa.Integer(), nullable=True),
+        sa.Column("total_tokens", sa.Integer(), nullable=True),
+        sa.Column("reasoning_tokens", sa.Integer(), nullable=True),
+        sa.Column("cached_input_tokens", sa.Integer(), nullable=True),
+        sa.Column("usage_source", sa.Text(), nullable=False),
+        sa.Column("is_actual", sa.Boolean(), nullable=False, server_default=sa.text("true")),
+        sa.Column("raw_usage_json", JSONB(), nullable=True),
+        sa.Column("synced_after", sa.Text(), nullable=True),
+        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("now()")),
+        sa.CheckConstraint("input_tokens IS NULL OR input_tokens >= 0", name="ck_agent_model_step_usage_input_nonnegative"),
+        sa.CheckConstraint("output_tokens IS NULL OR output_tokens >= 0", name="ck_agent_model_step_usage_output_nonnegative"),
+        sa.CheckConstraint("total_tokens IS NULL OR total_tokens >= 0", name="ck_agent_model_step_usage_total_nonnegative"),
+        sa.CheckConstraint("reasoning_tokens IS NULL OR reasoning_tokens >= 0", name="ck_agent_model_step_usage_reasoning_nonnegative"),
+        sa.CheckConstraint("cached_input_tokens IS NULL OR cached_input_tokens >= 0", name="ck_agent_model_step_usage_cached_nonnegative"),
+        sa.UniqueConstraint("agent_run_id", "step_index", "usage_source", name="uq_agent_model_step_usage_run_step_source"),
+    )
+    op.create_index("agent_model_step_usage_run_idx", "agent_model_step_usage", ["agent_run_id", "step_index"])
+    op.create_index("agent_model_step_usage_provider_window_idx", "agent_model_step_usage", ["provider_type", "provider_model_id", "created_at"])
+
+    op.create_table(
+        "agent_run_model_usage",
+        sa.Column("agent_run_id", UUID(as_uuid=True), primary_key=True, nullable=False),
+        sa.Column("conversation_id", UUID(as_uuid=True), nullable=True),
+        sa.Column("provider_type", sa.Text(), nullable=False),
+        sa.Column("provider_model_id", sa.Text(), nullable=False),
+        sa.Column("model_id", sa.Text(), nullable=True),
+        sa.Column("input_tokens", sa.Integer(), nullable=True),
+        sa.Column("output_tokens", sa.Integer(), nullable=True),
+        sa.Column("total_tokens", sa.Integer(), nullable=True),
+        sa.Column("reasoning_tokens", sa.Integer(), nullable=True),
+        sa.Column("cached_input_tokens", sa.Integer(), nullable=True),
+        sa.Column("usage_source", sa.Text(), nullable=False),
+        sa.Column("is_actual", sa.Boolean(), nullable=False, server_default=sa.text("true")),
+        sa.Column("raw_usage_json", JSONB(), nullable=True),
+        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("now()")),
+        sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("now()")),
+    )
+    op.create_index("agent_run_model_usage_provider_window_idx", "agent_run_model_usage", ["provider_type", "provider_model_id", "updated_at"])
+
+    op.create_table(
+        "agent_model_step_usage_estimate",
+        sa.Column("id", UUID(as_uuid=True), primary_key=True, nullable=False, server_default=sa.text("gen_random_uuid()")),
+        sa.Column("conversation_id", UUID(as_uuid=True), nullable=True),
+        sa.Column("agent_run_id", UUID(as_uuid=True), nullable=False),
+        sa.Column("request_id", sa.Text(), nullable=True),
+        sa.Column("step_index", sa.Integer(), nullable=False),
+        sa.Column("provider_type", sa.Text(), nullable=False),
+        sa.Column("provider_model_id", sa.Text(), nullable=False),
+        sa.Column("estimated_output_tokens", sa.Integer(), nullable=True),
+        sa.Column("estimated_total_tokens", sa.Integer(), nullable=True),
+        sa.Column("estimate_source", sa.Text(), nullable=False),
+        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("now()")),
+    )
+    op.create_index("agent_model_step_usage_estimate_run_idx", "agent_model_step_usage_estimate", ["agent_run_id", "step_index", "created_at"])
+
+    op.create_table(
         "ai_documents",
         sa.Column("id", UUID(as_uuid=True), primary_key=True, nullable=False),
         sa.Column("title", sa.Text(), nullable=False),
@@ -732,6 +799,13 @@ def downgrade() -> None:
     op.drop_index("ix_ai_documents_scope", table_name="ai_documents")
     op.drop_table("ai_documents")
 
+    op.drop_index("agent_model_step_usage_estimate_run_idx", table_name="agent_model_step_usage_estimate")
+    op.drop_table("agent_model_step_usage_estimate")
+    op.drop_index("agent_run_model_usage_provider_window_idx", table_name="agent_run_model_usage")
+    op.drop_table("agent_run_model_usage")
+    op.drop_index("agent_model_step_usage_provider_window_idx", table_name="agent_model_step_usage")
+    op.drop_index("agent_model_step_usage_run_idx", table_name="agent_model_step_usage")
+    op.drop_table("agent_model_step_usage")
     op.drop_index("ix_ai_agent_events_agent_sequence", table_name="ai_agent_events")
     op.drop_index("ix_ai_agent_events_conversation_created", table_name="ai_agent_events")
     op.drop_table("ai_agent_events")

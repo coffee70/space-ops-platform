@@ -52,6 +52,13 @@ cd "${PLATFORM_ROOT}"
 "${VENVDIR}/bin/pytest" "${PYTEST_ARGS[@]}" "$@"
 
 if [[ -f "${PLATFORM_ROOT}/backend/services/agent-runtime-service/package.json" ]]; then
+  if [[ "${SKIP_NPM_INSTALL:-0}" == "1" ]]; then
+    echo "==> skip npm ci backend/services/agent-runtime-service (SKIP_NPM_INSTALL=1)"
+  else
+    echo "==> npm ci backend/services/agent-runtime-service"
+    cd "${PLATFORM_ROOT}/backend/services/agent-runtime-service"
+    npm ci
+  fi
   echo "==> npm test backend/services/agent-runtime-service"
   cd "${PLATFORM_ROOT}/backend/services/agent-runtime-service"
   npm test

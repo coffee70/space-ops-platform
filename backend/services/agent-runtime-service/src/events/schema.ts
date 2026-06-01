@@ -65,6 +65,22 @@ export const AGENT_EVENT_REQUIRED_PAYLOAD_FIELDS = {
     "data_boundary",
     "capabilities",
   ],
+  "model.budget.snapshot": ["provider_type", "provider_model_id", "measured_at", "context", "throughput"],
+  "model.budget.warning": ["kind", "status", "message", "provider_type", "provider_model_id"],
+  "model.retry_scheduled": [
+    "provider_type",
+    "provider_model_id",
+    "category",
+    "attempt",
+    "max_attempts",
+    "retry_after_ms",
+    "retry_at",
+    "safe_to_retry",
+  ],
+  "model.retrying": ["provider_type", "provider_model_id", "attempt", "max_attempts"],
+  "model.provider_error": ["provider_type", "provider_model_id", "category", "retryable", "message"],
+  "model.usage.step": ["provider_type", "provider_model_id", "usage"],
+  "model.usage.total": ["provider_type", "provider_model_id", "usage"],
   error: ["error_code", "message", "source"],
 } as const;
 

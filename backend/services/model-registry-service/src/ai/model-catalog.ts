@@ -20,6 +20,7 @@ import type {
   ModelRegistryProvider,
   ResolvedChatModel,
   ResolvedRuntimeModel,
+  RuntimeBudgetConfig,
   RuntimeConfig,
 } from "../types.js";
 
@@ -86,6 +87,16 @@ function resolveRuntimeReasoning(entry: ModelRegistryEntry): ResolvedRuntimeMode
     representation: entry.reasoning.representation,
     source: "provider_exposed",
     providerOptions: entry.reasoning.providerOptions ?? {},
+  };
+}
+
+function resolveRuntimeBudget(entry: ModelRegistryEntry, metadata: Pick<ModelMetadata, "contextWindow" | "maxOutputTokens">): RuntimeBudgetConfig {
+  return {
+    contextWindowTokens: entry.runtimeBudget?.contextWindowTokens ?? metadata.contextWindow ?? null,
+    maxOutputTokens: entry.runtimeBudget?.maxOutputTokens ?? metadata.maxOutputTokens ?? null,
+    tokensPerMinute: entry.runtimeBudget?.tokensPerMinute ?? null,
+    requestsPerMinute: entry.runtimeBudget?.requestsPerMinute ?? null,
+    rollingWindowSeconds: entry.runtimeBudget?.rollingWindowSeconds ?? 60,
   };
 }
 
@@ -189,12 +200,12 @@ export class ModelCatalogService implements ModelCatalogPort {
       throw new ModelSelectionError("provider_not_implemented", `Provider type ${provider.type} is not implemented yet.`);
     }
 
-    const runtimeModel = this.resolveProviderRuntime(entry, provider);
+    const runtimeModel = this.resolveProviderRuntime(entry, provider, option);
 
     return { option, runtime: runtimeModel };
   }
 
-  private resolveProviderRuntime(entry: ModelRegistryEntry, provider: ModelRegistryProvider): ResolvedRuntimeModel {
+  private resolveProviderRuntime(entry: ModelRegistryEntry, provider: ModelRegistryProvider, option: AiEngineerModelOption): ResolvedRuntimeModel {
     const apiKey = resolveProviderApiKey(provider, this.runtime);
 
     let baseUrl: string | null = provider.baseUrl ?? null;
@@ -209,6 +220,7 @@ export class ModelCatalogService implements ModelCatalogPort {
       apiKey,
       baseUrl,
       reasoning: resolveRuntimeReasoning(entry),
+      budget: resolveRuntimeBudget(entry, { contextWindow: option.contextWindow, maxOutputTokens: option.maxOutputTokens }),
     };
   }
 
@@ -349,6 +361,7 @@ export class ModelCatalogService implements ModelCatalogPort {
       },
       contextWindow: merged.contextWindow,
       maxOutputTokens: merged.maxOutputTokens,
+      runtimeBudget: resolveRuntimeBudget(entry, merged),
       inputModalities: merged.inputModalities,
       outputModalities: merged.outputModalities,
       supportedParameters: merged.supportedParameters,

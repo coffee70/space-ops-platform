@@ -67,6 +67,16 @@ const reasoningConfigSchema = z
   })
   .strict();
 
+const runtimeBudgetSchema = z
+  .object({
+    contextWindowTokens: z.number().int().positive().nullable().optional(),
+    maxOutputTokens: z.number().int().positive().nullable().optional(),
+    tokensPerMinute: z.number().int().positive().nullable().optional(),
+    requestsPerMinute: z.number().int().positive().nullable().optional(),
+    rollingWindowSeconds: z.number().int().positive().nullable().optional(),
+  })
+  .strict();
+
 const modelEntrySchema = z.object({
   id: z.string().min(1),
   providerRef: z.string().min(1),
@@ -81,6 +91,7 @@ const modelEntrySchema = z.object({
     })
     .optional(),
   reasoning: reasoningConfigSchema.optional(),
+  runtimeBudget: runtimeBudgetSchema.optional(),
   metadataOverrides: metadataOverridesSchema.optional(),
 });
 

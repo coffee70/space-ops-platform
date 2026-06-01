@@ -37,6 +37,14 @@ export type ModelRegistryReasoningConfig = {
   providerOptions?: Record<string, unknown>;
 };
 
+export type RuntimeBudgetConfig = {
+  contextWindowTokens: number | null;
+  maxOutputTokens: number | null;
+  tokensPerMinute: number | null;
+  requestsPerMinute: number | null;
+  rollingWindowSeconds: number | null;
+};
+
 export type ModelRegistryProvider = {
   id: string;
   type: ModelProviderType;
@@ -79,6 +87,7 @@ export type ModelRegistryEntry = {
     dataBoundary?: ModelDataBoundary;
   };
   reasoning?: ModelRegistryReasoningConfig;
+  runtimeBudget?: Partial<RuntimeBudgetConfig>;
   metadataOverrides?: Partial<ModelMetadata> & {
     recommendedFor?: string[];
   };
@@ -107,6 +116,7 @@ export type AiEngineerModelOption = {
   };
   contextWindow: number | null;
   maxOutputTokens: number | null;
+  runtimeBudget?: RuntimeBudgetConfig | null;
   inputModalities: string[];
   outputModalities: string[];
   supportedParameters: string[];
@@ -127,6 +137,7 @@ export type ResolvedRuntimeModel = {
   apiKey: string | null;
   baseUrl: string | null;
   reasoning?: RuntimeReasoningConfig | null;
+  budget?: RuntimeBudgetConfig | null;
 };
 
 export type ResolvedChatModel = {

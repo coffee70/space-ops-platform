@@ -25,6 +25,13 @@ const envSchema = z.object({
   OPENROUTER_BASE_URL: z.preprocess(emptyStringToUndefined, z.string().url().optional()),
   AGENT_RUNTIME_MODEL_METADATA_CACHE_TTL_SECONDS: z.preprocess(emptyStringToUndefined, z.coerce.number().int().nonnegative().optional()),
   AGENT_RUNTIME_LOG_STREAM_PARTS: z.coerce.boolean().default(false),
+  AGENT_RUNTIME_MODEL_RETRY_MAX_ATTEMPTS: z.coerce.number().int().positive().default(3),
+  AGENT_RUNTIME_MODEL_RETRY_BASE_DELAY_MS: z.coerce.number().int().nonnegative().default(1000),
+  AGENT_RUNTIME_MODEL_RETRY_MAX_DELAY_MS: z.coerce.number().int().nonnegative().default(30000),
+  AGENT_RUNTIME_MODEL_RETRY_JITTER_MS: z.coerce.number().int().nonnegative().default(500),
+  AGENT_RUNTIME_MODEL_BUDGET_WARNING_THRESHOLD: z.coerce.number().positive().default(0.7),
+  AGENT_RUNTIME_MODEL_BUDGET_DANGER_THRESHOLD: z.coerce.number().positive().default(0.9),
+  AGENT_RUNTIME_MODEL_BUDGET_EXHAUSTED_THRESHOLD: z.coerce.number().positive().default(0.98),
   NODE_ENV: z.preprocess(emptyStringToUndefined, z.string().optional()),
 });
 
@@ -50,5 +57,12 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): RuntimeConfig 
     openRouterBaseUrl: parsed.OPENROUTER_BASE_URL ?? null,
     modelMetadataCacheTtlSeconds: parsed.AGENT_RUNTIME_MODEL_METADATA_CACHE_TTL_SECONDS ?? null,
     logModelStreamParts: parsed.AGENT_RUNTIME_LOG_STREAM_PARTS,
+    modelRetryMaxAttempts: parsed.AGENT_RUNTIME_MODEL_RETRY_MAX_ATTEMPTS,
+    modelRetryBaseDelayMs: parsed.AGENT_RUNTIME_MODEL_RETRY_BASE_DELAY_MS,
+    modelRetryMaxDelayMs: parsed.AGENT_RUNTIME_MODEL_RETRY_MAX_DELAY_MS,
+    modelRetryJitterMs: parsed.AGENT_RUNTIME_MODEL_RETRY_JITTER_MS,
+    modelBudgetWarningThreshold: parsed.AGENT_RUNTIME_MODEL_BUDGET_WARNING_THRESHOLD,
+    modelBudgetDangerThreshold: parsed.AGENT_RUNTIME_MODEL_BUDGET_DANGER_THRESHOLD,
+    modelBudgetExhaustedThreshold: parsed.AGENT_RUNTIME_MODEL_BUDGET_EXHAUSTED_THRESHOLD,
   };
 }

@@ -14,6 +14,16 @@ const ModelProviderTypeSchema = z.enum([
 const ModelDataBoundarySchema = z.enum(["external_api", "private_cloud", "local_airgapped", "unknown"]);
 const ModelCapabilitySchema = z.enum(["text", "vision", "tool-use", "reasoning", "json", "file-input", "web-search", "code"]);
 
+export const RuntimeBudgetConfigSchema = z
+  .object({
+    contextWindowTokens: z.number().int().positive().nullable(),
+    maxOutputTokens: z.number().int().positive().nullable(),
+    tokensPerMinute: z.number().int().positive().nullable(),
+    requestsPerMinute: z.number().int().positive().nullable(),
+    rollingWindowSeconds: z.number().int().positive().nullable(),
+  })
+  .passthrough();
+
 export const AiEngineerModelOptionSchema = z
   .object({
     id: z.string(),
@@ -36,6 +46,7 @@ export const AiEngineerModelOptionSchema = z
       .passthrough(),
     contextWindow: z.number().nullable(),
     maxOutputTokens: z.number().nullable(),
+    runtimeBudget: RuntimeBudgetConfigSchema.nullable().optional(),
     inputModalities: z.array(z.string()),
     outputModalities: z.array(z.string()),
     supportedParameters: z.array(z.string()),
@@ -93,6 +104,7 @@ export const ResolvedRuntimeModelSchema = z
     apiKey: z.string().nullable(),
     baseUrl: z.string().nullable(),
     reasoning: RuntimeReasoningConfigSchema.nullable().optional(),
+    budget: RuntimeBudgetConfigSchema.nullable().optional(),
   })
   .passthrough();
 

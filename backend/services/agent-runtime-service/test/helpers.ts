@@ -24,6 +24,8 @@ import type {
   ToolRegistryClient,
   TraceEnvelope,
 } from "../src/types.js";
+import { emptyUsageSnapshot, type LanguageModelUsageSnapshot } from "../src/ai/model-usage.js";
+import type { ModelUsageStore, PersistedModelUsageRecord } from "../src/storage/model-usage-store.js";
 
 export function baseRuntimeConfig(overrides: Partial<RuntimeConfig> = {}): RuntimeConfig {
   return {
@@ -43,6 +45,13 @@ export function baseRuntimeConfig(overrides: Partial<RuntimeConfig> = {}): Runti
     openRouterBaseUrl: null,
     modelMetadataCacheTtlSeconds: null,
     logModelStreamParts: false,
+    modelRetryMaxAttempts: 3,
+    modelRetryBaseDelayMs: 0,
+    modelRetryMaxDelayMs: 0,
+    modelRetryJitterMs: 0,
+    modelBudgetWarningThreshold: 0.7,
+    modelBudgetDangerThreshold: 0.9,
+    modelBudgetExhaustedThreshold: 0.98,
     ...overrides,
   };
 }
@@ -112,6 +121,7 @@ export class FakeModelCatalog implements ModelCatalogPort {
           providerModelId: option.providerModelId,
           apiKey: "test-key",
           baseUrl: null,
+          budget: option.runtimeBudget ?? null,
         },
       };
     },
@@ -123,6 +133,62 @@ export class FakeModelCatalog implements ModelCatalogPort {
 
   async resolveForChat(modelId: string | null | undefined, executionMode: ExecutionMode): Promise<ResolvedChatModel> {
     return this.resolver(modelId, executionMode);
+  }
+}
+
+export class MemoryModelUsageStore implements ModelUsageStore {
+  readonly records: PersistedModelUsageRecord[] = [];
+  readonly totals: PersistedModelUsageRecord[] = [];
+  readonly estimates: PersistedModelUsageRecord[] = [];
+
+  async insertStepUsage(record: PersistedModelUsageRecord): Promise<void> {
+    this.records.push(structuredClone(record));
+  }
+
+  async upsertRunTotalUsage(record: PersistedModelUsageRecord): Promise<void> {
+    const index = this.totals.findIndex((candidate) => candidate.agent_run_id === record.agent_run_id);
+    if (index >= 0) {
+      this.totals[index] = structuredClone(record);
+    } else {
+      this.totals.push(structuredClone(record));
+    }
+  }
+
+  async insertStepUsageEstimate(record: PersistedModelUsageRecord): Promise<void> {
+    this.estimates.push(structuredClone(record));
+  }
+
+  async sumActualUsageForRun(input: { agentRunId: string }): Promise<LanguageModelUsageSnapshot> {
+    const rows = this.records.filter((record) => record.agent_run_id === input.agentRunId && record.is_actual);
+    if (rows.length === 0) return emptyUsageSnapshot("ai_sdk_step_usage");
+    const sum = (key: "input_tokens" | "output_tokens" | "total_tokens" | "reasoning_tokens" | "cached_input_tokens") =>
+      rows.some((row) => row[key] !== null) ? rows.reduce((total, row) => total + (row[key] ?? 0), 0) : null;
+    return {
+      input_tokens: sum("input_tokens"),
+      output_tokens: sum("output_tokens"),
+      total_tokens: sum("total_tokens"),
+      reasoning_tokens: sum("reasoning_tokens"),
+      cached_input_tokens: sum("cached_input_tokens"),
+      raw: null,
+      source: "ai_sdk_step_usage",
+      step_index: null,
+      synced_after: "run_sum",
+      is_actual: true,
+    };
+  }
+
+  async getRollingThroughputUsage(input: {
+    providerType: string;
+    providerModelId: string;
+    windowSeconds: number;
+    now?: Date;
+  }): Promise<{ totalTokens: number; windowStartedAt: Date }> {
+    const now = input.now ?? new Date();
+    const windowStartedAt = new Date(now.getTime() - input.windowSeconds * 1000);
+    const totalTokens = this.records
+      .filter((record) => record.provider_type === input.providerType && record.provider_model_id === input.providerModelId && record.is_actual)
+      .reduce((total, record) => total + (record.total_tokens ?? 0), 0);
+    return { totalTokens, windowStartedAt };
   }
 }
 

@@ -1,5 +1,6 @@
 import { RunSequencer } from "./sequencer.js";
 import { redactAndTruncate, validateAgentEventPayload } from "./schema.js";
+import { ModelProviderRuntimeError } from "../ai/provider-errors.js";
 import type { ConversationStore, PersistedEvent, RawEventFact, StreamChunk, TraceEnvelope } from "../types.js";
 
 const encoder = new TextEncoder();
@@ -103,11 +104,7 @@ export class AgentEventStream {
   }
 
   async fail(error: unknown): Promise<void> {
-    const message = error instanceof Error ? error.message : "Agent runtime failed";
-    await this.emitEvent("run.failed", {
-      error_code: "agent_runtime_failed",
-      message,
-    });
+    await this.emitEvent("run.failed", runFailedPayloadForError(error));
     await this.close();
   }
 
@@ -134,4 +131,43 @@ export class AgentEventStream {
       this.#transportClosed = true;
     }
   }
+}
+
+function runFailedPayloadForError(error: unknown): Record<string, unknown> {
+  if (error instanceof ModelProviderRuntimeError) {
+    const normalized = error.normalized;
+    const codeByCategory: Record<typeof normalized.category, string> = {
+      rate_limited: "model_provider_rate_limited",
+      quota_exceeded: "model_provider_quota_exceeded",
+      context_length_exceeded: "model_context_length_exceeded",
+      auth_failed: "model_provider_auth_failed",
+      model_unavailable: "model_provider_unavailable",
+      provider_overloaded: "model_provider_overloaded",
+      network_transient: "model_provider_network_transient",
+      cancelled: "model_stream_cancelled",
+      unknown: "model_provider_failed",
+    };
+    return {
+      error_code: codeByCategory[normalized.category],
+      category: normalized.category,
+      retryable: normalized.retryable,
+      can_continue: normalized.retryable,
+      retry_after_ms: normalized.retry_after_ms,
+      provider_type: normalized.provider_type,
+      provider_model_id: normalized.provider_model_id,
+      provider_error_type: normalized.provider_error_type,
+      provider_error_code: normalized.provider_error_code,
+      http_status: normalized.http_status,
+      message:
+        normalized.category === "rate_limited"
+          ? "The selected model hit a provider throughput limit. Completed tool actions were preserved. You can continue after the provider window clears."
+          : normalized.message,
+    };
+  }
+
+  const message = error instanceof Error ? error.message : "Agent runtime failed";
+  return {
+    error_code: "agent_runtime_failed",
+    message,
+  };
 }

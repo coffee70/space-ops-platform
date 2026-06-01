@@ -9,6 +9,7 @@ import { HttpToolPermissionClient } from "./clients/tool-permissions.js";
 import { HttpToolRegistryClient } from "./clients/tool-registry.js";
 import { loadConfig } from "./config.js";
 import { PgConversationStore } from "./db/conversations.js";
+import { EphemeralModelUsageStore, PostgresModelUsageStore } from "./storage/model-usage-store.js";
 import { registerChatRoutes } from "./routes/chat.js";
 import { registerConversationRoutes } from "./routes/conversations.js";
 import { registerModelRoutes } from "./routes/models.js";
@@ -26,6 +27,9 @@ export function createApp(overrides?: Partial<RunDependencies>): Hono {
     toolPermissionClient: overrides?.toolPermissionClient ?? new HttpToolPermissionClient(config),
     modelRunner: overrides?.modelRunner ?? createModelRunner(config),
     modelCatalog: overrides?.modelCatalog ?? new HttpModelRegistryClient(config),
+    modelUsageStore:
+      overrides?.modelUsageStore ??
+      (config.nodeEnv === "test" ? new EphemeralModelUsageStore() : new PostgresModelUsageStore(config.databaseUrl)),
     now: overrides?.now ?? (() => new Date()),
     createId: overrides?.createId ?? (() => crypto.randomUUID()),
     changeSummaryRegistryClient: overrides?.changeSummaryRegistryClient,

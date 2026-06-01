@@ -3,6 +3,8 @@ import { createAnthropic } from "@ai-sdk/anthropic";
 import { createOpenAI } from "@ai-sdk/openai";
 import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
 
+import { normalizeAiSdkUsage } from "./model-usage.js";
+import { ModelProviderRuntimeError, normalizeModelProviderError, providerErrorPayload } from "./provider-errors.js";
 import type { ModelRunner, ModelStreamPart, ResolvedRuntimeModel, RuntimeConfig } from "../types.js";
 
 const DEFAULT_OPENAI_BASE_URL = "https://api.openai.com/v1";
@@ -102,6 +104,44 @@ function getTextDeltaPreview(part: ModelStreamPart): { length: number; preview: 
   return { length: text.length, preview: text.slice(0, 80) };
 }
 
+function errorFromStreamPart(part: ModelStreamPart): unknown {
+  const fields = part as Record<string, unknown>;
+  return fields.error ?? part;
+}
+
+function unsafeToRetryPart(part: ModelStreamPart): boolean {
+  return (
+    part.type === "text-delta" ||
+    part.type === "reasoning" ||
+    part.type === "reasoning-delta" ||
+    part.type === "tool-call" ||
+    part.type === "tool-result"
+  );
+}
+
+function retryDelayMs(errorRetryAfterMs: number | null, attempt: number, config: RuntimeConfig): number {
+  if (errorRetryAfterMs !== null) return Math.min(errorRetryAfterMs, config.modelRetryMaxDelayMs);
+  const exponential = config.modelRetryBaseDelayMs * 2 ** Math.max(0, attempt - 1);
+  const jitter = config.modelRetryJitterMs > 0 ? Math.floor(Math.random() * config.modelRetryJitterMs) : 0;
+  return Math.min(config.modelRetryMaxDelayMs, exponential + jitter);
+}
+
+function sleep(ms: number, signal?: AbortSignal): Promise<void> {
+  if (ms <= 0) return Promise.resolve();
+  if (signal?.aborted) return Promise.reject(new DOMException("Retry sleep aborted.", "AbortError"));
+  return new Promise((resolve, reject) => {
+    const timeout = setTimeout(resolve, ms);
+    signal?.addEventListener(
+      "abort",
+      () => {
+        clearTimeout(timeout);
+        reject(new DOMException("Retry sleep aborted.", "AbortError"));
+      },
+      { once: true },
+    );
+  });
+}
+
 export function createModelRunner(config: RuntimeConfig): ModelRunner {
   return {
     async *stream(input): AsyncIterable<ModelStreamPart> {
@@ -109,44 +149,130 @@ export function createModelRunner(config: RuntimeConfig): ModelRunner {
 
       const languageModel = createLanguageModel(model);
 
-      const result = streamText({
-        model: languageModel,
-        system: input.system,
-        messages: input.messages,
-        tools: input.tools,
-        stopWhen: stepCountIs(input.maxSteps),
-        providerOptions: providerOptionsForModel(model),
-        abortSignal: input.abortSignal,
-      });
+      for (let attempt = 1; attempt <= config.modelRetryMaxAttempts; attempt += 1) {
+        let safeToRetry = true;
+        let stepIndex = 0;
+        try {
+          const result = streamText({
+            model: languageModel,
+            system: input.system,
+            messages: input.messages,
+            tools: input.tools,
+            stopWhen: stepCountIs(input.maxSteps),
+            providerOptions: providerOptionsForModel(model),
+            abortSignal: input.abortSignal,
+            onStepFinish: async (step) => {
+              const stepFields = step as unknown as Record<string, unknown>;
+              const usage = normalizeAiSdkUsage((step as { usage?: unknown }).usage, "ai_sdk_step_usage", {
+                stepIndex,
+                syncedAfter: `step_${stepIndex}`,
+              });
+              await input.onRuntimeEvent?.("model.usage.step", {
+                provider_type: model.providerType,
+                provider_model_id: model.providerModelId,
+                model_id: model.id,
+                step_type: typeof stepFields.stepType === "string" ? stepFields.stepType : null,
+                step_index: stepIndex,
+                usage,
+              });
+              stepIndex += 1;
+            },
+          });
 
-      for await (const rawPart of result.fullStream) {
-        const part = rawPart as ModelStreamPart;
-        if (config.logModelStreamParts) {
-          const textDelta = getTextDeltaPreview(part);
-          if (textDelta) {
+          for await (const rawPart of result.fullStream) {
+            const part = rawPart as ModelStreamPart;
+            if (unsafeToRetryPart(part)) {
+              safeToRetry = false;
+            }
+            if (config.logModelStreamParts) {
+              const textDelta = getTextDeltaPreview(part);
+              if (textDelta) {
+                console.debug(
+                  "[agent-runtime] model text-delta",
+                  JSON.stringify({
+                    timestamp: new Date().toISOString(),
+                    providerType: model.providerType,
+                    providerModelId: model.providerModelId,
+                    deltaLength: textDelta.length,
+                    preview: textDelta.preview,
+                  }),
+                );
+              }
+              console.debug(
+                "[agent-runtime] model fullStream part",
+                JSON.stringify({
+                  timestamp: new Date().toISOString(),
+                  providerType: model.providerType,
+                  providerModelId: model.providerModelId,
+                  part: summarizeStreamPart(part),
+                }),
+              );
+            }
+            if (part.type === "error") {
+              throw errorFromStreamPart(part);
+            }
+            yield part;
+          }
+
+          const totalUsage = normalizeAiSdkUsage(await result.totalUsage, "ai_sdk_total_usage", { syncedAfter: "run_finish" });
+          await input.onRuntimeEvent?.("model.usage.total", {
+            provider_type: model.providerType,
+            provider_model_id: model.providerModelId,
+            model_id: model.id,
+            usage: totalUsage,
+          });
+          return;
+        } catch (error) {
+          const normalized = normalizeModelProviderError({
+            error,
+            providerType: model.providerType,
+            providerModelId: model.providerModelId,
+          });
+          await input.onRuntimeEvent?.("model.provider_error", providerErrorPayload(normalized));
+          const canRetry = normalized.retryable && safeToRetry && attempt < config.modelRetryMaxAttempts;
+          if (!canRetry) {
+            throw new ModelProviderRuntimeError(normalized);
+          }
+          const delayMs = retryDelayMs(normalized.retry_after_ms, attempt, config);
+          const retryAt = new Date(Date.now() + delayMs).toISOString();
+          await input.onRuntimeEvent?.("model.retry_scheduled", {
+            provider_type: model.providerType,
+            provider_model_id: model.providerModelId,
+            category: normalized.category,
+            attempt,
+            max_attempts: config.modelRetryMaxAttempts,
+            retry_after_ms: delayMs,
+            retry_at: retryAt,
+            safe_to_retry: safeToRetry,
+          });
+          await sleep(delayMs, input.abortSignal);
+          await input.onRuntimeEvent?.("model.retrying", {
+            provider_type: model.providerType,
+            provider_model_id: model.providerModelId,
+            attempt: attempt + 1,
+            max_attempts: config.modelRetryMaxAttempts,
+          });
+          if (config.logModelStreamParts) {
             console.debug(
-              "[agent-runtime] model text-delta",
+              "[agent-runtime] retrying model stream",
               JSON.stringify({
                 timestamp: new Date().toISOString(),
                 providerType: model.providerType,
                 providerModelId: model.providerModelId,
-                deltaLength: textDelta.length,
-                preview: textDelta.preview,
+                attempt: attempt + 1,
               }),
             );
           }
-          console.debug(
-            "[agent-runtime] model fullStream part",
-            JSON.stringify({
-              timestamp: new Date().toISOString(),
-              providerType: model.providerType,
-              providerModelId: model.providerModelId,
-              part: summarizeStreamPart(part),
-            }),
-          );
         }
-        yield part;
       }
+
+      throw new ModelProviderRuntimeError(
+        normalizeModelProviderError({
+          error: new Error("Model provider retry attempts exhausted."),
+          providerType: model.providerType,
+          providerModelId: model.providerModelId,
+        }),
+      );
     },
   };
 }
