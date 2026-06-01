@@ -375,6 +375,7 @@ function buildLoadedRegistry(parsed: ModelRegistryConfigFile): LoadedModelRegist
     defaultFor: m.defaultFor,
     governance: m.governance as ModelRegistryEntry["governance"],
     reasoning: m.reasoning as ModelRegistryEntry["reasoning"],
+    runtimeBudget: m.runtimeBudget as ModelRegistryEntry["runtimeBudget"],
     metadataOverrides: m.metadataOverrides as ModelRegistryEntry["metadataOverrides"],
   }));
 

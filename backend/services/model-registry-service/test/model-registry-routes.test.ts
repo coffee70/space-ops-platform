@@ -55,6 +55,33 @@ models:
     defaultFor: [chat, coding, fast]
 `;
 
+const BUDGET_VALID = `version: 1
+defaults:
+  chatModel: m1
+  codingModel: m1
+  fastModel: m1
+  restrictedModel: m1
+chat_title_generation:
+  model_id: m1
+providers:
+  p1:
+    type: openai
+    displayName: OpenAI
+    apiKeyEnv: OPENAI_API_KEY
+models:
+  - id: m1
+    providerRef: p1
+    providerModelId: gpt-4o-mini
+    enabled: true
+    defaultFor: [chat, coding, fast]
+    runtimeBudget:
+      contextWindowTokens: 128000
+      maxOutputTokens: 16384
+      tokensPerMinute: 30000
+      requestsPerMinute: 120
+      rollingWindowSeconds: 45
+`;
+
 function writeTmpYaml(content: string): { dir: string; filePath: string } {
   const dir = path.join(os.tmpdir(), `model-registry-${Date.now()}-${Math.random().toString(16).slice(2)}`);
   mkdirSync(dir);
@@ -255,6 +282,24 @@ test("GET /models returns list payload", async () => {
   }
 });
 
+test("GET /models preserves runtime budget from YAML", async () => {
+  const { filePath, dir } = writeTmpYaml(BUDGET_VALID);
+  try {
+    const config = loadConfig({ MODEL_CONFIG_PATH: filePath });
+    const app = createApp({ config });
+    const response = await app.request("/models");
+    assert.equal(response.status, 200);
+    const body = (await response.json()) as {
+      models: Array<{ id: string; runtimeBudget?: { tokensPerMinute: number | null; rollingWindowSeconds: number | null } | null }>;
+    };
+    assert.equal(body.models[0]?.id, "m1");
+    assert.equal(body.models[0]?.runtimeBudget?.tokensPerMinute, 30000);
+    assert.equal(body.models[0]?.runtimeBudget?.rollingWindowSeconds, 45);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("POST /models/resolve-chat resolves default chat model", async () => {
   const { filePath, dir } = writeTmpYaml(MIN_VALID);
   try {
@@ -269,6 +314,27 @@ test("POST /models/resolve-chat resolves default chat model", async () => {
     const body = (await response.json()) as { option: { id: string }; runtime: { providerModelId: string } };
     assert.equal(body.option.id, "m1");
     assert.equal(body.runtime.providerModelId, "gpt-4o-mini");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("POST /models/resolve-chat preserves runtime budget in runtime model", async () => {
+  const { filePath, dir } = writeTmpYaml(BUDGET_VALID);
+  try {
+    const config = loadConfig({ MODEL_CONFIG_PATH: filePath });
+    const app = createApp({ config });
+    const response = await app.request("/models/resolve-chat", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ model_id: "m1", execution_mode: "read_only" }),
+    });
+    assert.equal(response.status, 200);
+    const body = (await response.json()) as {
+      runtime: { budget?: { tokensPerMinute: number | null; rollingWindowSeconds: number | null } | null };
+    };
+    assert.equal(body.runtime.budget?.tokensPerMinute, 30000);
+    assert.equal(body.runtime.budget?.rollingWindowSeconds, 45);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

@@ -159,6 +159,22 @@ export class MemoryModelUsageStore implements ModelUsageStore {
   }
 
   async sumActualUsageForRun(input: { agentRunId: string }): Promise<LanguageModelUsageSnapshot> {
+    const total = this.totals.find((record) => record.agent_run_id === input.agentRunId && record.is_actual);
+    if (total) {
+      return {
+        input_tokens: total.input_tokens,
+        output_tokens: total.output_tokens,
+        total_tokens: total.total_tokens,
+        reasoning_tokens: total.reasoning_tokens,
+        cached_input_tokens: total.cached_input_tokens,
+        raw: null,
+        source: total.usage_source,
+        step_index: null,
+        synced_after: "run_total",
+        is_actual: true,
+      };
+    }
+
     const rows = this.records.filter((record) => record.agent_run_id === input.agentRunId && record.is_actual);
     if (rows.length === 0) return emptyUsageSnapshot("ai_sdk_step_usage");
     const sum = (key: "input_tokens" | "output_tokens" | "total_tokens" | "reasoning_tokens" | "cached_input_tokens") =>
@@ -182,13 +198,13 @@ export class MemoryModelUsageStore implements ModelUsageStore {
     providerModelId: string;
     windowSeconds: number;
     now?: Date;
-  }): Promise<{ totalTokens: number; windowStartedAt: Date }> {
+  }): Promise<{ totalTokens: number; windowStartedAt: Date; oldestSampleAt: Date | null }> {
     const now = input.now ?? new Date();
     const windowStartedAt = new Date(now.getTime() - input.windowSeconds * 1000);
     const totalTokens = this.records
       .filter((record) => record.provider_type === input.providerType && record.provider_model_id === input.providerModelId && record.is_actual)
       .reduce((total, record) => total + (record.total_tokens ?? 0), 0);
-    return { totalTokens, windowStartedAt };
+    return { totalTokens, windowStartedAt, oldestSampleAt: null };
   }
 }
 

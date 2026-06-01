@@ -122,8 +122,8 @@ function classify(input: {
   return "unknown";
 }
 
-function retryableFor(category: ModelProviderErrorCategory, retryAfterMs: number | null): boolean {
-  if (category === "rate_limited") return retryAfterMs !== null || true;
+function retryableFor(category: ModelProviderErrorCategory): boolean {
+  if (category === "rate_limited") return true;
   return category === "provider_overloaded" || category === "network_transient";
 }
 
@@ -154,7 +154,7 @@ export function normalizeModelProviderError(input: {
 
   return NormalizedModelProviderErrorSchema.parse({
     category,
-    retryable: retryableFor(category, retryAfterMs),
+    retryable: retryableFor(category),
     retry_after_ms: retryAfterMs,
     provider_type: input.providerType,
     provider_model_id: input.providerModelId,

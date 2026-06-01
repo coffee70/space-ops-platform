@@ -231,6 +231,8 @@ export class ModelBudgetTracker {
         })
       : null;
     const throughputUsed = throughputLimit ? (rolling?.totalTokens ?? 0) + currentEstimate : null;
+    const throughputResetAt = throughputLimit && rolling?.oldestSampleAt ? new Date(rolling.oldestSampleAt.getTime() + windowSeconds * 1000) : null;
+    const secondsUntilReset = throughputResetAt ? Math.max(0, (throughputResetAt.getTime() - now.getTime()) / 1000) : null;
     const contextPercent = percent(contextUsed, contextLimit);
     const throughputPercent = percent(throughputUsed, throughputLimit);
 
@@ -255,8 +257,8 @@ export class ModelBudgetTracker {
         used_tokens: throughputUsed,
         remaining_tokens: remaining(throughputUsed, throughputLimit),
         percent_used: throughputPercent,
-        reset_at: throughputLimit ? new Date(now.getTime() + windowSeconds * 1000).toISOString() : null,
-        seconds_until_reset: throughputLimit ? windowSeconds : null,
+        reset_at: throughputResetAt?.toISOString() ?? null,
+        seconds_until_reset: secondsUntilReset,
         status: statusFor(throughputPercent, this.config),
         measurement_source: throughputLimit ? (input.usage?.is_actual ? "provider_usage" : "configured_rolling_window") : "unknown",
       },

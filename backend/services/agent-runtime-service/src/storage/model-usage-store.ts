@@ -44,10 +44,14 @@ export interface ModelUsageStore {
     providerModelId: string;
     windowSeconds: number;
     now?: Date;
-  }): Promise<{ totalTokens: number; windowStartedAt: Date }>;
+  }): Promise<{ totalTokens: number; windowStartedAt: Date; oldestSampleAt: Date | null }>;
 }
 
-function usageRecordFromRow(row: Record<string, unknown>): LanguageModelUsageSnapshot {
+function usageRecordFromRow(
+  row: Record<string, unknown>,
+  source: PersistedModelUsageRecord["usage_source"] = "ai_sdk_step_usage",
+  syncedAfter = "run_sum",
+): LanguageModelUsageSnapshot {
   return LanguageModelUsageSnapshotSchema.parse({
     input_tokens: row.input_tokens === null ? null : Number(row.input_tokens ?? 0),
     output_tokens: row.output_tokens === null ? null : Number(row.output_tokens ?? 0),
@@ -55,9 +59,9 @@ function usageRecordFromRow(row: Record<string, unknown>): LanguageModelUsageSna
     reasoning_tokens: row.reasoning_tokens === null ? null : Number(row.reasoning_tokens ?? 0),
     cached_input_tokens: row.cached_input_tokens === null ? null : Number(row.cached_input_tokens ?? 0),
     raw: null,
-    source: "ai_sdk_step_usage",
+    source,
     step_index: null,
-    synced_after: "run_sum",
+    synced_after: syncedAfter,
     is_actual: true,
   });
 }
@@ -171,6 +175,19 @@ export class PostgresModelUsageStore implements ModelUsageStore {
   }
 
   async sumActualUsageForRun(input: { agentRunId: string }): Promise<LanguageModelUsageSnapshot> {
+    const totalResult = await this.#pool.query(
+      `SELECT input_tokens, output_tokens, total_tokens, reasoning_tokens, cached_input_tokens, usage_source
+       FROM agent_run_model_usage
+       WHERE agent_run_id = $1::uuid AND is_actual = TRUE
+       LIMIT 1`,
+      [input.agentRunId],
+    );
+    if (totalResult.rows[0]) {
+      const row = totalResult.rows[0] as Record<string, unknown>;
+      const source = (row.usage_source as PersistedModelUsageRecord["usage_source"] | undefined) ?? "ai_sdk_total_usage";
+      return usageRecordFromRow(row, source, "run_total");
+    }
+
     const result = await this.#pool.query(
       `SELECT
          NULLIF(COALESCE(SUM(input_tokens), 0), 0)::integer AS input_tokens,
@@ -190,11 +207,13 @@ export class PostgresModelUsageStore implements ModelUsageStore {
     providerModelId: string;
     windowSeconds: number;
     now?: Date;
-  }): Promise<{ totalTokens: number; windowStartedAt: Date }> {
+  }): Promise<{ totalTokens: number; windowStartedAt: Date; oldestSampleAt: Date | null }> {
     const now = input.now ?? new Date();
     const windowStartedAt = new Date(now.getTime() - input.windowSeconds * 1000);
     const result = await this.#pool.query(
-      `SELECT COALESCE(SUM(total_tokens), 0)::integer AS total_tokens
+      `SELECT
+         COALESCE(SUM(total_tokens), 0)::integer AS total_tokens,
+         MIN(created_at) AS oldest_sample_at
        FROM agent_model_step_usage
        WHERE provider_type = $1
          AND provider_model_id = $2
@@ -202,17 +221,27 @@ export class PostgresModelUsageStore implements ModelUsageStore {
          AND created_at >= $3::timestamptz`,
       [input.providerType, input.providerModelId, windowStartedAt.toISOString()],
     );
-    return { totalTokens: Number(result.rows[0]?.total_tokens ?? 0), windowStartedAt };
+    const oldest = result.rows[0]?.oldest_sample_at;
+    return {
+      totalTokens: Number(result.rows[0]?.total_tokens ?? 0),
+      windowStartedAt,
+      oldestSampleAt: oldest instanceof Date ? oldest : oldest ? new Date(String(oldest)) : null,
+    };
   }
 }
 
 export class EphemeralModelUsageStore implements ModelUsageStore {
-  readonly #records: PersistedModelUsageRecord[] = [];
+  readonly #records: Array<{ record: PersistedModelUsageRecord; createdAt: Date }> = [];
   readonly #totals = new Map<string, PersistedModelUsageRecord>();
   readonly #estimates: PersistedModelUsageRecord[] = [];
+  readonly #now: () => Date;
+
+  constructor(now: () => Date = () => new Date()) {
+    this.#now = now;
+  }
 
   async insertStepUsage(record: PersistedModelUsageRecord): Promise<void> {
-    this.#records.push(PersistedModelUsageRecordSchema.parse(record));
+    this.#records.push({ record: PersistedModelUsageRecordSchema.parse(record), createdAt: this.#now() });
   }
 
   async upsertRunTotalUsage(record: PersistedModelUsageRecord): Promise<void> {
@@ -225,7 +254,23 @@ export class EphemeralModelUsageStore implements ModelUsageStore {
   }
 
   async sumActualUsageForRun(input: { agentRunId: string }): Promise<LanguageModelUsageSnapshot> {
-    const records = this.#records.filter((record) => record.agent_run_id === input.agentRunId && record.is_actual);
+    const total = this.#totals.get(input.agentRunId);
+    if (total?.is_actual) {
+      return LanguageModelUsageSnapshotSchema.parse({
+        input_tokens: total.input_tokens,
+        output_tokens: total.output_tokens,
+        total_tokens: total.total_tokens,
+        reasoning_tokens: total.reasoning_tokens,
+        cached_input_tokens: total.cached_input_tokens,
+        raw: null,
+        source: total.usage_source,
+        step_index: null,
+        synced_after: "run_total",
+        is_actual: true,
+      });
+    }
+
+    const records = this.#records.map((entry) => entry.record).filter((record) => record.agent_run_id === input.agentRunId && record.is_actual);
     const sum = (key: "input_tokens" | "output_tokens" | "total_tokens" | "reasoning_tokens" | "cached_input_tokens") =>
       records.some((record) => record[key] !== null) ? records.reduce((total, record) => total + (record[key] ?? 0), 0) : null;
     return LanguageModelUsageSnapshotSchema.parse({
@@ -247,12 +292,21 @@ export class EphemeralModelUsageStore implements ModelUsageStore {
     providerModelId: string;
     windowSeconds: number;
     now?: Date;
-  }): Promise<{ totalTokens: number; windowStartedAt: Date }> {
+  }): Promise<{ totalTokens: number; windowStartedAt: Date; oldestSampleAt: Date | null }> {
     const now = input.now ?? new Date();
     const windowStartedAt = new Date(now.getTime() - input.windowSeconds * 1000);
-    const totalTokens = this.#records
-      .filter((record) => record.provider_type === input.providerType && record.provider_model_id === input.providerModelId && record.is_actual)
-      .reduce((total, record) => total + (record.total_tokens ?? 0), 0);
-    return { totalTokens, windowStartedAt };
+    const records = this.#records.filter(
+      ({ record, createdAt }) =>
+        record.provider_type === input.providerType &&
+        record.provider_model_id === input.providerModelId &&
+        record.is_actual &&
+        createdAt.getTime() >= windowStartedAt.getTime(),
+    );
+    const totalTokens = records.reduce((total, { record }) => total + (record.total_tokens ?? 0), 0);
+    const oldestSampleAt = records.reduce<Date | null>((oldest, entry) => {
+      if (!oldest || entry.createdAt.getTime() < oldest.getTime()) return entry.createdAt;
+      return oldest;
+    }, null);
+    return { totalTokens, windowStartedAt, oldestSampleAt };
   }
 }
