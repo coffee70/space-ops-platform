@@ -4,9 +4,18 @@ import { createOpenAI } from "@ai-sdk/openai";
 import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
 
 import type { ModelRunner, ModelStreamPart, ResolvedRuntimeModel, RuntimeConfig } from "../types.js";
+import {
+  ModelProviderErrorPayloadSchema,
+  ModelProviderRuntimeError,
+  ModelRetryingPayloadSchema,
+  ModelRetryScheduledPayloadSchema,
+  type NormalizedModelProviderError,
+  normalizeModelProviderError,
+} from "./provider-errors.js";
 
 const DEFAULT_OPENAI_BASE_URL = "https://api.openai.com/v1";
 type StreamTextProviderOptions = NonNullable<Parameters<typeof streamText>[0]["providerOptions"]>;
+type StreamTextFn = typeof streamText;
 
 function createLanguageModel(model: ResolvedRuntimeModel) {
   if (model.providerType === "openai") {
@@ -102,51 +111,165 @@ function getTextDeltaPreview(part: ModelStreamPart): { length: number; preview: 
   return { length: text.length, preview: text.slice(0, 80) };
 }
 
-export function createModelRunner(config: RuntimeConfig): ModelRunner {
+function extractStreamPartError(part: ModelStreamPart): unknown {
+  if (part.type !== "error") {
+    return part;
+  }
+  const fields = part as Record<string, unknown>;
+  return fields.error ?? new Error("Model stream failed");
+}
+
+function isUnsafeToRetryPart(part: ModelStreamPart): boolean {
+  return part.type === "text-delta" || part.type === "reasoning" || part.type === "reasoning-delta" || part.type === "tool-call" || part.type === "tool-result";
+}
+
+function providerErrorPayload(normalized: NormalizedModelProviderError): Record<string, unknown> {
+  return ModelProviderErrorPayloadSchema.parse({
+    provider_type: normalized.provider_type,
+    provider_model_id: normalized.provider_model_id,
+    category: normalized.category,
+    retryable: normalized.retryable,
+    retry_after_ms: normalized.retry_after_ms,
+    provider_error_type: normalized.provider_error_type,
+    provider_error_code: normalized.provider_error_code,
+    http_status: normalized.http_status,
+    message: normalized.message,
+  });
+}
+
+function computeRetryDelayMs(normalized: NormalizedModelProviderError, attempt: number, config: RuntimeConfig): number {
+  if (normalized.retry_after_ms !== null) {
+    return Math.min(normalized.retry_after_ms, config.modelRetryMaxDelayMs);
+  }
+  const exponential = config.modelRetryBaseDelayMs * 2 ** Math.max(0, attempt - 1);
+  const jitter = config.modelRetryJitterMs > 0 ? Math.floor(Math.random() * (config.modelRetryJitterMs + 1)) : 0;
+  return Math.min(exponential + jitter, config.modelRetryMaxDelayMs);
+}
+
+async function sleepWithAbort(delayMs: number, abortSignal?: AbortSignal): Promise<void> {
+  if (delayMs <= 0) {
+    if (abortSignal?.aborted) {
+      throw abortError();
+    }
+    return;
+  }
+  await new Promise<void>((resolve, reject) => {
+    if (abortSignal?.aborted) {
+      reject(abortError());
+      return;
+    }
+    const timeout = setTimeout(resolve, delayMs);
+    const onAbort = () => {
+      clearTimeout(timeout);
+      reject(abortError());
+    };
+    abortSignal?.addEventListener("abort", onAbort, { once: true });
+  });
+}
+
+function abortError(): Error {
+  const error = new Error("Model stream aborted.");
+  error.name = "AbortError";
+  return error;
+}
+
+export function createModelRunner(config: RuntimeConfig, input?: { streamText?: StreamTextFn }): ModelRunner {
+  const streamTextFn = input?.streamText ?? streamText;
   return {
     async *stream(input): AsyncIterable<ModelStreamPart> {
       const model = input.model;
 
       const languageModel = createLanguageModel(model);
 
-      const result = streamText({
-        model: languageModel,
-        system: input.system,
-        messages: input.messages,
-        tools: input.tools,
-        stopWhen: stepCountIs(input.maxSteps),
-        providerOptions: providerOptionsForModel(model),
-        abortSignal: input.abortSignal,
-      });
+      for (let attempt = 1; attempt <= config.modelRetryMaxAttempts; attempt += 1) {
+        let safeToRetry = true;
 
-      for await (const rawPart of result.fullStream) {
-        const part = rawPart as ModelStreamPart;
-        if (config.logModelStreamParts) {
-          const textDelta = getTextDeltaPreview(part);
-          if (textDelta) {
-            console.debug(
-              "[agent-runtime] model text-delta",
-              JSON.stringify({
-                timestamp: new Date().toISOString(),
-                providerType: model.providerType,
-                providerModelId: model.providerModelId,
-                deltaLength: textDelta.length,
-                preview: textDelta.preview,
-              }),
-            );
+        try {
+          const result = streamTextFn({
+            model: languageModel,
+            system: input.system,
+            messages: input.messages,
+            tools: input.tools,
+            stopWhen: stepCountIs(input.maxSteps),
+            providerOptions: providerOptionsForModel(model),
+            abortSignal: input.abortSignal,
+          });
+
+          for await (const rawPart of result.fullStream) {
+            const part = rawPart as ModelStreamPart;
+            if (part.type === "error") {
+              throw extractStreamPartError(part);
+            }
+            if (isUnsafeToRetryPart(part)) {
+              safeToRetry = false;
+            }
+            if (config.logModelStreamParts) {
+              const textDelta = getTextDeltaPreview(part);
+              if (textDelta) {
+                console.debug(
+                  "[agent-runtime] model text-delta",
+                  JSON.stringify({
+                    timestamp: new Date().toISOString(),
+                    providerType: model.providerType,
+                    providerModelId: model.providerModelId,
+                    deltaLength: textDelta.length,
+                    preview: textDelta.preview,
+                  }),
+                );
+              }
+              console.debug(
+                "[agent-runtime] model fullStream part",
+                JSON.stringify({
+                  timestamp: new Date().toISOString(),
+                  providerType: model.providerType,
+                  providerModelId: model.providerModelId,
+                  part: summarizeStreamPart(part),
+                }),
+              );
+            }
+            yield part;
           }
-          console.debug(
-            "[agent-runtime] model fullStream part",
-            JSON.stringify({
-              timestamp: new Date().toISOString(),
-              providerType: model.providerType,
-              providerModelId: model.providerModelId,
-              part: summarizeStreamPart(part),
-            }),
-          );
+          return;
+        } catch (error) {
+          const normalized = normalizeModelProviderError({
+            error,
+            providerType: model.providerType,
+            providerModelId: model.providerModelId,
+          });
+
+          await input.onRuntimeEvent?.("model.provider_error", providerErrorPayload(normalized));
+
+          if (normalized.category === "cancelled") {
+            throw error;
+          }
+
+          if (!normalized.retryable || !safeToRetry || attempt >= config.modelRetryMaxAttempts) {
+            throw new ModelProviderRuntimeError(normalized);
+          }
+
+          const retryAfterMs = computeRetryDelayMs(normalized, attempt, config);
+          await input.onRuntimeEvent?.("model.retry_scheduled", ModelRetryScheduledPayloadSchema.parse({
+            provider_type: normalized.provider_type,
+            provider_model_id: normalized.provider_model_id,
+            category: normalized.category,
+            attempt,
+            max_attempts: config.modelRetryMaxAttempts,
+            retry_after_ms: retryAfterMs,
+            retry_at: new Date(Date.now() + retryAfterMs).toISOString(),
+            safe_to_retry: safeToRetry,
+          }));
+
+          await sleepWithAbort(retryAfterMs, input.abortSignal);
+          await input.onRuntimeEvent?.("model.retrying", ModelRetryingPayloadSchema.parse({
+            provider_type: normalized.provider_type,
+            provider_model_id: normalized.provider_model_id,
+            attempt: attempt + 1,
+            max_attempts: config.modelRetryMaxAttempts,
+          }));
         }
-        yield part;
       }
+
+      throw new Error("Model stream failed after retry attempts were exhausted.");
     },
   };
 }

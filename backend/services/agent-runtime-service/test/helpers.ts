@@ -43,6 +43,10 @@ export function baseRuntimeConfig(overrides: Partial<RuntimeConfig> = {}): Runti
     openRouterBaseUrl: null,
     modelMetadataCacheTtlSeconds: null,
     logModelStreamParts: false,
+    modelRetryMaxAttempts: 3,
+    modelRetryBaseDelayMs: 0,
+    modelRetryMaxDelayMs: 0,
+    modelRetryJitterMs: 0,
     ...overrides,
   };
 }

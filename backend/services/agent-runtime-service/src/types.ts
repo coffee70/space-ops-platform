@@ -462,6 +462,7 @@ export interface ModelRunner {
     maxSteps: number;
     model: ResolvedRuntimeModel;
     abortSignal?: AbortSignal;
+    onRuntimeEvent?: (eventType: string, payload: Record<string, unknown>) => Promise<void>;
   }): AsyncIterable<ModelStreamPart>;
 }
 
@@ -482,6 +483,10 @@ export interface RuntimeConfig {
   openRouterBaseUrl: string | null;
   modelMetadataCacheTtlSeconds: number | null;
   logModelStreamParts: boolean;
+  modelRetryMaxAttempts: number;
+  modelRetryBaseDelayMs: number;
+  modelRetryMaxDelayMs: number;
+  modelRetryJitterMs: number;
 }
 
 export interface RunDependencies {

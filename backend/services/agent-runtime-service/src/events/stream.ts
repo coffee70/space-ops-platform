@@ -1,8 +1,52 @@
 import { RunSequencer } from "./sequencer.js";
 import { redactAndTruncate, validateAgentEventPayload } from "./schema.js";
 import type { ConversationStore, PersistedEvent, RawEventFact, StreamChunk, TraceEnvelope } from "../types.js";
+import {
+  defaultProviderFailureMessage,
+  ModelProviderRuntimeError,
+  type ModelProviderErrorCategory,
+} from "../ai/provider-errors.js";
 
 const encoder = new TextEncoder();
+
+const modelProviderErrorCodeByCategory: Record<ModelProviderErrorCategory, string> = {
+  rate_limited: "model_provider_rate_limited",
+  quota_exceeded: "model_provider_quota_exceeded",
+  context_length_exceeded: "model_context_length_exceeded",
+  auth_failed: "model_provider_auth_failed",
+  model_unavailable: "model_provider_unavailable",
+  provider_overloaded: "model_provider_overloaded",
+  network_transient: "model_provider_network_transient",
+  cancelled: "model_stream_cancelled",
+  unknown: "model_provider_failed",
+};
+
+function runFailedPayloadForError(error: unknown, context?: Record<string, unknown>): Record<string, unknown> {
+  if (error instanceof ModelProviderRuntimeError) {
+    const normalized = error.normalized;
+    return {
+      error_code: modelProviderErrorCodeByCategory[normalized.category],
+      category: normalized.category,
+      retryable: normalized.retryable,
+      can_continue: normalized.retryable || normalized.category === "context_length_exceeded",
+      retry_after_ms: normalized.retry_after_ms,
+      provider_type: normalized.provider_type,
+      provider_model_id: normalized.provider_model_id,
+      provider_error_type: normalized.provider_error_type,
+      provider_error_code: normalized.provider_error_code,
+      http_status: normalized.http_status,
+      message: defaultProviderFailureMessage(normalized.category),
+      ...context,
+    };
+  }
+
+  const message = error instanceof Error ? error.message : "Agent runtime failed";
+  return {
+    error_code: "agent_runtime_failed",
+    message,
+    ...context,
+  };
+}
 
 export class AgentEventStream {
   readonly response: Response;
@@ -102,12 +146,8 @@ export class AgentEventStream {
     }
   }
 
-  async fail(error: unknown): Promise<void> {
-    const message = error instanceof Error ? error.message : "Agent runtime failed";
-    await this.emitEvent("run.failed", {
-      error_code: "agent_runtime_failed",
-      message,
-    });
+  async fail(error: unknown, context?: Record<string, unknown>): Promise<void> {
+    await this.emitEvent("run.failed", runFailedPayloadForError(error, context));
     await this.close();
   }
 

@@ -3,6 +3,7 @@ import { z } from "zod";
 
 import { buildSystemPrompt } from "../ai/prompts.js";
 import { ModelSelectionError } from "../ai/model-errors.js";
+import { defaultProviderFailureMessage, ModelProviderRuntimeError } from "../ai/provider-errors.js";
 import { createToolSet, toolSchemaInvalidDiagnosticEvent, validateToolDefinitionsForModel } from "../ai/tools.js";
 import { AgentEventStream } from "../events/stream.js";
 import { RunSequencer } from "../events/sequencer.js";
@@ -529,6 +530,9 @@ async function orchestrateChat(input: {
       maxSteps: dependencies.config.maxSteps,
       model: selection.runtime,
       abortSignal: input.abortSignal,
+      onRuntimeEvent: async (eventType, payload) => {
+        await stream.emitEvent(eventType, payload);
+      },
     })) {
       if (part.type === "abort") {
         throw new ChatRunCancelledError(cancellationReasonForSignal(input.abortSignal));
@@ -721,6 +725,68 @@ async function orchestrateChat(input: {
 
       await stream.emitEvent("run.cancelled", payload);
       await stream.close();
+      return;
+    }
+
+    if (error instanceof ModelProviderRuntimeError) {
+      const normalized = error.normalized;
+      const providerFailureContext: Record<string, unknown> = {
+        context_packet_id: contextPacketId,
+        tool_call_count: toolCallCount,
+        assistant_text_length: assistantText.length,
+        reasoning_text_length: reasoningText.length,
+      };
+      const canContinue = normalized.retryable || normalized.category === "context_length_exceeded";
+      const hasUsefulContext = assistantText.trim().length > 0 || reasoningText.trim().length > 0 || toolCallCount > 0;
+
+      if (assistantMessageId && hasUsefulContext) {
+        const assistantMetadata: Record<string, unknown> = {
+          agent_run_id: input.trace.agent_run_id,
+          request_id: input.trace.request_id,
+          completion_status: normalized.retryable ? "interrupted_provider_retryable" : "interrupted_provider_failed",
+          failure_category: normalized.category,
+          retryable: normalized.retryable,
+          can_continue: canContinue,
+          provider_type: normalized.provider_type,
+          provider_model_id: normalized.provider_model_id,
+          context_packet_id: contextPacketId,
+          tool_call_count: toolCallCount,
+        };
+
+        if (selection) {
+          assistantMetadata.model_id = selection.option.id;
+          assistantMetadata.provider = selection.option.provider;
+          assistantMetadata.data_boundary = selection.option.governance.dataBoundary;
+        }
+
+        if (reasoningText.trim().length > 0 && selection) {
+          assistantMetadata.reasoning = {
+            text: reasoningText,
+            representation: reasoningRepresentationForProvider(selection.runtime.providerType),
+            source: "provider_exposed",
+            provider_type: selection.runtime.providerType,
+            provider_model_id: selection.runtime.providerModelId,
+            streamed: true,
+            completion_status: "interrupted",
+          };
+        }
+
+        const interruptedAssistantText =
+          assistantText.trim().length > 0 ? assistantText : defaultProviderFailureMessage(normalized.category);
+
+        await dependencies.store.updateMessage(assistantMessageId, {
+          content: interruptedAssistantText,
+          requestId: input.trace.request_id,
+          agentRunId: input.trace.agent_run_id,
+          metadata: assistantMetadata,
+        });
+      }
+
+      if (assistantMessageId && !hasUsefulContext) {
+        await dependencies.store.deleteMessage(assistantMessageId);
+      }
+
+      await stream.fail(error, providerFailureContext);
       return;
     }
 
