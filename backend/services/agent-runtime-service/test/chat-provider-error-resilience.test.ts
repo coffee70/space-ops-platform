@@ -125,8 +125,66 @@ test("chat preserves assistant metadata and enriched failure after completed too
 
   const updatedConversation = await store.getConversation(conversation.id);
   const assistant = updatedConversation?.messages.findLast((message) => message.role === "assistant");
+  assert.match(assistant?.content ?? "", /provider throughput limit/i);
   assert.equal(assistant?.metadata_json.completion_status, "interrupted_provider_retryable");
+  assert.equal(assistant?.metadata_json.failure_category, "rate_limited");
+  assert.equal(assistant?.metadata_json.retryable, true);
   assert.equal(assistant?.metadata_json.tool_call_count, 1);
   assert.equal(assistant?.metadata_json.can_continue, true);
+  assert.equal(assistant?.metadata_json.provider_type, "openai");
+  assert.equal(assistant?.metadata_json.provider_model_id, "gpt-5.5");
+  assert.equal(assistant?.metadata_json.context_packet_id, "ctx-1");
 });
 
+test("chat preserves actual assistant text when provider fails after text", async () => {
+  const store = new MemoryConversationStore();
+  const conversation = await store.createConversation({
+    title: "Provider failure after text",
+    execution_mode: "read_only",
+    initial_message: { role: "user", content: "Start session." },
+  });
+
+  const app = createApp({
+    config: baseRuntimeConfig({ allowMissingKeyFallback: false }),
+    store,
+    contextClient: new FakeContextClient([contextResolvedEvent()]),
+    toolRegistryClient: new FakeToolRegistryClient([]),
+    toolExecutionClient: new FakeToolExecutionClient({
+      conversation_id: conversation.id,
+      agent_run_id: "ignored",
+      request_id: "ignored",
+      tool_call_id: "ignored",
+      status: "completed",
+      output: {},
+      raw_events: [],
+    }),
+    modelRunner: {
+      async *stream() {
+        yield { type: "text-delta", textDelta: "I inspected the request." };
+        throw rateLimitRuntimeError();
+      },
+    },
+    modelCatalog: new FakeModelCatalog(),
+  });
+
+  const response = await app.request("/chat", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      conversation_id: conversation.id,
+      execution_mode: "read_only",
+      messages: [{ role: "user", content: "Inspect and continue." }],
+    }),
+  });
+
+  assert.equal(response.status, 200);
+  const chunks = parseNdjson(await response.text()) as Array<{ kind: "event"; event: { event_type: string; payload: Record<string, unknown> } }>;
+  const failed = chunks.find((chunk) => chunk.event.event_type === "run.failed")?.event.payload;
+  assert.equal(failed?.error_code, "model_provider_rate_limited");
+
+  const updatedConversation = await store.getConversation(conversation.id);
+  const assistant = updatedConversation?.messages.findLast((message) => message.role === "assistant");
+  assert.equal(assistant?.content, "I inspected the request.");
+  assert.doesNotMatch(assistant?.content ?? "", /provider throughput limit/i);
+  assert.equal(assistant?.metadata_json.failure_category, "rate_limited");
+});

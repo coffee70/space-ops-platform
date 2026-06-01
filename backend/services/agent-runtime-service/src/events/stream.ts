@@ -1,7 +1,11 @@
 import { RunSequencer } from "./sequencer.js";
 import { redactAndTruncate, validateAgentEventPayload } from "./schema.js";
 import type { ConversationStore, PersistedEvent, RawEventFact, StreamChunk, TraceEnvelope } from "../types.js";
-import { ModelProviderRuntimeError, type ModelProviderErrorCategory } from "../ai/provider-errors.js";
+import {
+  defaultProviderFailureMessage,
+  ModelProviderRuntimeError,
+  type ModelProviderErrorCategory,
+} from "../ai/provider-errors.js";
 
 const encoder = new TextEncoder();
 
@@ -16,22 +20,6 @@ const modelProviderErrorCodeByCategory: Record<ModelProviderErrorCategory, strin
   cancelled: "model_stream_cancelled",
   unknown: "model_provider_failed",
 };
-
-function defaultProviderFailureMessage(category: ModelProviderErrorCategory): string {
-  if (category === "rate_limited") {
-    return "The selected model hit a provider throughput limit. Completed tool actions were preserved. You can continue after the provider window clears.";
-  }
-  if (category === "provider_overloaded") {
-    return "The selected model provider is temporarily overloaded. Completed tool actions were preserved. You can continue once the provider recovers.";
-  }
-  if (category === "network_transient") {
-    return "The model connection was interrupted by a transient network/provider issue. Completed tool actions were preserved. You can continue the conversation.";
-  }
-  if (category === "context_length_exceeded") {
-    return "The selected model could not continue because the request exceeded its context limit. Completed tool actions were preserved, but the next message may need a smaller scope or summarized context.";
-  }
-  return "Model provider request failed.";
-}
 
 function runFailedPayloadForError(error: unknown, context?: Record<string, unknown>): Record<string, unknown> {
   if (error instanceof ModelProviderRuntimeError) {

@@ -3,7 +3,7 @@ import { z } from "zod";
 
 import { buildSystemPrompt } from "../ai/prompts.js";
 import { ModelSelectionError } from "../ai/model-errors.js";
-import { ModelProviderRuntimeError } from "../ai/provider-errors.js";
+import { defaultProviderFailureMessage, ModelProviderRuntimeError } from "../ai/provider-errors.js";
 import { createToolSet, toolSchemaInvalidDiagnosticEvent, validateToolDefinitionsForModel } from "../ai/tools.js";
 import { AgentEventStream } from "../events/stream.js";
 import { RunSequencer } from "../events/sequencer.js";
@@ -771,8 +771,11 @@ async function orchestrateChat(input: {
           };
         }
 
+        const interruptedAssistantText =
+          assistantText.trim().length > 0 ? assistantText : defaultProviderFailureMessage(normalized.category);
+
         await dependencies.store.updateMessage(assistantMessageId, {
-          content: assistantText,
+          content: interruptedAssistantText,
           requestId: input.trace.request_id,
           agentRunId: input.trace.agent_run_id,
           metadata: assistantMetadata,
